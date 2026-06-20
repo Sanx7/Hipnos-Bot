@@ -1,0 +1,4 @@
+node_modules/
+auth/
+comandos/dados/temp/
+*.exe
