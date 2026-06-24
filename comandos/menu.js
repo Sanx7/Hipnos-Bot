@@ -30,6 +30,25 @@ enfrentam o julgamento das sombras."
 
 ════════════════════
 
+🔮 MENU STICKER (FIGURINHAS)
+
+🔮 /s
+➥ Transforma imagens em figurinhas.
+
+🖼️ /toimg
+➥ Converte figurinha estática em imagem comum (Responda ao sticker).
+
+🏷️ /renomear [Pacote] | [Autor]
+➥ Altera os metadados de um sticker (Responda ao sticker).
+
+🎞️ /togif
+➥ Transforma figurinha animada em GIF em loop (Responda ao sticker).
+
+🎬 /tomp4
+➥ Transforma figurinha animada em vídeo MP4 comum (Responda ao sticker).
+
+════════════════════
+
 👑 ADMINISTRAÇÃO
 
 🔓 /abrir

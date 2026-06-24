@@ -8,7 +8,6 @@ const P = require('pino')
 const qrcode = require('qrcode-terminal')
 const fs = require('fs')
 const path = require('path')
-const Jimp = require('jimp') // 🚀 Biblioteca gráfica importada com sucesso
 
 // ====================
 // CARREGAR COMANDOS
@@ -60,7 +59,7 @@ async function startBot() {
 
   sock.ev.on('creds.update', saveCreds)
 
-  // 🚨 MONITOR AUTOMÁTICO DE ENTRADAS, SAÍDAS E ANTI-BLACKLIST (GRÁFICO & DINÂMICO)
+  // 🚨 MONITOR AUTOMÁTICO DE ENTRADAS, SAÍDAS E ANTI-BLACKLIST
   sock.ev.on('group-participants.update', async (atualizacao) => {
     const { id: grupoId, participants, action } = atualizacao;
 
@@ -101,151 +100,49 @@ async function startBot() {
         }
       }
 
-      // --- PARTE 2: SISTEMA GRÁFICO DINÂMICO DE BOAS-VINDAS / DESPEDIDAS ---
+      // --- PARTE 2: SISTEMA DE BOAS-VINDAS / DESPEDIDAS (APENAS TEXTO) ---
       if (configs.welcome?.includes(grupoId)) {
-        for (const participante of participants) {
-          const numeroMembro = participante.split('@')[0];
-          const pastaTemp = path.join(__dirname, 'comandos', 'dados', 'temp');
-          if (!fs.existsSync(pastaTemp)) fs.mkdirSync(pastaTemp, { recursive: true });
 
-          let nomeGrupo = "Recinto";
-          let contagemMembros = "—";
-          
+        console.log('Atualização recebida:', participants)
+
+        for (const participante of participants) {
+
+          const participanteId =
+            typeof participante === 'object'
+              ? (participante.phoneNumber || participante.id || participante.jid)
+              : participante
+
+          if (!participanteId) continue
+
+          const numeroMembro = participanteId.split('@')[0]
+
+          let nomeGrupo = "Recinto"
+          let contagemMembros = "—"
           try {
-            const metadados = await sock.groupMetadata(grupoId);
-            nomeGrupo = metadados.subject || "Recinto";
-            contagemMembros = metadados.participants.length;
+            const metadados = await sock.groupMetadata(grupoId)
+            nomeGrupo = metadados.subject || "Recinto"
+            contagemMembros = metadados.participants.length
           } catch (e) {
-            console.error("Erro ao obter metadados do grupo:", e);
+            console.error("Erro ao obter metadados do grupo:", e)
           }
 
           // 📥 PORTAL DE ENTRADA (WELCOME)
           if (action === 'add') {
-            const textoEntrada = `👁️‍🗨️ **NOVA ALMA NO RECINTO** 👁️‍🗨️\n\n🪐 Seja bem-vindo ao domínio de Hipnos, @${numeroMembro}.\n\n"Mantenha o silêncio e respeite o sono dos justos no grupo ${nomeGrupo}, ou as sombras cuidarão de você." 🥱💤`;
-            const caminhoFundo = path.join(__dirname, 'comandos', 'dados', 'welcome.jpg');
-            const caminhoSaidaTemp = path.join(pastaTemp, `welcome_${numeroMembro}.jpg`);
+            const textoEntrada = `👁️‍🗨️ *NOVA ALMA NO RECINTO* 👁️‍🗨️\n\n🪐 Seja bem-vindo ao domínio de Hipnos, @${numeroMembro}.\n\n"Mantenha o silêncio e respeite o sono dos justos no grupo *${nomeGrupo}*, ou as sombras cuidarão de você." 🥱💤\n\n*Membro nº ${contagemMembros}*`;
+            
+            await sock.sendMessage(grupoId, { 
+              text: textoEntrada, 
+              mentions: [participanteId] 
+            });
 
-            if (fs.existsSync(caminhoFundo)) {
-              try {
-                let urlFotoPerfil;
-                try {
-                  urlFotoPerfil = await sock.profilePictureUrl(participante, 'image');
-                } catch (e) {
-                  urlFotoPerfil = 'https://i.imgur.com/6VB8Hz0.png'; 
-                }
-
-                let urlFotoGrupo;
-                try {
-                  urlFotoGrupo = await sock.profilePictureUrl(grupoId, 'image');
-                } catch (e) {
-                  urlFotoGrupo = 'https://i.imgur.com/6VB8Hz0.png'; 
-                }
-
-                const imagemFundo = await Jimp.read(caminhoFundo);
-                const imagemPerfil = await Jimp.read(urlFotoPerfil);
-                const imagemGrupo = await Jimp.read(urlFotoGrupo);
-
-                imagemFundo.resize(1000, 500);
-
-                // Foto do participante (Esquerda)
-                imagemPerfil.resize(260, 260);
-                imagemPerfil.circle();
-                imagemFundo.composite(imagemPerfil, 74, 115);
-
-                // Foto do grupo (Canto Superior Direito)
-                imagemGrupo.resize(110, 110);
-                imagemGrupo.circle();
-                imagemFundo.composite(imagemGrupo, 840, 32);
-
-                // Escrevendo os Textos no Fundo Limpo
-                const fonteTitulo = await Jimp.loadFont(Jimp.FONT_SANS_64_WHITE);
-                const fonteSubtitulo = await Jimp.loadFont(Jimp.FONT_SANS_32_WHITE);
-
-                imagemFundo.print(fonteTitulo, 430, 150, "BEM VINDO(A)!");
-                imagemFundo.print(fonteSubtitulo, 430, 240, `Ao grupo: ${nomeGrupo}`);
-                imagemFundo.print(fonteSubtitulo, 430, 300, `Você é o membro nº ${contagemMembros}`);
-
-                await imagemFundo.writeAsync(caminhoSaidaTemp);
-
-                await sock.sendMessage(grupoId, {
-                  image: fs.readFileSync(caminhoSaidaTemp),
-                  caption: textoEntrada,
-                  mentions: [participante]
-                });
-
-                if (fs.existsSync(caminhoSaidaTemp)) fs.unlinkSync(caminhoSaidaTemp);
-
-              } catch (erroGrafico) {
-                console.error("Erro ao gerar imagem de entrada:", erroGrafico);
-                await sock.sendMessage(grupoId, { text: textoEntrada, mentions: [participante] });
-              }
-            } else {
-              await sock.sendMessage(grupoId, { text: textoEntrada, mentions: [participante] });
-            }
-
-          // 📤 PORTAL DE SAÍDA / BANIMENTO (GOODBYE)
+          // 📤 PORTAL DE SAÍDA / DESPEDIDA (GOODBYE)
           } else if (action === 'remove') {
-            const textoSaida = `🌑 **DESCENSO AO ESQUECIMENTO** 🌑\n\n@${numeroMembro} deixou nosso território e retornou para o mundo desperto. Que o limbo ignore seus passos. 🪐`;
-            const caminhoFundoSaida = path.join(__dirname, 'comandos', 'dados', 'goodbye.jpg');
-            const caminhoSaidaTemp = path.join(pastaTemp, `goodbye_${numeroMembro}.jpg`);
-
-            if (fs.existsSync(caminhoFundoSaida)) {
-              try {
-                let urlFotoPerfil;
-                try {
-                  urlFotoPerfil = await sock.profilePictureUrl(participante, 'image');
-                } catch (e) {
-                  urlFotoPerfil = 'https://i.imgur.com/6VB8Hz0.png'; 
-                }
-
-                let urlFotoGrupo;
-                try {
-                  urlFotoGrupo = await sock.profilePictureUrl(grupoId, 'image');
-                } catch (e) {
-                  urlFotoGrupo = 'https://i.imgur.com/6VB8Hz0.png'; 
-                }
-
-                const imagemFundo = await Jimp.read(caminhoFundoSaida);
-                const imagemPerfil = await Jimp.read(urlFotoPerfil);
-                const imagemGrupo = await Jimp.read(urlFotoGrupo);
-
-                imagemFundo.resize(1000, 500);
-                
-                // Foto do participante (Esquerda) - Alinhado à mesma métrica do Welcome
-                imagemPerfil.resize(260, 260);
-                imagemPerfil.circle();
-                imagemFundo.composite(imagemPerfil, 74, 115);
-
-                // Foto do grupo (Canto Superior Direito)
-                imagemGrupo.resize(110, 110);
-                imagemGrupo.circle();
-                imagemFundo.composite(imagemGrupo, 840, 32);
-
-                // Textos dinâmicos do Banimento sincronizados com as posições certas
-                const fonteTitulo = await Jimp.loadFont(Jimp.FONT_SANS_64_WHITE);
-                const fonteSubtitulo = await Jimp.loadFont(Jimp.FONT_SANS_32_WHITE);
-
-                imagemFundo.print(fonteTitulo, 430, 140, "USUÁRIO BANIDO");
-                imagemFundo.print(fonteSubtitulo, 430, 230, `Alvo: @${numeroMembro}`); 
-                imagemFundo.print(fonteSubtitulo, 430, 280, `Motivo: Violação das regras`);
-
-                await imagemFundo.writeAsync(caminhoSaidaTemp);
-
-                await sock.sendMessage(grupoId, {
-                  image: fs.readFileSync(caminhoSaidaTemp),
-                  caption: textoSaida,
-                  mentions: [participante]
-                });
-
-                if (fs.existsSync(caminhoSaidaTemp)) fs.unlinkSync(caminhoSaidaTemp);
-
-              } catch (erroGrafico) {
-                console.error("Erro ao gerar imagem de saída:", erroGrafico);
-                await sock.sendMessage(grupoId, { text: textoSaida, mentions: [participante] });
-              }
-            } else {
-              await sock.sendMessage(grupoId, { text: textoSaida, mentions: [participante] });
-            }
+            const textoSaida = `🌑 *DESCENSO AO ESQUECIMENTO* 🌑\n\n@${numeroMembro} deixou nosso território e retornou para o mundo desperto. Que o limbo ignore seus passos. 🪐`;
+            
+            await sock.sendMessage(grupoId, { 
+              text: textoSaida, 
+              mentions: [participanteId] 
+            });
           }
         }
       }
@@ -271,7 +168,7 @@ async function startBot() {
         if (fs.existsSync(caminhoConfigs)) {
           const configs = JSON.parse(fs.readFileSync(caminhoConfigs, 'utf-8'));
           
-          if (configs.antiAudio?.includes(jid)) {
+          if (configs.antiaudio?.includes(jid)) {
             const ehAudio = msg.message.audioMessage || msg.message.extendedTextMessage?.contextInfo?.quotedMessage?.audioMessage;
             if (ehAudio) {
               await sock.sendMessage(jid, { delete: { remoteJid: jid, fromMe: false, id: msg.key.id, participant: sender } });
@@ -279,7 +176,7 @@ async function startBot() {
             }
           }
 
-          if (configs.antiDocument?.includes(jid)) {
+          if (configs.antidoc?.includes(jid)) {
             const ehDocumento = msg.message.documentMessage || msg.message.documentWithCaptionMessage || msg.message.extendedTextMessage?.contextInfo?.quotedMessage?.documentMessage;
             if (ehDocumento) {
               await sock.sendMessage(jid, { delete: { remoteJid: jid, fromMe: false, id: msg.key.id, participant: sender } });
@@ -287,7 +184,7 @@ async function startBot() {
             }
           }
 
-          if (configs.antiEvent?.includes(jid)) {
+          if (configs.antievento?.includes(jid)) {
             const ehEvento = msg.message.eventMessage || msg.message.extendedTextMessage?.contextInfo?.quotedMessage?.eventMessage;
             if (ehEvento) {
               await sock.sendMessage(jid, { delete: { remoteJid: jid, fromMe: false, id: msg.key.id, participant: sender } });
@@ -295,7 +192,7 @@ async function startBot() {
             }
           }
        
-          if (configs.antiLink?.includes(jid)) {
+          if (configs.antilink?.includes(jid)) {
             const conteudoTexto = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
             const temLink = /(https?:\/\/[^\s]+|www\.[^\s]+|wa\.me\/[^\s]+)/i.test(conteudoTexto);
             
@@ -305,7 +202,7 @@ async function startBot() {
             }
           }
 
-          if (configs.antiPayment?.includes(jid)) {
+          if (configs.antipay?.includes(jid)) {
             const ehPagamentoNormal = msg.message.paymentInviteMessage;
             const ehPagamentoStealth = msg.messageStubType === 63 || msg.messageStubType === 40 || msg.messageStubType === 41;
 
@@ -314,13 +211,13 @@ async function startBot() {
               await sock.groupSettingUpdate(jid, 'announcement');
               await sock.groupParticipantsUpdate(jid, [sender], 'remove');
               await sock.sendMessage(jid, {
-                text: '💀⚖️ ANATEMA PROIBIDO\n\nUma transação profana tentou se manifestar. O autor foi banido para os confins do limbo e as portas do recinto foram seladas temporariamente para purificação.'
+                text: '💀⚖️ ANATEMA PROIBIDO\n\ Uma transação profana tentou se manifestar. O autor foi banido para os confins do limbo e as portas do recinto foram seladas temporariamente para purificação.'
               });
               return;
             }
           }
 
-          if (configs.antiStatus?.includes(jid)) {
+          if (configs.antistatus?.includes(jid)) {
             const contextInfo = msg.message.extendedTextMessage?.contextInfo || msg.message[Object.keys(msg.message)[0]]?.contextInfo;
             const marcouStatus = contextInfo?.remoteJid === 'status@broadcast';
 
@@ -398,14 +295,21 @@ async function startBot() {
     }
 
     if (connection === 'close') {
-      console.log('🔄 Reconnecting...')
+      console.log('❌ Conexão fechada')
+      console.log('lastDisconnect:')
+      console.log(lastDisconnect)
 
       const shouldReconnect =
         lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut
 
-      if (shouldReconnect) startBot()
+      console.log('Reconectar?', shouldReconnect)
+
+      if (shouldReconnect) {
+        console.log('🔄 Reconnecting...')
+        startBot()
+      }
     }
   })
 }
 
-startBot()
+startBot();

@@ -1,9 +1,23 @@
 {
-  "antiAudio": [],
-  "antiLink": [
+  "antiaudio": [
     "120363425807489041@g.us"
   ],
-  "antiDocument": [
+  "antidoc": [
+    "120363425807489041@g.us"
+  ],
+  "antievento": [
+    "120363425807489041@g.us"
+  ],
+  "antilink": [
+    "120363425807489041@g.us"
+  ],
+  "antipay": [
+    "120363425807489041@g.us"
+  ],
+  "antistatus": [
+    "120363425807489041@g.us"
+  ],
+  "welcome": [
     "120363425807489041@g.us"
   ]
 }
