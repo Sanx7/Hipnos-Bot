@@ -10,6 +10,40 @@ const fs = require('fs')
 const path = require('path')
 
 // ====================
+// CONFIGURAÇÃO DO EXPRESS (PARA O RENDER)
+// ====================
+const express = require('express');
+const app = express();
+const port = process.env.PORT || 3000;
+
+let linkDoQrCode = '';
+
+// Rota web onde você vai abrir no navegador para ler o QR Code
+app.get('/', (req, res) => {
+  if (linkDoQrCode) {
+    res.send(`
+      <div style="text-align: center; font-family: sans-serif; margin-top: 50px;">
+        <h1>🌌 Hipnos Bot - Escaneie o QR Code</h1>
+        <img src="${linkDoQrCode}" style="border: 4px solid #000; padding: 10px; background: white;" />
+        <p style="color: #555;">Atualize a página se o código expirar no seu celular.</p>
+      </div>
+    `);
+  } else {
+    res.send(`
+      <div style="text-align: center; font-family: sans-serif; margin-top: 50px;">
+        <h1>🌙 Hipnos Bot</h1>
+        <p>O bot já está conectado ou o QR Code ainda não foi gerado pelo servidor.</p>
+      </div>
+    `);
+  }
+});
+
+// Inicializa o servidor web exigido pelo Render
+app.listen(port, () => {
+  console.log(`🌐 Servidor de autenticação online na porta ${port}`);
+});
+
+// ====================
 // CARREGAR COMANDOS
 // ====================
 
@@ -286,12 +320,17 @@ async function startBot() {
   sock.ev.on('connection.update', ({ connection, qr, lastDisconnect }) => {
 
     if (qr) {
+      // Mantém no terminal caso precise
       qrcode.generate(qr, { small: true })
       console.log('📱 Scan the QR Code above')
+      
+      // GERA A URL DA IMAGEM PARA O SEU NAVEGADOR
+      linkDoQrCode = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(qr)}`;
     }
 
     if (connection === 'open') {
       console.log('🌙 Hipnos Bot connected successfully!')
+      linkDoQrCode = ''; // Limpa o QR Code quando conectar
     }
 
     if (connection === 'close') {
