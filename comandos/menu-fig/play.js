@@ -1,33 +1,12 @@
 const yts = require('yt-search')
-const YTDlpWrap = require('yt-dlp-wrap').default
+const ytStream = require('yt-stream')
 const fs = require('fs')
 const path = require('path')
 const os = require('os')
 
-const pastaTemp = os.tmpdir()
-// Define um local seguro para salvar o binário do yt-dlp no Render
-const caminhoBinario = path.join(pastaTemp, 'yt-dlp')
-let ytDlpWrap
-
-// Função assíncrona para garantir que o yt-dlp está baixado e pronto
-async function obterYTDlp() {
-  if (ytDlpWrap) return ytDlpWrap
-
-  // Se o binário não existir na pasta temporária, faz o download dele
-  if (!fs.existsSync(caminhoBinario)) {
-    console.log('📥 Baixando binário do yt-dlp para o servidor...')
-    await YTDlpWrap.downloadFromGithub(caminhoBinario)
-    fs.chmodSync(caminhoBinario, '755') // Dá permissão de execução no Linux (Render)
-    console.log('✅ Binário do yt-dlp pronto para uso!')
-  }
-
-  ytDlpWrap = new YTDlpWrap(caminhoBinario)
-  return ytDlpWrap
-}
-
 module.exports = {
   nome: 'play',
-  descricao: 'Pesquisa e baixa uma música do YouTube usando yt-dlp com cookies e binário auto-gerenciado.',
+  descricao: 'Pesquisa e baixa uma música do YouTube usando stream nativo direto.',
   async executar(sock, jid, msg, texto) {
     try {
       if (!texto || !texto.trim()) {
@@ -46,57 +25,51 @@ module.exports = {
         return await sock.sendMessage(jid, { text: '❌ Nenhuma música encontrada com esse nome.' }, { quoted: msg })
       }
 
-      // Trava de segurança de 10 minutos para proteger a RAM do Render
       if (video.seconds > 600) {
         return await sock.sendMessage(jid, { text: '❌ A música não pode ter mais de 10 minutos para proteger o servidor.' }, { quoted: msg })
       }
 
-      const infoTexto = `🎵 *Música Encontrada!*\n\n📌 *Título:* ${video.title}\n⏱️ *Duração:* ${video.timestamp}\n\n⏳ *Baixando áudio com Engine Nativa...*`
+      const infoTexto = `🎵 *Música Encontrada!*\n\n📌 *Título:* ${video.title}\n⏱️ *Duração:* ${video.timestamp}\n\n⏳ *Obtendo fluxo de áudio direto...*`
       await sock.sendMessage(jid, { text: infoTexto }, { quoted: msg })
 
+      const pastaTemp = os.tmpdir()
       const arquivoSaida = path.join(pastaTemp, `play_${Date.now()}.mp3`)
-      
-      // Caminho para o cookies.txt localizado na raiz do projeto
-      const caminhoCookies = path.join(process.cwd(), 'cookies.txt')
 
-      // Configuração de argumentos do yt-dlp
-      const argumentos = [
-        video.url,
-        '-x',
-        '--audio-format', 'mp3',
-        '-o', arquivoSaida
-      ]
+      // Obtém o fluxo de áudio diretamente sem depender de binários do yt-dlp ou downloads do GitHub
+      const stream = await ytStream.stream(video.url, {
+        quality: 'high',
+        type: 'audio',
+        highWaterMark: 1048576 * 32
+      })
 
-      // Se o arquivo cookies.txt existir na raiz, injeta os cookies no download
-      if (fs.existsSync(caminhoCookies)) {
-        argumentos.push('--cookies', caminhoCookies)
-      } else {
-        console.log('Aviso: cookies.txt não encontrado na raiz. Tentando sem cookies...')
-      }
+      const writer = fs.createWriteStream(arquivoSaida)
+      stream.stream.pipe(writer)
 
-      // Garante o binário e executa o download nativo
-      const dlp = await obterYTDlp()
-      await dlp.execPromise(argumentos)
+      writer.on('finish', async () => {
+        if (!fs.existsSync(arquivoSaida) || fs.statSync(arquivoSaida).size === 0) {
+          throw new Error('Falha ao gravar arquivo de áudio vazio.')
+        }
 
-      if (!fs.existsSync(arquivoSaida)) {
-        throw new Error('O arquivo MP3 não foi gerado com sucesso.')
-      }
+        await sock.sendMessage(jid, { 
+          audio: fs.readFileSync(arquivoSaida), 
+          mimetype: 'audio/mp4',
+          ptt: false
+        }, { quoted: msg })
 
-      // Envia o áudio convertido direto para o WhatsApp
-      await sock.sendMessage(jid, { 
-        audio: fs.readFileSync(arquivoSaida), 
-        mimetype: 'audio/mp4',
-        ptt: false
-      }, { quoted: msg })
+        setTimeout(() => {
+          if (fs.existsSync(arquivoSaida)) fs.unlinkSync(arquivoSaida)
+        }, 2000)
+      })
 
-      // Remove o arquivo temporário após o envio
-      setTimeout(() => {
+      writer.on('error', async (err) => {
+        console.error(err)
+        await sock.sendMessage(jid, { text: '❌ Erro ao gravar o arquivo de música.' }, { quoted: msg })
         if (fs.existsSync(arquivoSaida)) fs.unlinkSync(arquivoSaida)
-      }, 2000)
+      })
 
     } catch (err) {
       console.error('Erro geral no comando play:', err)
-      await sock.sendMessage(jid, { text: '❌ Ocorreu um erro interno ao processar este áudio.' }, { quoted: msg })
+      await sock.sendMessage(jid, { text: '❌ Servidor de stream ocupado. Tente novamente em instantes.' }, { quoted: msg })
     }
   }
 }
