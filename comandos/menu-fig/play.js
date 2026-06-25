@@ -1,13 +1,13 @@
 const yts = require('yt-search')
-const ytStream = require('yt-stream')
+const ytdl = require('@distube/ytdl-core')
 const fs = require('fs')
 const path = require('path')
 const os = require('os')
 
 module.exports = {
   nome: 'play',
-  descricao: 'Pesquisa e baixa uma música do YouTube usando stream nativo direto.',
-  async executar(sock, jid, msg, texto) {
+  descricao: 'Pesquisa e baixa uma música do YouTube usando ytdl-core atualizado com cookies.',
+  async ejecutar(sock, jid, msg, texto) {
     try {
       if (!texto || !texto.trim()) {
         return await sock.sendMessage(jid, { 
@@ -29,25 +29,51 @@ module.exports = {
         return await sock.sendMessage(jid, { text: '❌ A música não pode ter mais de 10 minutos para proteger o servidor.' }, { quoted: msg })
       }
 
-      const infoTexto = `🎵 *Música Encontrada!*\n\n📌 *Título:* ${video.title}\n⏱️ *Duração:* ${video.timestamp}\n\n⏳ *Obtendo fluxo de áudio direto...*`
+      const infoTexto = `🎵 *Música Encontrada!*\n\n📌 *Título:* ${video.title}\n⏱️ *Duração:* ${video.timestamp}\n\n⏳ *Baixando áudio autenticado via Cookies...*`
       await sock.sendMessage(jid, { text: infoTexto }, { quoted: msg })
 
       const pastaTemp = os.tmpdir()
       const arquivoSaida = path.join(pastaTemp, `play_${Date.now()}.mp3`)
+      
+      // Carrega os cookies do seu arquivo txt de forma nativa
+      const caminhoCookies = path.join(process.cwd(), 'cookies.txt')
+      let opcoesYtdl = {
+        quality: 'highestaudio',
+        filter: 'audioonly',
+        highWaterMark: 1024 * 1024 * 32
+      }
 
-      // Obtém o fluxo de áudio diretamente sem depender de binários do yt-dlp ou downloads do GitHub
-      const stream = await ytStream.stream(video.url, {
-        quality: 'high',
-        type: 'audio',
-        highWaterMark: 1048576 * 32
-      })
+      if (fs.existsSync(caminhoCookies)) {
+        // Converte o arquivo cookies.txt do formato Netscape para o formato que o ytdl aceita
+        const cookiesString = fs.readFileSync(caminhoCookies, 'utf8')
+        const cookiesArray = cookiesString.split('\n')
+          .filter(line => line && !line.startsWith('#'))
+          .map(line => {
+            const parts = line.split('\t')
+            if (parts.length >= 7) {
+              return `${parts[5].trim()}=${parts[6].trim()}`
+            }
+            return null
+          }).filter(Boolean).join('; ')
 
+        opcoesYtdl.requestOptions = {
+          headers: {
+            Cookie: cookiesString // Passa o arquivo bruto ou os headers
+          }
+        }
+      } else {
+        console.log('Aviso: cookies.txt não encontrado na raiz!')
+      }
+
+      // Cria a stream de download direto do YouTube usando sua conta
+      const stream = ytdl(video.url, opcoesYtdl)
       const writer = fs.createWriteStream(arquivoSaida)
-      stream.stream.pipe(writer)
+      
+      stream.pipe(writer)
 
       writer.on('finish', async () => {
         if (!fs.existsSync(arquivoSaida) || fs.statSync(arquivoSaida).size === 0) {
-          throw new Error('Falha ao gravar arquivo de áudio vazio.')
+          throw new Error('Arquivo gravado vazio.')
         }
 
         await sock.sendMessage(jid, { 
@@ -62,14 +88,14 @@ module.exports = {
       })
 
       writer.on('error', async (err) => {
-        console.error(err)
-        await sock.sendMessage(jid, { text: '❌ Erro ao gravar o arquivo de música.' }, { quoted: msg })
+        console.error('Erro na escrita do arquivo:', err)
+        await sock.sendMessage(jid, { text: '❌ Erro ao processar o arquivo de áudio.' }, { quoted: msg })
         if (fs.existsSync(arquivoSaida)) fs.unlinkSync(arquivoSaida)
       })
 
     } catch (err) {
       console.error('Erro geral no comando play:', err)
-      await sock.sendMessage(jid, { text: '❌ Servidor de stream ocupado. Tente novamente em instantes.' }, { quoted: msg })
+      await sock.sendMessage(jid, { text: '❌ Falha ao baixar áudio. Tentando contornar o YouTube...' }, { quoted: msg })
     }
   }
 }
