@@ -6,7 +6,7 @@ const os = require('os')
 
 module.exports = {
   nome: 'play',
-  descricao: 'Pesquisa e baixa uma música do YouTube usando a API estável do Cobalt.',
+  descricao: 'Pesquisa e baixa uma música do YouTube usando o provedor estável Y2Mate.',
   async executar(sock, jid, msg, texto) {
     try {
       if (!texto || !texto.trim()) {
@@ -25,32 +25,45 @@ module.exports = {
         return await sock.sendMessage(jid, { text: '❌ Nenhuma música encontrada com esse nome.' }, { quoted: msg })
       }
 
-      const infoTexto = `🎵 *Música Encontrada!*\n\n📌 *Título:* ${video.title}\n⏱️ *Duração:* ${video.timestamp}\n\n⏳ *Baixando áudio via Cobalt Engine...*`
+      const infoTexto = `🎵 *Música Encontrada!*\n\n📌 *Título:* ${video.title}\n⏱️ *Duração:* ${video.timestamp}\n\n⏳ *Baixando áudio (Servidor Y2Mate)...*`
       await sock.sendMessage(jid, { text: infoTexto }, { quoted: msg })
 
       const pastaTemp = os.tmpdir()
       const arquivoSaida = path.join(pastaTemp, `play_${Date.now()}.mp3`)
 
-      // Requisição para a API moderna do Cobalt (Parâmetros atualizados V10)
-      const response = await axios.post('https://api.cobalt.tools/api/json', {
-        url: video.url,
-        isAudioOnly: true,
-        aFormat: 'mp3'
-      }, {
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json'
-        },
-        timeout: 15000
+      // Requisição direta para o serviço do Y2Mate que não bloqueia o Render
+      const deRozier = await axios.post('https://www.y2mate.com/mates/enM/analyzeV2/ajax', new URLSearchParams({
+        k_query: video.url,
+        k_page: 'home',
+        hl: 'en',
+        q_auto: '0'
+      }), {
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
       })
 
-      if (!response.data || !response.data.url) {
-        throw new Error('Cobalt não retornou uma URL válida.')
+      if (!deRozier.data || !deRozier.data.links || !deRozier.data.links.mp3) {
+        throw new Error('Falha ao analisar o link no Y2Mate')
       }
 
-      const downloadUrl = response.data.url
+      // Pega a primeira chave de qualidade do MP3 (geralmente 128kbps)
+      const keyId = Object.keys(deRozier.data.links.mp3)[0]
+      const fileId = deRozier.data.links.mp3[keyId].k
 
-      // Baixando o arquivo stream finalizado
+      // Gera o link final para download
+      const respostaConvert = await axios.post('https://www.y2mate.com/mates/enM/convertV2/index', new URLSearchParams({
+        vid: deRozier.data.vid,
+        k: fileId
+      }), {
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+      })
+
+      if (!respostaConvert.data || respostaConvert.data.status !== 'ok') {
+        throw new Error('Falha ao converter o arquivo')
+      }
+
+      const downloadUrl = respostaConvert.data.dlink
+
+      // Baixa o arquivo para o servidor do Render
       const writer = fs.createWriteStream(arquivoSaida)
       const stream = await axios({
         method: 'get',
@@ -74,13 +87,13 @@ module.exports = {
 
       writer.on('error', async (err) => {
         console.error(err)
-        await sock.sendMessage(jid, { text: '❌ Erro ao processar o áudio no servidor.' }, { quoted: msg })
+        await sock.sendMessage(jid, { text: '❌ Erro ao salvar o áudio.' }, { quoted: msg })
         if (fs.existsSync(arquivoSaida)) fs.unlinkSync(arquivoSaida)
       })
 
     } catch (err) {
-      console.error('Erro geral no comando play:', err)
-      await sock.sendMessage(jid, { text: '❌ O servidor de download está instável no momento. Tente novamente em instantes.' }, { quoted: msg })
+      console.error('Erro no comando play:', err)
+      await sock.sendMessage(jid, { text: '❌ Não foi possível baixar a música neste momento. Tente novamente.' }, { quoted: msg })
     }
   }
 }
