@@ -6,8 +6,8 @@ const os = require('os')
 
 module.exports = {
   nome: 'play',
-  descricao: 'Pesquisa e baixa uma música do YouTube usando ytdl-core atualizado com cookies.',
-  async ejecutar(sock, jid, msg, texto) {
+  descricao: 'Pesquisa e baixa uma música do YouTube usando ytdl-core com cookies estruturados.',
+  async executar(sock, jid, msg, texto) {
     try {
       if (!texto || !texto.trim()) {
         return await sock.sendMessage(jid, { 
@@ -34,38 +34,31 @@ module.exports = {
 
       const pastaTemp = os.tmpdir()
       const arquivoSaida = path.join(pastaTemp, `play_${Date.now()}.mp3`)
-      
-      // Carrega os cookies do seu arquivo txt de forma nativa
       const caminhoCookies = path.join(process.cwd(), 'cookies.txt')
+      
       let opcoesYtdl = {
         quality: 'highestaudio',
         filter: 'audioonly',
-        highWaterMark: 1024 * 1024 * 32
+        highWaterMark: 1024 * 1024 * 64 // Aumentado para evitar gargalo
       }
 
+      // Injeta os cookies se o arquivo existir
       if (fs.existsSync(caminhoCookies)) {
-        // Converte o arquivo cookies.txt do formato Netscape para o formato que o ytdl aceita
-        const cookiesString = fs.readFileSync(caminhoCookies, 'utf8')
-        const cookiesArray = cookiesString.split('\n')
-          .filter(line => line && !line.startsWith('#'))
-          .map(line => {
-            const parts = line.split('\t')
-            if (parts.length >= 7) {
-              return `${parts[5].trim()}=${parts[6].trim()}`
+        try {
+          const cookiesBrutos = fs.readFileSync(caminhoCookies, 'utf8')
+          // O @distube/ytdl-core aceita os cookies analisados em formato de string na propriedade cookie dos headers
+          opcoesYtdl.requestOptions = {
+            headers: {
+              'cookie': cookiesBrutos,
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
             }
-            return null
-          }).filter(Boolean).join('; ')
-
-        opcoesYtdl.requestOptions = {
-          headers: {
-            Cookie: cookiesString // Passa o arquivo bruto ou os headers
           }
+        } catch (cookieErr) {
+          console.error('Erro ao ler cookies:', cookieErr)
         }
-      } else {
-        console.log('Aviso: cookies.txt não encontrado na raiz!')
       }
 
-      // Cria a stream de download direto do YouTube usando sua conta
+      // Baixa e salva o arquivo de áudio
       const stream = ytdl(video.url, opcoesYtdl)
       const writer = fs.createWriteStream(arquivoSaida)
       
@@ -88,14 +81,14 @@ module.exports = {
       })
 
       writer.on('error', async (err) => {
-        console.error('Erro na escrita do arquivo:', err)
+        console.error('Erro na stream do ytdl:', err)
         await sock.sendMessage(jid, { text: '❌ Erro ao processar o arquivo de áudio.' }, { quoted: msg })
         if (fs.existsSync(arquivoSaida)) fs.unlinkSync(arquivoSaida)
       })
 
     } catch (err) {
       console.error('Erro geral no comando play:', err)
-      await sock.sendMessage(jid, { text: '❌ Falha ao baixar áudio. Tentando contornar o YouTube...' }, { quoted: msg })
+      await sock.sendMessage(jid, { text: '❌ Falha ao processar o comando.' }, { quoted: msg })
     }
   }
 }
