@@ -1,12 +1,14 @@
 const yts = require('yt-search')
-const axios = require('axios')
+const YTDlpWrap = require('yt-dlp-wrap').default
 const fs = require('fs')
 const path = require('path')
 const os = require('os')
 
+const ytDlpWrap = new YTDlpWrap()
+
 module.exports = {
   nome: 'play',
-  descricao: 'Pesquisa e baixa uma música do YouTube usando o provedor estável Y2Mate.',
+  descricao: 'Pesquisa e baixa uma música do YouTube usando yt-dlp com cookies.',
   async executar(sock, jid, msg, texto) {
     try {
       if (!texto || !texto.trim()) {
@@ -25,75 +27,57 @@ module.exports = {
         return await sock.sendMessage(jid, { text: '❌ Nenhuma música encontrada com esse nome.' }, { quoted: msg })
       }
 
-      const infoTexto = `🎵 *Música Encontrada!*\n\n📌 *Título:* ${video.title}\n⏱️ *Duração:* ${video.timestamp}\n\n⏳ *Baixando áudio (Servidor Y2Mate)...*`
+      // Trava de segurança de 10 minutos para proteger a RAM do Render
+      if (video.seconds > 600) {
+        return await sock.sendMessage(jid, { text: '❌ A música não pode ter mais de 10 minutos para proteger o servidor.' }, { quoted: msg })
+      }
+
+      const infoTexto = `🎵 *Música Encontrada!*\n\n📌 *Título:* ${video.title}\n⏱️ *Duração:* ${video.timestamp}\n\n⏳ *Baixando áudio com Engine Nativa...*`
       await sock.sendMessage(jid, { text: infoTexto }, { quoted: msg })
 
       const pastaTemp = os.tmpdir()
       const arquivoSaida = path.join(pastaTemp, `play_${Date.now()}.mp3`)
+      
+      // Caminho para o cookies.txt localizado na raiz do projeto
+      const caminhoCookies = path.join(process.cwd(), 'cookies.txt')
 
-      // Requisição direta para o serviço do Y2Mate que não bloqueia o Render
-      const deRozier = await axios.post('https://www.y2mate.com/mates/enM/analyzeV2/ajax', new URLSearchParams({
-        k_query: video.url,
-        k_page: 'home',
-        hl: 'en',
-        q_auto: '0'
-      }), {
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
-      })
+      // Configuração de argumentos do yt-dlp
+      const argumentos = [
+        video.url,
+        '-x',
+        '--audio-format', 'mp3',
+        '-o', arquivoSaida
+      ]
 
-      if (!deRozier.data || !deRozier.data.links || !deRozier.data.links.mp3) {
-        throw new Error('Falha ao analisar o link no Y2Mate')
+      // Se o arquivo cookies.txt existir na raiz, injeta os cookies no download
+      if (fs.existsSync(caminhoCookies)) {
+        argumentos.push('--cookies', caminhoCookies)
+      } else {
+        console.log('Aviso: cookies.txt não encontrado na raiz. Tentando sem cookies...')
       }
 
-      // Pega a primeira chave de qualidade do MP3 (geralmente 128kbps)
-      const keyId = Object.keys(deRozier.data.links.mp3)[0]
-      const fileId = deRozier.data.links.mp3[keyId].k
+      // Executa o download nativo
+      await ytDlpWrap.execPromise(argumentos)
 
-      // Gera o link final para download
-      const respostaConvert = await axios.post('https://www.y2mate.com/mates/enM/convertV2/index', new URLSearchParams({
-        vid: deRozier.data.vid,
-        k: fileId
-      }), {
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
-      })
-
-      if (!respostaConvert.data || respostaConvert.data.status !== 'ok') {
-        throw new Error('Falha ao converter o arquivo')
+      if (!fs.existsSync(arquivoSaida)) {
+        throw new Error('O arquivo MP3 não foi gerado com sucesso.')
       }
 
-      const downloadUrl = respostaConvert.data.dlink
+      // Envia o áudio convertido direto para o WhatsApp
+      await sock.sendMessage(jid, { 
+        audio: fs.readFileSync(arquivoSaida), 
+        mimetype: 'audio/mp4',
+        ptt: false
+      }, { quoted: msg })
 
-      // Baixa o arquivo para o servidor do Render
-      const writer = fs.createWriteStream(arquivoSaida)
-      const stream = await axios({
-        method: 'get',
-        url: downloadUrl,
-        responseType: 'stream'
-      })
-
-      stream.data.pipe(writer)
-
-      writer.on('finish', async () => {
-        await sock.sendMessage(jid, { 
-          audio: fs.readFileSync(arquivoSaida), 
-          mimetype: 'audio/mp4',
-          ptt: false
-        }, { quoted: msg })
-
-        setTimeout(() => {
-          if (fs.existsSync(arquivoSaida)) fs.unlinkSync(arquivoSaida)
-        }, 1000)
-      })
-
-      writer.on('error', async (err) => {
-        console.error(err)
-        await sock.sendMessage(jid, { text: '❌ Erro ao salvar o áudio.' }, { quoted: msg })
+      // Remove o arquivo temporário após o envio
+      setTimeout(() => {
         if (fs.existsSync(arquivoSaida)) fs.unlinkSync(arquivoSaida)
-      })
+      }, 2000)
 
     } catch (err) {
-      console.error('Erro no comando play:', err)
-      await sock.sendMessage(jid, { text: '❌ Não foi possível baixar a música neste momento. Tente novamente.' }, { quoted: msg })
+      console.error('Erro geral no comando play:', err)
+      await sock.sendMessage(jid, { text: '❌ Ocorreu um erro interno ao processar este áudio.' }, { quoted: msg })
     }
   }
 }
