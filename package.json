@@ -13,7 +13,7 @@
   "dependencies": {
     "@distube/ytdl-core": "^4.16.12",
     "@ffmpeg-installer/ffmpeg": "^1.1.0",
-    "@whiskeysockets/baileys": "^7.0.0-rc13",
+    "@whiskeysockets/baileys": "^7.0.0-rc14",
     "axios": "^1.18.1",
     "express": "^5.2.1",
     "fluent-ffmpeg": "^2.1.3",
