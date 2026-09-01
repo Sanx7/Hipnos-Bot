@@ -10,6 +10,19 @@ const fs = require('fs')
 const path = require('path')
 
 // ====================
+// REDE DE SEGURANÇA DO PROCESSO
+// ====================
+// Impede que qualquer erro inesperado (fora dos try/catch dos handlers)
+// derrube o processo inteiro — o que forçaria escanear o QR Code de novo.
+process.on('uncaughtException', (err) => {
+  console.error('⚠️ Exceção não capturada (processo mantido vivo):', err)
+})
+
+process.on('unhandledRejection', (reason) => {
+  console.error('⚠️ Promise rejeitada sem tratamento (processo mantido vivo):', reason)
+})
+
+// ====================
 // CONFIGURAÇÃO DO EXPRESS (PARA O RENDER)
 // ====================
 const express = require('express');
@@ -354,10 +367,14 @@ async function startBot() {
 
       if (shouldReconnect) {
         console.log('🔄 Reconnecting...')
-        startBot()
+        startBot().catch((err) => {
+          console.error('❌ Falha ao reconectar:', err)
+        })
       }
     }
   })
 }
 
-startBot();
+startBot().catch((err) => {
+  console.error('❌ Falha ao iniciar o bot:', err)
+});
