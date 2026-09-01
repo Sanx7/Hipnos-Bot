@@ -32,13 +32,14 @@ module.exports = {
   descricao: 'Pesquisa e baixa uma música do YouTube usando ytdl-core com cookies estruturados.',
   async executar(sock, jid, msg, texto) {
     try {
-      if (!texto || !texto.trim()) {
-        return await sock.sendMessage(jid, { 
-          text: '❌ Digite o nome da música! Exemplo: `/play Linkin Park In The End`' 
+      // Remove o prefixo do comando ("/play ...") e deixa apenas o nome da música
+      const termoPesquisa = texto.replace(/^\/\S+\s*/, '').trim()
+
+      if (!termoPesquisa) {
+        return await sock.sendMessage(jid, {
+          text: '❌ Digite o nome da música! Exemplo: `/play Linkin Park In The End`'
         }, { quoted: msg })
       }
-
-      const termoPesquisa = texto.trim()
       await sock.sendMessage(jid, { text: `🔍 Buscando por "${termoPesquisa}" no YouTube...` }, { quoted: msg })
 
       const resultado = await yts(termoPesquisa)
