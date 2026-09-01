@@ -105,13 +105,38 @@ if (fs.existsSync(pastaComandos)) {
 // BOT
 // ====================
 
+// Socket atualmente ativo + controle de reconexão.
+// Objetivo: nunca abrir 2 conexões ao mesmo tempo após um erro de stream.
+let sockAtual = null
+let reconexaoAgendada = false
+let tentativas = 0
+
 async function startBot() {
+  // TRAVA ANTI-DUPLICAÇÃO: se já existe uma reconexão marcada, ignora a chamada
+  if (reconexaoAgendada) {
+    console.log('⏳ Reconexão já agendada, ignorando chamada duplicada...')
+    return
+  }
+
+  // Encerra o socket anterior (se ainda existir) antes de abrir outro
+  if (sockAtual) {
+    const antigo = sockAtual
+    sockAtual = null
+    try {
+      antigo.end(undefined)
+    } catch (err) {
+      // socket já morto — seguimos em frente
+    }
+  }
+
   const { state, saveCreds } = await useMultiFileAuthState('./auth')
 
   const sock = makeWASocket({
     auth: state,
     logger: P({ level: 'silent' })
   })
+
+  sockAtual = sock
 
   sock.ev.on('creds.update', saveCreds)
 
@@ -339,7 +364,11 @@ async function startBot() {
     }
   })
 
-  sock.ev.on('connection.update', ({ connection, qr, lastDisconnect }) => {
+  sock.ev.on('connection.update', (atualizacao) => {
+    const { connection, qr, lastDisconnect } = atualizacao
+
+    // Ignora eventos de sockets antigos que já foram substituídos/reiniciados
+    if (sockAtual !== sock) return
 
     if (qr) {
       // Mantém no terminal caso precise
@@ -351,30 +380,55 @@ async function startBot() {
     }
 
     if (connection === 'open') {
+      tentativas = 0
+      reconexaoAgendada = false
       console.log('🌙 Hipnos Bot connected successfully!')
       linkDoQrCode = ''; // Limpa o QR Code quando conectar
     }
 
     if (connection === 'close') {
+      const codigo = lastDisconnect?.error?.output?.statusCode
       console.log('❌ Conexão fechada')
-      console.log('lastDisconnect:')
-      console.log(lastDisconnect)
+      console.log('Status do erro:', codigo, '| Motivo:', lastDisconnect?.error?.message)
 
-      const shouldReconnect =
-        lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut
+      // Não faz sentido reconectar quando a sessão foi encerrada ou corrompida
+      const sessaoInvalida =
+        codigo === DisconnectReason.loggedOut ||
+        codigo === DisconnectReason.badSession
 
-      console.log('Reconectar?', shouldReconnect)
+      console.log('Reconectar?', !sessaoInvalida)
 
-      if (shouldReconnect) {
-        console.log('🔄 Reconnecting...')
+      if (sessaoInvalida) {
+        console.log('🚪 Sessão encerrada ou inválida. Reinicie o bot e escaneie o QR Code novamente.')
+        sockAtual = null
+        return
+      }
+
+      // Se já há uma reconexão agendada (eventos de close repetidos), ignora
+      if (reconexaoAgendada) {
+        console.log('⏳ Reconexão já agendada, ignorando este evento...')
+        return
+      }
+
+      reconexaoAgendada = true
+      tentativas += 1
+
+      // Backoff progressivo: 3s, 6s, 12s... até 60s no máximo
+      const espera = Math.min(3000 * Math.pow(2, tentativas - 1), 60000)
+      console.log(`🔄 Reconnecting em ${espera / 1000}s... (tentativa ${tentativas})`)
+
+      setTimeout(() => {
+        reconexaoAgendada = false
         startBot().catch((err) => {
           console.error('❌ Falha ao reconectar:', err)
+          reconexaoAgendada = false
         })
-      }
+      }, espera)
     }
   })
 }
 
 startBot().catch((err) => {
   console.error('❌ Falha ao iniciar o bot:', err)
+  reconexaoAgendada = false
 });
