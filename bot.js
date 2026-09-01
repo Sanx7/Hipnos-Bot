@@ -49,6 +49,15 @@ app.listen(port, () => {
 
 const comandos = new Map()
 
+// Verifica se um JID está ativo na config aceitando tanto camelCase (novo padrão)
+// quanto minúsculas (dados antigos), evitando quebra de compatibilidade.
+function configAtiva(configs, chaveCamelCase, chaveMinuscula, id) {
+  return Boolean(
+    configs?.[chaveCamelCase]?.includes(id) ||
+    configs?.[chaveMinuscula]?.includes(id)
+  )
+}
+
 function carregarComandos(pasta) {
   const arquivos = fs.readdirSync(pasta)
 
@@ -202,7 +211,7 @@ async function startBot() {
         if (fs.existsSync(caminhoConfigs)) {
           const configs = JSON.parse(fs.readFileSync(caminhoConfigs, 'utf-8'));
           
-          if (configs.antiaudio?.includes(jid)) {
+          if (configAtiva(configs, 'antiAudio', 'antiaudio', jid)) {
             const ehAudio = msg.message.audioMessage || msg.message.extendedTextMessage?.contextInfo?.quotedMessage?.audioMessage;
             if (ehAudio) {
               await sock.sendMessage(jid, { delete: { remoteJid: jid, fromMe: false, id: msg.key.id, participant: sender } });
@@ -210,7 +219,7 @@ async function startBot() {
             }
           }
 
-          if (configs.antidoc?.includes(jid)) {
+          if (configAtiva(configs, 'antiDocument', 'antidoc', jid)) {
             const ehDocumento = msg.message.documentMessage || msg.message.documentWithCaptionMessage || msg.message.extendedTextMessage?.contextInfo?.quotedMessage?.documentMessage;
             if (ehDocumento) {
               await sock.sendMessage(jid, { delete: { remoteJid: jid, fromMe: false, id: msg.key.id, participant: sender } });
@@ -218,7 +227,7 @@ async function startBot() {
             }
           }
 
-          if (configs.antievento?.includes(jid)) {
+          if (configAtiva(configs, 'antiEvent', 'antievento', jid)) {
             const ehEvento = msg.message.eventMessage || msg.message.extendedTextMessage?.contextInfo?.quotedMessage?.eventMessage;
             if (ehEvento) {
               await sock.sendMessage(jid, { delete: { remoteJid: jid, fromMe: false, id: msg.key.id, participant: sender } });
@@ -226,7 +235,7 @@ async function startBot() {
             }
           }
        
-          if (configs.antilink?.includes(jid)) {
+          if (configAtiva(configs, 'antiLink', 'antilink', jid)) {
             const conteudoTexto = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
             const temLink = /(https?:\/\/[^\s]+|www\.[^\s]+|wa\.me\/[^\s]+)/i.test(conteudoTexto);
             
@@ -236,7 +245,7 @@ async function startBot() {
             }
           }
 
-          if (configs.antipay?.includes(jid)) {
+          if (configAtiva(configs, 'antiPayment', 'antipay', jid)) {
             const ehPagamentoNormal = msg.message.paymentInviteMessage;
             const ehPagamentoStealth = msg.messageStubType === 63 || msg.messageStubType === 40 || msg.messageStubType === 41;
 
@@ -251,7 +260,7 @@ async function startBot() {
             }
           }
 
-          if (configs.antistatus?.includes(jid)) {
+          if (configAtiva(configs, 'antiStatus', 'antistatus', jid)) {
             const contextInfo = msg.message.extendedTextMessage?.contextInfo || msg.message[Object.keys(msg.message)[0]]?.contextInfo;
             const marcouStatus = contextInfo?.remoteJid === 'status@broadcast';
 
@@ -294,7 +303,7 @@ async function startBot() {
         if (fs.existsSync(caminhoConfigs)) {
           const configs = JSON.parse(fs.readFileSync(caminhoConfigs, 'utf-8'));
           
-          if (configs.onlyAdmin?.includes(jid)) {
+          if (configAtiva(configs, 'onlyAdmin', 'onlyadmin', jid)) {
             const numeroDoSender = sender.split('@')[0].split(':')[0].replace(/\D/g, '');
             if (numeroDoSender !== '177060848861240') {
               const metadados = await sock.groupMetadata(jid);

@@ -15,7 +15,9 @@ function lerConfiguracoes() {
       return { antiAudio: [] };
     }
     const dados = fs.readFileSync(BANCO_CONFIG, 'utf-8');
-    return JSON.parse(dados);
+    const json = JSON.parse(dados);
+    if (!json.antiAudio) json.antiAudio = []; // Garante a propriedade
+    return json;
   } catch (err) {
     console.error("Erro ao ler antias.json:", err);
     return { antiAudio: [] };

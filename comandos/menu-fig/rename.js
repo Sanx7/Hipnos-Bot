@@ -4,7 +4,7 @@ const { Sticker, StickerTypes } = require('wa-sticker-formatter')
 module.exports = {
   nome: 'renomear',
   descricao: 'Altera o nome do pacote e do autor de uma figurinha existente.',
-  async ejecutar(sock, jid, msg, texto) {
+  async executar(sock, jid, msg, texto) {
     try {
       // Verifica se está respondendo a uma mensagem
       const cotada = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage

@@ -28,6 +28,9 @@ enfrentam o julgamento das sombras."
 👁️‍🗨️ /revelar
 ➥ Revela fotos/vídeos de visualização única (Responda à mídia).
 
+🎵 /play <nome da música>
+➥ Pesquisa e baixa o áudio do YouTube direto no chat.
+
 ════════════════════
 
 🔮 MENU STICKER (FIGURINHAS)
@@ -74,6 +77,21 @@ enfrentam o julgamento das sombras."
 
 🔗 /linkgp
 ➥ Revela o portal (Link de convite) do grupo.
+
+👑 /promover @membro
+➥ Eleva um mortal à administração.
+
+⬇️ /rebaixar @membro
+➥ Rebaixa um administrador de volta à condição de mortal.
+
+👋 /bemvindo (1 ou 0)
+➥ Ativa ou desativa a saudação de novos membros.
+
+☠️ /addblacklist @membro
+➥ Condena uma alma à blacklist eterna.
+
+🕊️ /remblacklist @membro
+➥ Perdoa e liberta um número da blacklist.
 
 ════════════════════
 

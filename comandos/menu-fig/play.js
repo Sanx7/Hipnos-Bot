@@ -4,6 +4,29 @@ const fs = require('fs')
 const path = require('path')
 const os = require('os')
 
+// Converte o cookies.txt (formato Netscape) em uma string de cabeçalho Cookie válida
+function lerCookies(caminho) {
+  const bruto = fs.readFileSync(caminho, 'utf8');
+  const linhasValidas = [];
+
+  for (const linha of bruto.split(/\r?\n/)) {
+    if (!linha.trim() || linha.startsWith('#')) continue;
+
+    const partes = linha.split('\t');
+    if (partes.length < 7) continue;
+
+    const [, , , , expiracao, nome, valor] = partes;
+    const exp = parseInt(expiracao, 10);
+
+    // Ignora cookies já expirados
+    if (exp && exp < Math.floor(Date.now() / 1000)) continue;
+
+    linhasValidas.push(`${nome}=${valor}`);
+  }
+
+  return linhasValidas.join('; ');
+}
+
 module.exports = {
   nome: 'play',
   descricao: 'Pesquisa e baixa uma música do YouTube usando ytdl-core com cookies estruturados.',
@@ -42,49 +65,49 @@ module.exports = {
         highWaterMark: 1024 * 1024 * 64 // Aumentado para evitar gargalo
       }
 
-      // Injeta os cookies se o arquivo existir
+      // Injeta os cookies se o arquivo existir (já convertidos para cabeçalho Cookie válido)
       if (fs.existsSync(caminhoCookies)) {
         try {
-          const cookiesBrutos = fs.readFileSync(caminhoCookies, 'utf8')
-          // O @distube/ytdl-core aceita os cookies analisados em formato de string na propriedade cookie dos headers
-          opcoesYtdl.requestOptions = {
-            headers: {
-              'cookie': cookiesBrutos,
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-            }
+          const cookies = lerCookies(caminhoCookies);
+          if (cookies) {
+            opcoesYtdl.requestOptions = {
+              headers: {
+                'cookie': cookies,
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+              }
+            };
           }
         } catch (cookieErr) {
           console.error('Erro ao ler cookies:', cookieErr)
         }
       }
 
-      // Baixa e salva o arquivo de áudio
-      const stream = ytdl(video.url, opcoesYtdl)
-      const writer = fs.createWriteStream(arquivoSaida)
-      
-      stream.pipe(writer)
+      // Baixa e salva o arquivo de áudio aguardando o processamento completo
+      await new Promise((resolve, reject) => {
+        const stream = ytdl(video.url, opcoesYtdl)
+        const writer = fs.createWriteStream(arquivoSaida)
 
-      writer.on('finish', async () => {
-        if (!fs.existsSync(arquivoSaida) || fs.statSync(arquivoSaida).size === 0) {
-          throw new Error('Arquivo gravado vazio.')
-        }
+        stream.on('error', (err) => { writer.destroy(); reject(err); });
+        writer.on('error', reject)
+        writer.on('finish', () => {
+          if (!fs.existsSync(arquivoSaida) || fs.statSync(arquivoSaida).size === 0) {
+            return reject(new Error('Arquivo gravado vazio.'))
+          }
+          resolve()
+        })
 
-        await sock.sendMessage(jid, { 
-          audio: fs.readFileSync(arquivoSaida), 
-          mimetype: 'audio/mp4',
-          ptt: false
-        }, { quoted: msg })
-
-        setTimeout(() => {
-          if (fs.existsSync(arquivoSaida)) fs.unlinkSync(arquivoSaida)
-        }, 2000)
+        stream.pipe(writer)
       })
 
-      writer.on('error', async (err) => {
-        console.error('Erro na stream do ytdl:', err)
-        await sock.sendMessage(jid, { text: '❌ Erro ao processar o arquivo de áudio.' }, { quoted: msg })
+      await sock.sendMessage(jid, {
+        audio: fs.readFileSync(arquivoSaida),
+        mimetype: 'audio/mp4',
+        ptt: false
+      }, { quoted: msg })
+
+      setTimeout(() => {
         if (fs.existsSync(arquivoSaida)) fs.unlinkSync(arquivoSaida)
-      })
+      }, 2000)
 
     } catch (err) {
       console.error('Erro geral no comando play:', err)

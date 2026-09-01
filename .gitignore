@@ -2,3 +2,4 @@ node_modules/
 auth/
 comandos/dados/temp/
 *.exe
+cookies.txt

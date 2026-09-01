@@ -3,6 +3,14 @@ const ffmpeg = require('fluent-ffmpeg')
 const fs = require('fs')
 const path = require('path')
 
+// Garante que o FFmpeg funcione mesmo sem estar instalado/exposto no PATH
+try {
+  const ffmpegInstaller = require('@ffmpeg-installer/ffmpeg');
+  ffmpeg.setFfmpegPath(ffmpegInstaller.path);
+} catch (err) {
+  console.warn('Binário local de FFmpeg não encontrado; usando o ffmpeg do PATH.');
+}
+
 module.exports = {
   nome: 'togif',
   descricao: 'Transforma uma figurinha animada em GIF.',
@@ -32,6 +40,13 @@ module.exports = {
       let buffer = Buffer.from([])
       for await (const chunk of stream) {
         buffer = Buffer.concat([buffer, chunk])
+        if (buffer.length > 25 * 1024 * 1024) {
+          throw new Error('A figurinha excede o limite de 25MB suportado.')
+        }
+      }
+
+      if (buffer.length === 0) {
+        throw new Error('A figurinha foi baixada vazia (0 bytes).')
       }
 
       // Define os caminhos temporários dos arquivos
@@ -43,8 +58,9 @@ module.exports = {
       fs.writeFileSync(caminhoWebp, buffer)
 
       // Converte o WebP animado para MP4 (que o WhatsApp interpreta como GIF se enviado corretamente)
-      ffmpeg(caminhoWebp)
+      ffmpeg(caminhoWebp, { timeout: 120 }) // Proteção: aborta a conversão se passar de 120s
         .outputOptions([
+          '-nostdin',
           '-pix_fmt yuv420p',
           '-c:v libx264',
           '-movflags faststart',
@@ -68,6 +84,7 @@ module.exports = {
           console.error('Erro no FFmpeg:', err)
           await sock.sendMessage(jid, { text: '❌ Ocorreu um erro interno no FFmpeg ao processar o GIF.' }, { quoted: msg })
           if (fs.existsSync(caminhoWebp)) fs.unlinkSync(caminhoWebp)
+          if (fs.existsSync(caminhoMp4)) fs.unlinkSync(caminhoMp4)
         })
 
     } catch (err) {

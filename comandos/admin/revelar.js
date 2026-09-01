@@ -3,6 +3,15 @@ const { exec } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
+// Usa o binário de FFmpeg instalado com o projeto, com fallback para o PATH
+const binarioFfmpeg = (() => {
+  try {
+    return require('@ffmpeg-installer/ffmpeg').path;
+  } catch (err) {
+    return 'ffmpeg';
+  }
+})();
+
 module.exports = {
   nome: "revelar",
   async executar(sock, jid, msg, text) {
@@ -71,19 +80,34 @@ module.exports = {
       
       for await (const chunk of stream) {
         buffer = Buffer.concat([buffer, chunk]);
+        if (buffer.length > 25 * 1024 * 1024) {
+          throw new Error('A mídia excede o limite de 25MB suportado.');
+        }
       }
+
+      if (buffer.length === 0) {
+        throw new Error('A mídia foi baixada vazia (0 bytes).');
+      }
+
       fs.writeFileSync(caminhoInput, buffer);
 
       // 4. Converter com FFmpeg para remover metadados de trava e estabilizar o arquivo
       const comandoFFmpeg = ehImagem 
-        ? `ffmpeg -y -i "${caminhoInput}" -q:v 2 "${caminhoOutput}"`
-        : `ffmpeg -y -i "${caminhoInput}" -c copy "${caminhoOutput}"`;
+        ? `"${binarioFfmpeg}" -y -nostdin -i "${caminhoInput}" -q:v 2 "${caminhoOutput}"`
+        : `"${binarioFfmpeg}" -y -nostdin -i "${caminhoInput}" -c copy "${caminhoOutput}"`;
 
       await new Promise((resolve, reject) => {
-        exec(comandoFFmpeg, (error) => {
-          if (error) reject(error);
-          else resolve();
-        });
+        exec(
+          comandoFFmpeg,
+          { timeout: 120000, maxBuffer: 50 * 1024 * 1024 }, // 120s e até 50MB de log
+          (error, stdout, stderr) => {
+            if (error) {
+              const detalhe = (stderr || '').toString().split('\n').slice(-3).join(' ');
+              error.mensagemFfmpeg = detalhe;
+              reject(error);
+            } else resolve();
+          }
+        );
       });
 
       // 5. Enviar de volta ao grupo sem as restrições
@@ -106,8 +130,9 @@ module.exports = {
 
     } catch (err) {
       console.error('Erro ao executar o comando revelar:', err);
+      const detalheExtra = err?.mensagemFfmpeg ? `\n\n📎 Detalhe: ${err.mensagemFfmpeg}` : '';
       await sock.sendMessage(jid, { 
-        text: '❌ Ocorreu um erro ao quebrar o feitiço da visualização única. Certifique-se de que o servidor possui o FFmpeg instalado.' 
+        text: `❌ Ocorreu um erro ao quebrar o feitiço da visualização única. Certifique-se de que o servidor possui o FFmpeg instalado.${detalheExtra}`
       }, { quoted: msg });
     } finally {
       // Limpeza absoluta dos arquivos para não entupir o servidor
