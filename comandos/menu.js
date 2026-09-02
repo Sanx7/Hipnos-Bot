@@ -52,6 +52,40 @@ enfrentam o julgamento das sombras."
 
 ════════════════════
 
+🎲 BRINCADEIRAS
+
+🪙 /moeda (ou /flip)
+➥ Desafia o destino: Cara ou Coroa?
+
+🎲 /dado [lados]
+➥ Rola um dado de 6 lados, ou com quantos lados quiser (ex: /dado 20).
+
+🔮 /escolha opção1, opção2, ...
+➥ O oráculo escolhe uma das opções separadas por vírgula (ex: /escolha café, chá, sonho).
+
+🎰 /roleta
+➥ Gira a roda onírica e marca um membro sorteado do grupo.
+
+💞 /casal
+➥ O oráculo do amor sorteia um casal do grupo e revela a compatibilidade.
+
+🔮 /simounao <pergunta>
+➥ O oráculo dos sonhos responde Sim ou Não (ex: /simounao devo dormir cedo?).
+
+🔢 /numero [min] [max]
+➥ Sorteia um número no intervalo (ex: /numero 10 20). Padrão: 1 a 100.
+
+🃏 /carta
+➥ Sorteia uma carta do baralho dos sonhos.
+
+🏆 /sorteio <prêmio> @user1 @user2
+➥ Sorteia um vencedor entre os marcados (ex: /sorteio de duas passagens aéreas @user1 @user2).
+
+🔮 /8ball <pergunta>
+➥ O orbe do subconsciente responde a sua pergunta (ex: /8ball devo mudar de emprego?).
+
+════════════════════
+
 👑 ADMINISTRAÇÃO
 
 🔓 /abrir
