@@ -141,10 +141,20 @@ function flagsBase(extra = {}) {
     flags.remoteComponents = 'ejs:github'
   }
 
-  // Cookies do YouTube (formato Netscape), se existirem na raiz do projeto.
+  // Cookies do YouTube (formato Netscape) — contorna o bloqueio
+  // "Sign in to confirm you're not a bot" em IPs de datacenter (ex.: Render).
   // O yt-dlp entende o cookies.txt nativamente (sem precisar converter nada).
-  const caminhoCookies = path.join(process.cwd(), 'cookies.txt')
-  if (fs.existsSync(caminhoCookies)) flags.cookies = caminhoCookies
+  //
+  // Prioridade:
+  //   1. Variável PLAY_COOKIES_PATH (caminho absoluto; no Render aponta para
+  //      /etc/secrets/cookies.txt — Secret File subido manualmente no painel)
+  //   2. Fallback: cookies.txt na raiz do projeto (uso local)
+  // Se nenhum existir, segue sem cookies normalmente (não trava, não dá erro).
+  const caminhoCookies = (process.env.PLAY_COOKIES_PATH || '').trim()
+  const cookiesPath = caminhoCookies
+    ? caminhoCookies
+    : path.join(process.cwd(), 'cookies.txt')
+  if (fs.existsSync(cookiesPath)) flags.cookies = cookiesPath
 
   return flags
 }
