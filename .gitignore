@@ -8,3 +8,5 @@ mensagens.db-wal
 mensagens.db-shm
 # Variáveis de ambiente (contêm números dos donos — nunca subir pro git)
 .env
+# Log gerado pelo script de teste do /play
+teste-play.log

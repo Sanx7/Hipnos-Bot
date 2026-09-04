@@ -395,7 +395,13 @@ async function startBot() {
         }
       }
 
-      await comando.executar(sock, jid, msg, text)
+      // 🛡️ ISOLAMENTO DE ERROS: nenhum comando pode derrubar o listener
+      // (messages.upsert) nem a conexão do Baileys com o WhatsApp.
+      // Cada comando deve tratar os próprios erros internamente; este
+      // .catch() é a última linha de defesa para rejeições que escaparem.
+      await Promise.resolve(comando.executar(sock, jid, msg, text)).catch((err) => {
+        console.error('❌ Erro não tratado dentro do comando (contido pelo isolation guard):', err)
+      })
 
     } catch (err) {
       console.log('❌ Erro:')
