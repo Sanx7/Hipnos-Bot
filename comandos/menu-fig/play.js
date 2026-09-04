@@ -119,6 +119,11 @@ function flagsBase(extra = {}) {
     // no Windows local e em deploys tipo Render (onde não existe deno)
     noJsRuntimes: true,
     jsRuntimes: 'node',
+    // Cliente Android do YouTube: contorna o bloqueio "Sign in to confirm
+    // you're not a bot" aplicado a IPs de datacenter (ex.: Render). O
+    // cliente android fala direto com a API interna (youtubei) e não passa
+    // pelo muro anti-bot do cliente web — sem precisar de cookies/login.
+    extractorArgs: ['youtube:player_client=android'],
     // Rede: nunca trava sem resposta
     socketTimeout: 30,
     retries: 3,

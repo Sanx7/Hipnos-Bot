@@ -117,6 +117,24 @@ O envio real pelo WhatsApp usa o mesmo formato dos demais comandos do bot
 (`audio` + `mimetype: 'audio/mpeg'`), então o caminho de envio é o mesmo já
 validado pelos outros comandos que enviam mídia.
 
+## Solução de problemas
+
+### `Sign in to confirm you're not a bot` (IPs de datacenter, ex.: Render)
+- O YouTube bloqueia sessões anônimas vindas de IPs de datacenter no cliente web.
+- O /play já força `--extractor-args youtube:player_client=android` (o cliente
+  oficial do app Android fala direto com a API interna `youtubei` e normalmente
+  **não** passa pelo muro anti-bot do cliente web) — tanto na busca (`ytsearch1:`)
+  quanto no download.
+- Observação: com o cliente android o YouTube pode aplicar o experimento SABR e
+  oferecer menos formatos (ex.: só o formato 18, 360p progressivo). Para áudio
+  MP3 isso não é problema — o ffmpeg extrai o áudio normalmente.
+- Se mesmo assim o erro persistir no Render, o plano B é autenticar com cookies:
+  1. Exporte o `cookies.txt` do YouTube (janela anônima → `youtube.com/robots.txt`
+     → extensão "Get cookies.txt LOCALLY" → feche a janela logo após exportar).
+  2. No Render: **Settings → Secret Files** → adicione o arquivo com caminho
+     `/etc/secrets/cookies.txt`.
+  3. Ajustar o código para ler esse caminho (variável `PLAY_COOKIES_PATH`).
+
 ## Manutenção
 
 - Atualizar o binário usado pelo bot: `npm update youtube-dl-exec` (baixa a
