@@ -28,25 +28,36 @@ function criarSockFalso(registro) {
 
 const CASOS = [
   {
-    nome: '1) Vídeo NORMAL (busca por nome)',
+    nome: '1) Busca por NOME — vídeo normal',
     texto: '/play Never Gonna Give You Up',
     validar(mensagens) {
       return mensagens.some(m => m.audio)
-        ? '✅ PASSOU (baixou e "enviou" o áudio)'
+        ? '✅ PASSOU (buscou, baixou e "enviou" o áudio)'
         : '❌ FALHOU (nenhum áudio foi enviado)'
     }
   },
   {
-    nome: '2) Vídeo mais LONGO (~6 min)',
+    nome: '2) Busca por NOME — vídeo mais longo (~6 min)',
     texto: '/play Bohemian Rhapsody Queen',
     validar(mensagens) {
       return mensagens.some(m => m.audio)
-        ? '✅ PASSOU (baixou e "enviou" o áudio)'
+        ? '✅ PASSOU (buscou, baixou e "enviou" o áudio)'
         : '❌ FALHOU (nenhum áudio foi enviado)'
     }
   },
   {
-    nome: '3) Link INVÁLIDO/inexistente (de propósito)',
+    nome: '3) Busca por termo SEM resultado (frase exata inexistente entre aspas)',
+    texto: '/play "zxq jqv bnm plk jjhgfdsa poiuytrewq"',
+    validar(mensagens) {
+      const temErroAmigavel = mensagens.some(m => typeof m.text === 'string' && (m.text.startsWith('❌') || m.text.startsWith('🔎')))
+      const semAudio = !mensagens.some(m => m.audio)
+      return temErroAmigavel && semAudio
+        ? '✅ PASSOU (respondeu mensagem amigável SEM derrubar nada)'
+        : '❌ FALHOU (esperava mensagem amigável sem áudio)'
+    }
+  },
+  {
+    nome: '4) BÔNUS — Link INVÁLIDO/inexistente (caminho de link direto)',
     texto: '/play https://www.youtube.com/watch?v=dQw4w9WgXc9',
     validar(mensagens) {
       const temErroAmigavel = mensagens.some(m => typeof m.text === 'string' && m.text.startsWith('❌'))

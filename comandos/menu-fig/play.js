@@ -1,4 +1,3 @@
-const yts = require('yt-search')
 const ytdlpBase = require('youtube-dl-exec')
 const fs = require('fs')
 const path = require('path')
@@ -33,8 +32,9 @@ const TIMEOUT_DOWNLOAD_MS = Number(process.env.PLAY_TIMEOUT_MS || 90000) // 90s
 const LIMITE_BYTES = Number(process.env.PLAY_LIMITE_MB || 20) * 1024 * 1024
 const MAX_FILESIZE_YTDLP = '25M' // trava ANTES de baixar (estimativa do yt-dlp)
 
-// Regex para identificar se o usuário mandou um link do YouTube direto
-const REGEX_URL_YOUTUBE = /^(https?:\/\/)?(www\.|m\.|music\.)?(youtube\.com\/(watch\?|shorts\/|live\/)|youtu\.be\/)/i
+// Se o texto começa com http/https é tratado como LINK direto (o yt-dlp
+// extrai os dados do vídeo); qualquer outra coisa é TERMO DE BUSCA
+const REGEX_EH_LINK = /^https?:\/\//i
 
 // 1 download por chat por vez — evita sobrecarregar o servidor com vários /play
 const downloadsEmAndamento = new Set()
@@ -86,14 +86,16 @@ async function executarYtDlp(url, flags, timeoutMs) {
   const timer = setTimeout(() => {
     expirou = true
     try {
-      subprocess.cancel('SIGKILL')
-    } catch (errCancel) {
-      try { subprocess.kill('SIGKILL') } catch (errKill) { /* já morreu */ }
-    }
+      subprocess.kill('SIGKILL')
+    } catch (errKill) { /* o processo já morreu */ }
   }, timeoutMs)
 
   try {
-    return await subprocess
+    const processo = await subprocess
+    // O await do wrapper (tinyspawn) devolve o PROCESSO; a saída do yt-dlp
+    // fica na propriedade .stdout (string), preenchida quando ele termina.
+    if (processo && typeof processo.stdout === 'string') return processo.stdout
+    return processo
   } catch (err) {
     if (expirou) {
       throw new ErroPlay(
@@ -154,6 +156,9 @@ function mensagemAmigavel(err) {
   }
   if (baixo.includes('private video')) {
     return '🔒 Esse vídeo é privado e não pode ser baixado.'
+  }
+  if (baixo.includes('no results')) {
+    return '🔎 Nenhuma música encontrada com esse nome. Tente outras palavras-chave!'
   }
   if (baixo.includes('sign in to confirm') || (baixo.includes('age') && baixo.includes('confirm'))) {
     return '🔞 O YouTube exigiu login/verificação de idade para esse vídeo, então não consigo baixá-lo.'
@@ -220,7 +225,7 @@ module.exports = {
 
       let url, titulo, duracaoSegundos
 
-      if (REGEX_URL_YOUTUBE.test(termoPesquisa)) {
+      if (REGEX_EH_LINK.test(termoPesquisa)) {
         // Usuário mandou um LINK: consulta os dados do vídeo antes de baixar
         await responder(sock, jid, msg, '🔎 Identificando o vídeo...')
 
@@ -243,19 +248,35 @@ module.exports = {
         titulo = info?.title || 'vídeo'
         duracaoSegundos = info?.duration
       } else {
-        // Usuário mandou um NOME: pesquisa no YouTube
+        // Usuário mandou um NOME: usa a busca NATIVA do yt-dlp ("ytsearch1:"
+        // = pegar apenas o 1º resultado), pelo mesmo wrapper do download.
+        // (Substitui o yt-search, que fazia scraping do HTML da página de
+        // busca e quebrava quando o YouTube mudava a estrutura dela.)
         await responder(sock, jid, msg, `🔍 Buscando por "${termoPesquisa}" no YouTube...`)
 
-        const resultado = await yts(termoPesquisa)
-        const video = resultado.videos[0]
+        const saidaBruta = await executarYtDlp(`ytsearch1:${termoPesquisa}`, flagsBase({
+          dumpSingleJson: true,
+          noProgress: true,
+          restrictFilenames: true
+        }), 30000)
 
-        if (!video) {
-          return await responder(sock, jid, msg, '❌ Nenhuma música encontrada com esse nome.')
+        let busca
+        try {
+          busca = JSON.parse(saidaBruta)
+        } catch (errParse) {
+          throw new ErroPlay('❌ Não consegui consultar a busca do YouTube agora. Tente novamente em instantes.', 'saída da busca do yt-dlp não é um JSON válido: ' + String(saidaBruta || '').slice(0, 200))
         }
 
-        url = video.url
-        titulo = video.title
-        duracaoSegundos = video.seconds
+        // "ytsearch1:" devolve uma playlist com 1 entrada
+        const video = busca?.entries?.[0] || (busca?._type === 'video' ? busca : null)
+
+        if (!video) {
+          return await responder(sock, jid, msg, '🔎 Nenhuma música encontrada com esse nome. Tente outras palavras-chave!')
+        }
+
+        url = video.webpage_url || video.url || (video.id ? `https://www.youtube.com/watch?v=${video.id}` : null)
+        titulo = video.title || 'música'
+        duracaoSegundos = video.duration
       }
 
       // Validações de duração (ao vivo = duração indefinida)

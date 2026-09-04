@@ -4,10 +4,12 @@
 
 ```
 Usuário → /play <nome ou link>
-   └─ yt-search (busca por nome, sem baixar nada)
    └─ youtube-dl-exec (wrapper Node.js) → EXECUTA o binário real do yt-dlp
         ├─ yt-dlp.exe baixado automaticamente no `npm install`
         │   (em node_modules/youtube-dl-exec/bin — embute o próprio Python 3.10)
+        ├─ Busca por nome: prefixo NATIVO "ytsearch1:<termo>" (1º resultado)
+        │   — sem nenhuma lib externa de busca (o antigo yt-search fazia
+        │     scraping do HTML e quebrou quando o YouTube mudou a página)
         ├─ Desafios de JavaScript do YouTube resolvidos com o NODE.JS
         │   (--no-js-runtimes --js-runtimes node, conforme a doc oficial:
         │    https://github.com/yt-dlp/yt-dlp/wiki/EJS)
@@ -85,7 +87,7 @@ habilite o download automático deles do GitHub com a variável
 - Cada `sock.sendMessage` do comando também tem try/catch próprio.
 - `bot.js` ganhou uma última linha de defesa: um `.catch()` em
   `comando.executar(...)` que apenas registra o erro no console.
-- Timeout de 90s mata o processo do yt-dlp (`subprocess.cancel` + `timeout` do spawn).
+- Timeout de 90s mata o processo do yt-dlp (`subprocess.kill('SIGKILL')` + `timeout` nativo do spawn).
 - `--max-filesize 25M` evita baixar arquivos gigantes; pós-download há verificação
   de 20 MB antes de enviar.
 - Arquivos temporários são apagados no `finally` (mesmo com erro).
@@ -102,9 +104,14 @@ Resultado da validação (com o `sock` falso, sem conectar no WhatsApp):
 
 | Caso | Entrada | Resultado |
 |---|---|---|
-| Vídeo normal | `/play Never Gonna Give You Up` | ✅ MP3 de 6,72 MB em 25,9s |
-| Vídeo mais longo | `/play Bohemian Rhapsody Queen` | ✅ MP3 de 10,87 MB em 30,2s |
-| Link inexistente | `/play https://www.youtube.com/watch?v=dQw4w9WgXc9` | ✅ "❌ Esse vídeo não está disponível..." em 3,6s, bot vivo |
+| Busca por nome (normal) | `/play Never Gonna Give You Up` | ✅ MP3 de 6,72 MB em ~24s |
+| Busca por nome (mais longo, ~6min) | `/play Bohemian Rhapsody Queen` | ✅ MP3 de 10,87 MB em ~29s |
+| Busca SEM resultado | `/play "zxq jqv bnm plk jjhgfdsa poiuytrewq"` | ✅ "🔎 Nenhuma música encontrada..." sem áudio, bot vivo |
+| Link inexistente | `/play https://www.youtube.com/watch?v=dQw4w9WgXc9` | ✅ "❌ Esse vídeo não está disponível..." em ~3s, bot vivo |
+
+> Nota: para o teste de "busca sem resultado" é usada uma **frase exata entre
+> aspas** que não existe em vídeo nenhum, porque a busca do YouTube é difusa —
+> gibberish solto (ex.: `zxqjqvbnmplk...`) ainda retorna vídeos por fuzzy match.
 
 O envio real pelo WhatsApp usa o mesmo formato dos demais comandos do bot
 (`audio` + `mimetype: 'audio/mpeg'`), então o caminho de envio é o mesmo já
