@@ -25,11 +25,17 @@ enfrentam o julgamento das sombras."
 📖 /menu
 ➥ Exibe este pergaminho.
 
+🏆 /ranking
+➥ Mostra os 10 membros mais ativos do grupo (mais mensagens enviadas).
+
 👁️‍🗨️ /revelar
 ➥ Revela fotos/vídeos de visualização única (Responda à mídia).
 
 🎵 /play <nome da música>
 ➥ Pesquisa e baixa o áudio do YouTube direto no chat.
+
+👑 /dono
+➥ Revela quem são os donos do bot.
 
 ════════════════════
 
@@ -131,8 +137,8 @@ enfrentam o julgamento das sombras."
 
 🛡️ GUARDIÕES DO LIMBO (ANTIS)
 
-⚙️ /soadm (1 ou 0)
-➥ Restringe o uso do bot apenas a administradores.
+⚙️ /soadm
+➥ Alterna o modo somente admin: só admins (e o dono) usam os comandos. Também aceita /soadm 1 (ativa) ou /soadm 0 (desativa).
 
 🎧 /anti-audio (1 ou 0)
 ➥ Intercepta e deleta áudios enviados.
@@ -151,6 +157,13 @@ enfrentam o julgamento das sombras."
 
 👁️ /antistatus (1 ou 0)
 ➥ Intercepta e bane marcações invasivas de status externo.
+
+════════════════════
+
+💠 MEMBROS VIP (SÓ DONO)
+
+💠 /menu-vip
+➥ Abre o pergaminho dos privilegiados: /darvip (outorgar dias de VIP) e /servip (listar VIPs ativos).
 
 ════════════════════
 

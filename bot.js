@@ -9,6 +9,16 @@ const qrcode = require('qrcode-terminal')
 const fs = require('fs')
 const path = require('path')
 
+// 📊 Módulo do banco de dados do /ranking (SQLite / better-sqlite3)
+// Expõe: registrarMensagem(grupoId, usuarioId, nome)
+const { registrarMensagem } = require('./database')
+
+// ⚙️ Configurações globais do bot
+// - OWNER_NUMBERS: lista de donos SEMPRE pode usar os comandos (mesmo no modo restrito)
+// - AVISAR_BLOQUEIO: true = avisa não-admin | false = ignora silenciosamente
+// - limparNumero / ehAdminDoGrupo: helpers p/ verificar admin de grupo
+const { OWNER_NUMBERS, AVISAR_BLOQUEIO, limparNumero, ehAdminDoGrupo } = require('./config')
+
 // ====================
 // REDE DE SEGURANÇA DO PROCESSO
 // ====================
@@ -243,6 +253,21 @@ async function startBot() {
       const jid = msg.key.remoteJid
       const sender = msg.key.participant || msg.key.remoteJid
 
+      // ====================
+      // 📊 REGISTRO DE MENSAGENS PARA O /RANKING
+      // ====================
+      // Captura TODA mensagem que passa pelo bot (não só comandos) e
+      // contabiliza um ponto para o remetente NAQUELE grupo (jid).
+      // Os dados vão para o SQLite (database.js) e alimentam o /ranking.
+      // O try/catch garante que o ranking nunca atrapalhe o fluxo normal.
+      if (jid.endsWith('@g.us')) {
+        try {
+          registrarMensagem(jid, sender, msg.pushName)
+        } catch (errRegistro) {
+          console.error('❌ Erro ao registrar mensagem no ranking:', errRegistro)
+        }
+      }
+
       // 🪐 GUARDIÕES DO LIMBO (MONITORES DE GRUPO)
       if (jid.endsWith('@g.us')) {
         const caminhoConfigs = path.join(__dirname, 'comandos', 'dados', 'antias.json');
@@ -342,14 +367,28 @@ async function startBot() {
           const configs = JSON.parse(fs.readFileSync(caminhoConfigs, 'utf-8'));
           
           if (configAtiva(configs, 'onlyAdmin', 'onlyadmin', jid)) {
-            const numeroDoSender = sender.split('@')[0].split(':')[0].replace(/\D/g, '');
-            if (numeroDoSender !== '177060848861240') {
-              const metadados = await sock.groupMetadata(jid);
-              const usuarioGrupo = metadados.participants.find(p => p.id === sender);
-              const ehAdmin = usuarioGrupo?.admin === 'admin' || usuarioGrupo?.admin === 'superadmin';
+            // 🔒 MODO SOMENTE ADMIN (/soadm) — para ESTE grupo específico
+            // Quando ativo, apenas administradores (ou o dono do bot) podem usar
+            // os comandos. Não-admins são ignorados (ou avisados, se config).
+            // (dono = qualquer número da lista OWNER_NUMBERS do config.js)
+            if (!OWNER_NUMBERS.includes(limparNumero(sender))) {
+              let metadados = null
+              try {
+                metadados = await sock.groupMetadata(jid)
+              } catch (err) {
+                // Sem metadados não dá pra provar que é admin -> bloqueia
+                console.error('Erro ao buscar metadados no modo restrito:', err)
+              }
+
+              const ehAdmin = ehAdminDoGrupo(metadados?.participants, sender)
 
               if (!ehAdmin) {
-                return; 
+                if (AVISAR_BLOQUEIO) {
+                  await sock.sendMessage(jid, {
+                    text: '🛡️ *MODO RESTRITO ATIVO*\n\nApenas *administradores do grupo* podem invocar os comandos de Hipnos enquanto o /soadm estiver ativo neste recinto. 💤'
+                  }, { quoted: msg })
+                }
+                return;
               }
             }
           }

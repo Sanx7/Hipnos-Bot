@@ -23,10 +23,13 @@ function sortearFrase(lista) {
   return lista[Math.floor(Math.random() * lista.length)]
 }
 
-// Converte qualquer JID (com sufixo de device) no formato limpo para menção
+// Remove apenas o sufixo de dispositivo (:N), mantendo o domínio ORIGINAL
+// do JID mencionado — nunca converte @lid em @s.whatsapp.net (número falso).
 function normalizarJid(id) {
-  const numero = String(id).split('@')[0].split(':')[0]
-  return `${numero}@s.whatsapp.net`
+  const bruto = String(id || '')
+  const [usuario, servidor] = bruto.split('@')
+  if (!usuario || !servidor) return ''
+  return `${usuario.split(':')[0]}@${servidor}`
 }
 
 module.exports = {

@@ -28,10 +28,22 @@ function sortearFrase(lista) {
   return lista[Math.floor(Math.random() * lista.length)]
 }
 
-// Converte qualquer JID (com sufixo de device) no formato limpo para menção
-function normalizarJid(id) {
-  const numero = String(id).split('@')[0].split(':')[0]
-  return `${numero}@s.whatsapp.net`
+// Retorna o JID real e mencionável de um participante do grupo.
+// - Prefere `phoneNumber` (número real @s.whatsapp.net) quando o WhatsApp
+//   entrega o participante como LID (@lid);
+// - Mantém o domínio ORIGINAL do id — NUNCA reconstroi @s.whatsapp.net a
+//   partir de um LID (isso era o que gerava números de telefone falsos);
+// - Remove o sufixo de dispositivo (:N) para a menção renderizar.
+function jidMencionavel(participante) {
+  const bruto = participante?.phoneNumber || participante?.id || ''
+  const [usuario, servidor] = String(bruto).split('@')
+  if (!usuario || !servidor) return ''
+  return `${usuario.split(':')[0]}@${servidor}`
+}
+
+// Extrai apenas os dígitos de um JID, para comparar com o número do bot
+function apenasDigitos(jid) {
+  return String(jid || '').split('@')[0].split(':')[0].replace(/\D/g, '')
 }
 
 // Sorteia dois itens distintos de uma lista (embaralhamento Fisher-Yates)
@@ -55,40 +67,47 @@ module.exports = {
         return await sock.sendMessage(jid, { text: AVISO_FORA_GRUPO }, { quoted: msg })
       }
 
-      // Busca os participantes do grupo via Baileys
+      // 1) Busca a lista REAL de participantes do grupo via Baileys
       const metadados = await sock.groupMetadata(jid)
-      const participantes = metadados.participants.map((p) => p.id)
+      const participantes = metadados.participants || []
 
-      // Exclui o próprio bot para nunca formar casal com ele
-      const numeroDoBot = (sock.user?.id || '').split('@')[0].split(':')[0]
-      const alvos = participantes.filter((participante) => {
-        if (!numeroDoBot) return true
-        return String(participante).split('@')[0].split(':')[0] !== numeroDoBot
-      })
+      // 2) Converte cada participante no JID "mencionável" real
+      //    (prefere phoneNumber, mantém o domínio original, remove :dispositivo),
+      //    deduplica e exclui o próprio bot para nunca sortear ele mesmo.
+      const numeroDoBot = apenasDigitos(sock.user?.id)
+      const alvos = participantes
+        .map(jidMencionavel)
+        .filter(Boolean)
+        .filter((jidAlvo, indice, lista) => lista.indexOf(jidAlvo) === indice) // deduplica
+        .filter((jidAlvo) => {
+          if (!numeroDoBot) return true
+          return apenasDigitos(jidAlvo) !== numeroDoBot
+        })
 
-      // Um casal precisa de pelo menos duas almas válidas
+      // 3) Um casal precisa de pelo menos duas almas válidas
       if (alvos.length < 2) {
         return await sock.sendMessage(jid, { text: AVISO_POUCAS_ALMAS }, { quoted: msg })
       }
 
-      // Sorteia duas pessoas diferentes (sem repetir)
+      // 4) Sorteia duas pessoas DIFERENTES (sem repetir a mesma)
       const [pessoa1, pessoa2] = sortearDoisDistintos(alvos)
 
       // Porcentagem de compatibilidade aleatória (1 a 100)
       const compatibilidade = Math.floor(Math.random() * 100) + 1
 
-      const numero1 = pessoa1.split('@')[0].split(':')[0]
-      const numero2 = pessoa2.split('@')[0].split(':')[0]
+      // Usa os dígitos do MESMO JID que vai no mentions[] (texto e menção casam)
+      const numero1 = pessoa1.split('@')[0]
+      const numero2 = pessoa2.split('@')[0]
 
       const mensagem = sortearFrase(FALAS)
         .replace('{p1}', `@${numero1}`)
         .replace('{p2}', `@${numero2}`)
         .replace('{c}', compatibilidade)
 
-      // Responde marcando as duas pessoas sorteadas
+      // 5) Responde marcando as duas pessoas sorteadas com o JID REAL delas
       await sock.sendMessage(jid, {
         text: mensagem,
-        mentions: [normalizarJid(pessoa1), normalizarJid(pessoa2)]
+        mentions: [pessoa1, pessoa2]
       }, { quoted: msg })
     } catch (err) {
       console.error('Erro no comando casal:', err)

@@ -3,3 +3,8 @@ auth/
 comandos/dados/temp/
 *.exe
 cookies.txt
+mensagens.db
+mensagens.db-wal
+mensagens.db-shm
+# Variáveis de ambiente (contêm números dos donos — nunca subir pro git)
+.env
