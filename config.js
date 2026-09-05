@@ -113,6 +113,32 @@ function ehAdminDoGrupo(participants, jid) {
   )
 }
 
+// 👑 Diz se o autor (`jid`) é DONO DO BOT — versão PROOF-LID:
+// dentro de grupos, o WhatsApp às vezes identifica o remetente pelo LID
+// (tipo "123456@lid") em vez do número de telefone real. Comparar esse JID
+// bruto contra OWNER_NUMBERS (números reais) falha, mesmo para um dono de
+// verdade. Por isso esta função:
+//   1) Localiza o participante nos metadados via acharParticipante (que já
+//      compara o `id` — podendo ser LID — com o `phoneNumber` — número real);
+//   2) Considera dono se QUALQUER número desse participante (id OU
+//      phoneNumber, normalizados) estiver em OWNER_NUMBERS;
+//   3) Sem metadados/participante (uso no privado, falha na busca), cai de
+//      volta na comparação simples OWNER_NUMBERS.includes(limparNumero(jid))
+//      para não quebrar em contextos sem metadados de grupo.
+function ehDonoDoBot(participants, jid) {
+  const participante = acharParticipante(participants, jid)
+  if (participante) {
+    const numeros = [
+      limparNumero(participante.id),
+      limparNumero(participante.phoneNumber)
+    ].filter(Boolean)
+    if (numeros.some((numero) => OWNER_NUMBERS.includes(numero))) return true
+  }
+  // Fallback: sem metadados (privado, erro na busca) compara o JID direto
+  return OWNER_NUMBERS.includes(limparNumero(jid))
+}
+
+// 👑 Lista de DONOS do bot — fonte única de verdade (usada pelo /dono e por
 // 👑 Lista de DONOS do bot — fonte única de verdade (usada pelo /dono e por
 // qualquer checagem de "quem é dono" espalhada no bot).
 // Retorna TODOS os donos (não só o primeiro), já normalizados (apenas dígitos),
@@ -132,12 +158,16 @@ function formatarNumero(digitos) {
   return `+${digitos}`
 }
 
+// 🔖 VERSÃO DO BOT — fonte única da versão (usada no rodapé dos menus
+// e pelo /info). Para trocar a versão, edite SÓ esta constante.
+const VERSAO_BOT = '1.0.0'
+
 // 🔮 RODAPÉ PADRÃO DOS MENUS — fonte ÚNICA da assinatura do bot.
 // Usado por /menu, /menu-vip, /menu-dono, /menu-admin e /menu-brincadeiras:
 // para trocar o número do criador ou a versão, edite SÓ esta constante
 // (evita rodapés dessincronizados espalhados pelos arquivos de menu).
 const RODAPE_MENU = [
-  '🌙 Hipnos Bot v1.0.0',
+  `🌙 Hipnos Bot v${VERSAO_BOT}`,
   '🔮 Criador: Sanx7 (+63 948 392 3601)',
   '💤 Guardião Supremo dos Sonhos'
 ].join('\n')
@@ -148,7 +178,9 @@ module.exports = {
   limparNumero,
   acharParticipante,
   ehAdminDoGrupo,
+  ehDonoDoBot,
   getDonos,
   formatarNumero,
+  VERSAO_BOT,
   RODAPE_MENU
 }

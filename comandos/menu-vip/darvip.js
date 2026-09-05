@@ -13,7 +13,7 @@
 //     se o VIP dele já expirou, vira um novo período a partir de agora.
 // ============================================
 
-const { OWNER_NUMBERS, limparNumero } = require('../../config')
+const { limparNumero, ehDonoDoBot } = require('../../config')
 const vip = require('../../vip')
 
 module.exports = {
@@ -24,8 +24,20 @@ module.exports = {
     try {
       const sender = msg.key.participant || msg.key.remoteJid
 
-      // 1) 🔒 Apenas donos do bot podem conceder VIP
-      if (!OWNER_NUMBERS.includes(limparNumero(sender))) {
+      // 1) 🔒 Apenas donos do bot podem conceder VIP.
+      //    Checagem PROOF-LID: em grupo buscamos os metadados para resolver
+      //    o sender mesmo quando ele vem como "@lid"; no privado (sem
+      //    metadados) a própria função cai na comparação direta.
+      let participantes = null
+      if (jid.endsWith('@g.us')) {
+        try {
+          const metadados = await sock.groupMetadata(jid)
+          participantes = metadados.participants
+        } catch (err) {
+          console.error('[darvip] Sem metadados do grupo:', err?.message || err)
+        }
+      }
+      if (!ehDonoDoBot(participantes, sender)) {
         return await sock.sendMessage(jid, {
           text: '🌑 *Hipnos só obedece aos donos do bot.*\n\nA outorga do selo 💠 *VIP* é privilégio exclusivo dos soberanos.'
         }, { quoted: msg })

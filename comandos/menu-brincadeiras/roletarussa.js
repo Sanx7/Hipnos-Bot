@@ -20,7 +20,8 @@ const {
   OWNER_NUMBERS,
   limparNumero,
   acharParticipante,
-  ehAdminDoGrupo
+  ehAdminDoGrupo,
+  ehDonoDoBot
 } = require('../../config')
 
 // Pausa dramática entre o anúncio do sorteado e a remoção efetiva (ms)
@@ -85,8 +86,10 @@ module.exports = {
       const metadados = await sock.groupMetadata(jid)
       const participantes = metadados.participants || []
 
-      // 3) 🔒 Restrito a ADMINS DO GRUPO ou DONOS DO BOT
-      const ehDonoBot = OWNER_NUMBERS.includes(limparNumero(sender))
+      // 3) 🔒 Restrito a ADMINS DO GRUPO ou DONOS DO BOT.
+      //    Dono via ehDonoDoBot (PROOF-LID): resolve o sender nos
+      //    participantes mesmo quando o WhatsApp o entrega como "@lid".
+      const ehDonoBot = ehDonoDoBot(participantes, sender)
       if (!ehDonoBot && !ehAdminDoGrupo(participantes, sender)) {
         return await sock.sendMessage(jid, {
           text: '🌑 *A roleta do limbo só obedece aos ADMINISTRADORES do grupo ou aos DONOS do bot.*\n\nMortais comuns não puxam o gatilho do destino.'

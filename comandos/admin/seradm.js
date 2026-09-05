@@ -12,9 +12,15 @@
 // outra pessoa. Se não for, respondemos um aviso claro em vez de deixar
 // o erro cru do Baileys estourar (e qualquer erro da chamada também é
 // convertido nesse aviso, seguindo o modelo do /ban).
+//
+// Checagem de dono PROOF-LID: dentro de grupos o WhatsApp às vezes entrega
+// o remetente como "@lid", e comparar esse JID bruto com OWNER_NUMBERS
+// barrava donos de verdade. Por isso buscamos os metadados ANTES da checagem
+// e usamos ehDonoDoBot(participantes, sender) — que resolve o participante
+// e compara tanto o id (LID) quanto o phoneNumber (número real).
 // ============================================
 
-const { OWNER_NUMBERS, limparNumero, acharParticipante } = require('../../config')
+const { acharParticipante, ehDonoDoBot } = require('../../config')
 
 function ehParticipanteAdmin(participante) {
   return Boolean(
@@ -38,20 +44,24 @@ module.exports = {
 
       const sender = msg.key.participant || msg.key.remoteJid
 
-      // 1) 🔒 Apenas donos do bot (mesma checagem do /soadm, /dono, /darvip, /servip)
-      if (!OWNER_NUMBERS.includes(limparNumero(sender))) {
+      // 1) Metadados do grupo (participantes + hierarquia) — buscados ANTES
+      //    da checagem de dono, pois é deles que sai a resolução do LID.
+      const metadados = await sock.groupMetadata(jid)
+      const participantes = metadados.participants || []
+
+      // 2) 🔒 Apenas donos do bot — checagem PROOF-LID via ehDonoDoBot:
+      //    se o sender vier como "123456@lid", a comparação bruta com
+      //    OWNER_NUMBERS falharia; a função resolve o participante e compara
+      //    o id (LID) E o phoneNumber (número real) contra a lista de donos.
+      if (!ehDonoDoBot(participantes, sender)) {
         return await sock.sendMessage(jid, {
           text: '🌑 *Hipnos só obedece aos donos do bot.*\n\nA coroação de administradores é privilégio exclusivo dos soberanos.'
         }, { quoted: msg })
       }
 
-      // 2) Alvo: @menção (se houver) OU o próprio autor da mensagem
+      // 3) Alvo: @menção (se houver) OU o próprio autor da mensagem
       const contextInfo = msg.message?.extendedTextMessage?.contextInfo
       const alvoJid = contextInfo?.mentionedJid?.[0] || sender
-
-      // 3) Metadados do grupo (participantes + hierarquia)
-      const metadados = await sock.groupMetadata(jid)
-      const participantes = metadados.participants || []
 
       // 4) ⚠️ O BOT precisa ser admin do grupo para promover outra pessoa
       const botNoGrupo = acharParticipante(participantes, sock.user?.id)

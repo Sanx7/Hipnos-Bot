@@ -18,8 +18,8 @@
 const fs = require('fs')
 const path = require('path')
 
-// Configuração global do bot (lista de donos + helpers de admin)
-const { OWNER_NUMBERS, limparNumero, ehAdminDoGrupo } = require('../../config')
+// Configuração global do bot (helpers de dono/admin — verificação PROOF-LID)
+const { limparNumero, ehAdminDoGrupo, ehDonoDoBot } = require('../../config')
 
 // Arquivo onde ficam salvos os modos restritos (mesmo banco dos antix)
 const BANCO_CONFIG = path.join(__dirname, '..', 'dados', 'antias.json')
@@ -73,9 +73,11 @@ module.exports = {
       // 2) Busca os metadados do grupo para saber quem é admin
       const metadados = await sock.groupMetadata(jid)
 
-      // 3) Autorização: dono do bot (lista OWNER_NUMBERS) OU admin do grupo OU dono do grupo
+      // 3) Autorização: dono do bot (checagem PROOF-LID via ehDonoDoBot, pois
+      //    o sender pode vir como "@lid" — a comparação bruta com OWNER_NUMBERS
+      //    barrava donos de verdade) OU admin do grupo OU dono do grupo
       const ehAutorizado =
-        OWNER_NUMBERS.includes(limparNumero(sender)) ||
+        ehDonoDoBot(metadados.participants, sender) ||
         ehAdminDoGrupo(metadados.participants, sender) ||
         limparNumero(sender) === limparNumero(metadados.owner)
 

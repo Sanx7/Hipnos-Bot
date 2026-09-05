@@ -131,11 +131,71 @@ function buscarRanking(grupoId, limite = 10) {
 }
 
 // -------------------------------------------------------------------
+// BuscarEstatisticasUsuario: estatísticas de UM usuário em UM grupo
+// (usado pelo /perfil). Retorna:
+//   - total         : mensagens registradas do usuário naquele grupo
+//   - posicao       : posição no ranking do grupo (= nº de usuários com
+//                     MAIS mensagens + 1; empates dividem a posição)
+//   - totalUsuarios : quantos usuários distintos têm mensagens no grupo
+//   - nome          : pushName mais recente registrado p/ o usuário
+// Retorna null se o banco não estiver disponível (better-sqlite3 ausente);
+// retorna { total: 0, posicao: null, ... } se o usuário ainda não tem
+// mensagens registradas (o /perfil mostra os dados básicos mesmo assim).
+// -------------------------------------------------------------------
+function buscarEstatisticasUsuario(grupoId, usuarioId) {
+  const conexao = conectar()
+  if (!conexao) return null
+
+  const alvo = normalizarId(usuarioId)
+
+  const totalDoUsuario = conexao.prepare(`
+    SELECT COUNT(*) AS total
+    FROM mensagens
+    WHERE grupo_id = ? AND usuario_id = ?
+  `)
+  const nomeMaisRecente = conexao.prepare(`
+    SELECT nome
+    FROM mensagens
+    WHERE grupo_id = ? AND usuario_id = ? AND nome IS NOT NULL
+    ORDER BY timestamp DESC
+    LIMIT 1
+  `)
+  const posicaoConsulta = conexao.prepare(`
+    SELECT COUNT(*) + 1 AS posicao
+    FROM (
+      SELECT usuario_id
+      FROM mensagens
+      WHERE grupo_id = ?
+      GROUP BY usuario_id
+      HAVING COUNT(*) > ?
+    )
+  `)
+  const totalUsuariosConsulta = conexao.prepare(`
+    SELECT COUNT(DISTINCT usuario_id) AS totalUsuarios
+    FROM mensagens
+    WHERE grupo_id = ?
+  `)
+
+  const { total } = totalDoUsuario.get(grupoId, alvo)
+  const { totalUsuarios } = totalUsuariosConsulta.get(grupoId)
+
+  if (!total) {
+    return { total: 0, posicao: null, totalUsuarios, nome: null }
+  }
+
+  const { posicao } = posicaoConsulta.get(grupoId, total)
+  const linhaNome = nomeMaisRecente.get(grupoId, alvo)
+
+  return { total, posicao, totalUsuarios, nome: linhaNome?.nome || null }
+}
+
+// -------------------------------------------------------------------
 // Exporta apenas o que o resto do bot precisa
 // -------------------------------------------------------------------
 module.exports = {
   conectar,
   registrarMensagem,
   buscarRanking,
+  buscarEstatisticasUsuario,
   normalizarId
 }

@@ -16,8 +16,9 @@ const { registrarMensagem } = require('./database')
 // ⚙️ Configurações globais do bot
 // - OWNER_NUMBERS: lista de donos SEMPRE pode usar os comandos (mesmo no modo restrito)
 // - AVISAR_BLOQUEIO: true = avisa não-admin | false = ignora silenciosamente
-// - limparNumero / ehAdminDoGrupo: helpers p/ verificar admin de grupo
-const { OWNER_NUMBERS, AVISAR_BLOQUEIO, limparNumero, ehAdminDoGrupo } = require('./config')
+// - limparNumero / ehAdminDoGrupo / ehDonoDoBot: helpers p/ verificar admin
+//   de grupo e dono do bot (ehDonoDoBot resolve o LID do sender nos metadados)
+const { OWNER_NUMBERS, AVISAR_BLOQUEIO, limparNumero, ehAdminDoGrupo, ehDonoDoBot } = require('./config')
 
 // ====================
 // REDE DE SEGURANÇA DO PROCESSO
@@ -70,7 +71,11 @@ app.listen(port, () => {
 // CARREGAR COMANDOS
 // ====================
 
-const comandos = new Map()
+// 📚 O Map de comandos vive em comandos-registry.js (módulo compartilhado).
+// Assim outros módulos (ex.: o /info) conseguem contar/consultar os comandos
+// carregados pelo loader SEM dar require no bot.js — o que criaria uma
+// dependência circular (comando -> bot -> comando) durante o carregamento.
+const { comandos } = require('./comandos-registry')
 
 // Verifica se um JID está ativo na config aceitando tanto camelCase (novo padrão)
 // quanto minúsculas (dados antigos), evitando quebra de compatibilidade.
@@ -371,6 +376,9 @@ async function startBot() {
             // Quando ativo, apenas administradores (ou o dono do bot) podem usar
             // os comandos. Não-admins são ignorados (ou avisados, se config).
             // (dono = qualquer número da lista OWNER_NUMBERS do config.js)
+            // O 1º teste é direto (número real, zero custo de API). Se não
+            // bater, buscamos os metadados e resolvemos via ehDonoDoBot —
+            // cobre o caso do WhatsApp entregar o remetente como "@lid".
             if (!OWNER_NUMBERS.includes(limparNumero(sender))) {
               let metadados = null
               try {
@@ -380,9 +388,10 @@ async function startBot() {
                 console.error('Erro ao buscar metadados no modo restrito:', err)
               }
 
+              const ehDono = ehDonoDoBot(metadados?.participants, sender)
               const ehAdmin = ehAdminDoGrupo(metadados?.participants, sender)
 
-              if (!ehAdmin) {
+              if (!ehDono && !ehAdmin) {
                 if (AVISAR_BLOQUEIO) {
                   await sock.sendMessage(jid, {
                     text: '🛡️ *MODO RESTRITO ATIVO*\n\nApenas *administradores do grupo* podem invocar os comandos de Hipnos enquanto o /soadm estiver ativo neste recinto. 💤'

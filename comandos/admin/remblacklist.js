@@ -1,8 +1,8 @@
 const fs = require('fs');
 const path = require('path');
 
-// Configuração global do bot (lista de donos + helpers)
-const { OWNER_NUMBERS, limparNumero } = require('../../config');
+// Configuração global do bot (helpers de dono — verificação PROOF-LID)
+const { limparNumero, ehDonoDoBot } = require('../../config');
 
 // Caminho corrigido apontando para comandos/dados
 const BANCO_BLACKLIST = path.join(__dirname, '..', 'dados', 'blacklist.json');
@@ -34,11 +34,22 @@ module.exports = {
     try {
       const sender = msg.key.participant || msg.key.remoteJid;
 
-      // 🔒 Permissão: APENAS donos do bot (lista OWNER_NUMBERS do config.js —
-      // mesma verificação usada em /soadm, /dono, /darvip e /servip).
+      // 🔒 Permissão: APENAS donos do bot.
+      // Checagem PROOF-LID (ehDonoDoBot): em grupo buscamos os metadados
+      // para resolver o sender mesmo quando ele vem como "@lid"; sem
+      // metadados, a própria função cai na comparação direta.
       // Antes, esta checagem comparava com um ÚNICO LID hardcoded (SEU_LID),
       // então os demais donos configurados em OWNER_NUMBERS eram barrados.
-      if (!OWNER_NUMBERS.includes(limparNumero(sender))) {
+      let participantes = null
+      if (jid.endsWith('@g.us')) {
+        try {
+          const metadados = await sock.groupMetadata(jid)
+          participantes = metadados.participants
+        } catch (e) {
+          console.error('Sem metadados do grupo (remblacklist):', e?.message || e);
+        }
+      }
+      if (!ehDonoDoBot(participantes, sender)) {
         return await sock.sendMessage(jid, {
           text: '🌑 Hipnos recusa sua invocação... você não possui domínio sobre a lista de sombras.'
         }, { quoted: msg });

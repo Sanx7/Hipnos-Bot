@@ -24,11 +24,17 @@ enfrentam o julgamento das sombras."
 🏓 /ping
 ➥ Mede a pulsação do bot.
 
+ℹ️ /info
+➥ Mostra a identidade do bot: versão, comandos disponíveis, tempo online e grupos.
+
 📖 /menu
 ➥ Exibe este pergaminho.
 
 🏆 /ranking
 ➥ Mostra os 10 membros mais ativos do grupo (mais mensagens enviadas).
+
+👤 /perfil
+➥ Mostra o perfil do autor (ou de um @mencionado): foto, número, cargo e posição no ranking do grupo.
 
 👁️‍🗨️ /revelar
 ➥ Revela fotos/vídeos de visualização única (Responda à mídia).
@@ -42,6 +48,12 @@ enfrentam o julgamento das sombras."
 
 🔮 /s
 ➥ Transforma imagens em figurinhas.
+
+🎨 /attp <texto>
+➥ Gera uma figurinha ANIMADA com o texto que você enviar (ex: /attp Oi mundo).
+
+🎨 /attp <texto>
+➥ Cria uma figurinha ANIMADA com o texto pulsando e girando (ex: /attp Oi mundo).
 
 🖼️ /toimg
 ➥ Converte figurinha estática em imagem comum (Responda ao sticker).

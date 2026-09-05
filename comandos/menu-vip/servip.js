@@ -8,7 +8,7 @@
 // - Autorização idêntica ao /darvip (OWNER_NUMBERS do config.js).
 // ============================================
 
-const { OWNER_NUMBERS, limparNumero, formatarNumero } = require('../../config')
+const { formatarNumero, ehDonoDoBot } = require('../../config')
 const vip = require('../../vip')
 
 module.exports = {
@@ -19,8 +19,20 @@ module.exports = {
     try {
       const sender = msg.key.participant || msg.key.remoteJid
 
-      // 1) 🔒 Apenas donos do bot
-      if (!OWNER_NUMBERS.includes(limparNumero(sender))) {
+      // 1) 🔒 Apenas donos do bot.
+      //    Checagem PROOF-LID: em grupo buscamos os metadados para resolver
+      //    o sender mesmo quando ele vem como "@lid"; no privado (sem
+      //    metadados) a própria função cai na comparação direta.
+      let participantes = null
+      if (jid.endsWith('@g.us')) {
+        try {
+          const metadados = await sock.groupMetadata(jid)
+          participantes = metadados.participants
+        } catch (err) {
+          console.error('[servip] Sem metadados do grupo:', err?.message || err)
+        }
+      }
+      if (!ehDonoDoBot(participantes, sender)) {
         return await sock.sendMessage(jid, {
           text: '🌑 *Hipnos só obedece aos donos do bot.*\n\nO livro dos VIPs 💠 permanece selado aos olhos dos mortais.'
         }, { quoted: msg })

@@ -16,7 +16,7 @@
 const fs = require('fs')
 const path = require('path')
 
-const { OWNER_NUMBERS, limparNumero, formatarNumero } = require('../../config')
+const { formatarNumero, ehDonoDoBot } = require('../../config')
 
 // Mesmo banco usado por /addblacklist e /remblacklist
 const BANCO_BLACKLIST = path.join(__dirname, '..', 'dados', 'blacklist.json')
@@ -41,8 +41,20 @@ module.exports = {
     try {
       const sender = msg.key.participant || msg.key.remoteJid
 
-      // 1) 🔒 Apenas donos do bot (mesma checagem de /addblacklist e /remblacklist)
-      if (!OWNER_NUMBERS.includes(limparNumero(sender))) {
+      // 1) 🔒 Apenas donos do bot (mesma checagem de /addblacklist e /remblacklist).
+      //    Checagem PROOF-LID: em grupo buscamos os metadados para resolver
+      //    o sender mesmo quando ele vem como "@lid"; no privado (sem
+      //    metadados) a própria função cai na comparação direta.
+      let participantes = null
+      if (jid.endsWith('@g.us')) {
+        try {
+          const metadados = await sock.groupMetadata(jid)
+          participantes = metadados.participants
+        } catch (err) {
+          console.error('[blacklist] Sem metadados do grupo:', err?.message || err)
+        }
+      }
+      if (!ehDonoDoBot(participantes, sender)) {
         return await sock.sendMessage(jid, {
           text: '🌑 *Hipnos só obedece aos donos do bot.*\n\nO livro das sombras 📕 permanece selado aos olhos dos mortais.'
         }, { quoted: msg })
