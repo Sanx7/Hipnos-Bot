@@ -34,9 +34,6 @@ enfrentam o julgamento das sombras."
 🎵 /play <nome da música>
 ➥ Pesquisa e baixa o áudio do YouTube direto no chat.
 
-👑 /dono
-➥ Revela quem são os donos do bot.
-
 ════════════════════
 
 🔮 MENU STICKER (FIGURINHAS)
@@ -60,103 +57,22 @@ enfrentam o julgamento das sombras."
 
 🎲 BRINCADEIRAS
 
-🪙 /moeda (ou /flip)
-➥ Desafia o destino: Cara ou Coroa?
-
-🎲 /dado [lados]
-➥ Rola um dado de 6 lados, ou com quantos lados quiser (ex: /dado 20).
-
-🔮 /escolha opção1, opção2, ...
-➥ O oráculo escolhe uma das opções separadas por vírgula (ex: /escolha café, chá, sonho).
-
-🎰 /roleta
-➥ Gira a roda onírica e marca um membro sorteado do grupo.
-
-💞 /casal
-➥ O oráculo do amor sorteia um casal do grupo e revela a compatibilidade.
-
-🔮 /simounao <pergunta>
-➥ O oráculo dos sonhos responde Sim ou Não (ex: /simounao devo dormir cedo?).
-
-🔢 /numero [min] [max]
-➥ Sorteia um número no intervalo (ex: /numero 10 20). Padrão: 1 a 100.
-
-🃏 /carta
-➥ Sorteia uma carta do baralho dos sonhos.
-
-🏆 /sorteio <prêmio> @user1 @user2
-➥ Sorteia um vencedor entre os marcados (ex: /sorteio de duas passagens aéreas @user1 @user2).
-
-🔮 /8ball <pergunta>
-➥ O orbe do subconsciente responde a sua pergunta (ex: /8ball devo mudar de emprego?).
+🎲 /menu-brincadeiras (ou /brincadeira)
+➥ Abre o pergaminho das brincadeiras e oráculos do sono.
 
 ════════════════════
 
 👑 ADMINISTRAÇÃO
 
-🔓 /abrir
-➥ Abre as portas do grupo.
-
-🔒 /fechar
-➥ Sela o grupo (Apenas admins).
-
-👢 /kick @membro
-➥ Expulsa um mortal do recinto.
-
-🌑 /mute @membro
-➥ Impõe o silêncio eterno no chat.
-
-🌙 /unmute @membro
-➥ Devolve a voz ao silenciado.
-
-☠️ /ban @membro
-➥ Punição máxima: Expulsa e joga na blacklist.
-
-📢 /hidetag [texto]
-➥ Convocação oculta de todas as almas do grupo.
-
-🔗 /linkgp
-➥ Revela o portal (Link de convite) do grupo.
-
-👑 /promover @membro
-➥ Eleva um mortal à administração.
-
-⬇️ /rebaixar @membro
-➥ Rebaixa um administrador de volta à condição de mortal.
-
-👋 /bemvindo (1 ou 0)
-➥ Ativa ou desativa a saudação de novos membros.
-
-☠️ /addblacklist @membro
-➥ Condena uma alma à blacklist eterna.
-
-🕊️ /remblacklist @membro
-➥ Perdoa e liberta um número da blacklist.
+👑 /menu-admin
+➥ Abre o arsenal de moderação: gestão de membros, blacklist e guardiões do limbo.
 
 ════════════════════
 
-🛡️ GUARDIÕES DO LIMBO (ANTIS)
+👑 MENU DONO (SÓ DONO)
 
-⚙️ /soadm
-➥ Alterna o modo somente admin: só admins (e o dono) usam os comandos. Também aceita /soadm 1 (ativa) ou /soadm 0 (desativa).
-
-🎧 /anti-audio (1 ou 0)
-➥ Intercepta e deleta áudios enviados.
-
-📂 /antidoc (1 ou 0)
-➥ Barra e elimina documentos no chat.
-
-📅 /antievento (1 ou 0)
-➥ Cancela e apaga convites de eventos.
-
-🔗 /antilink (1 ou 0)
-➥ Destrói links externos enviados.
-
-💰 /antipay (1 ou 0)
-➥ Bane cobranças materiais e detecções stealth.
-
-👁️ /antistatus (1 ou 0)
-➥ Intercepta e bane marcações invasivas de status externo.
+👑 /menu-dono
+➥ Abre o pergaminho dos soberanos: /dono, /seradm e /soadm.
 
 ════════════════════
 

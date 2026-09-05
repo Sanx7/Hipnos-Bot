@@ -1,6 +1,9 @@
 const fs = require('fs');
 const path = require('path');
 
+// Configuração global do bot (lista de donos + helpers)
+const { OWNER_NUMBERS, limparNumero } = require('../../config');
+
 // Caminho corrigido apontando para comandos/dados
 const BANCO_BLACKLIST = path.join(__dirname, '..', 'dados', 'blacklist.json');
 
@@ -31,11 +34,11 @@ module.exports = {
     try {
       const sender = msg.key.participant || msg.key.remoteJid;
 
-      // Validação do Dono (Apenas números puros)
-      const numeroDoSender = sender.split('@')[0].split(':')[0].replace(/\D/g, '');
-      const SEU_LID = '177060848861240';
-
-      if (numeroDoSender !== SEU_LID) {
+      // 🔒 Permissão: APENAS donos do bot (lista OWNER_NUMBERS do config.js —
+      // mesma verificação usada em /soadm, /dono, /darvip e /servip).
+      // Antes, esta checagem comparava com um ÚNICO LID hardcoded (SEU_LID),
+      // então os demais donos configurados em OWNER_NUMBERS eram barrados.
+      if (!OWNER_NUMBERS.includes(limparNumero(sender))) {
         return await sock.sendMessage(jid, {
           text: '🌑 Hipnos recusa sua invocação... você não possui domínio sobre a lista de sombras.'
         }, { quoted: msg });
@@ -60,12 +63,9 @@ module.exports = {
       }
 
       let listaAtual = lerBlacklist();
-      
-      // Purifica o alvo para ficar APENAS o número puro, igualzinho está salvo no JSON
-      const alvoLimpo = alvo.split('@')[0].split(':')[0].replace(/\D/g, '');
 
-      console.log('REMOVENDO ALVO LIMPO:', alvoLimpo);
-      console.log('LISTA ANTES DE REMOVER:', listaAtual);
+      // Purifica o alvo para ficar APENAS o número puro, igualzinho está salvo no JSON
+      const alvoLimpo = limparNumero(alvo);
 
       // Procura a posição exata do número puro na lista
       const index = listaAtual.indexOf(alvoLimpo);
@@ -78,8 +78,7 @@ module.exports = {
 
       // Remove o número da lista usando o index encontrado
       listaAtual.splice(index, 1);
-      
-      console.log('LISTA APÓS REMOVER:', listaAtual);
+
       salvarBlacklist(listaAtual);
 
       return await sock.sendMessage(jid, {

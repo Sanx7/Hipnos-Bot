@@ -1,6 +1,9 @@
 const fs = require('fs');
 const path = require('path');
 
+// Configuração global do bot (lista de donos + helpers)
+const { OWNER_NUMBERS, limparNumero } = require('../../config');
+
 // Caminho atualizado apontando para a pasta 'dados'
 const BANCO_BLACKLIST = path.join(__dirname, '..', 'dados', 'blacklist.json');
 
@@ -39,11 +42,11 @@ module.exports = {
     try {
       const sender = msg.key.participant || msg.key.remoteJid;
 
-      // Extrai apenas os números purificados do LID ou do JID
-      const numeroDoSender = sender.split('@')[0].split(':')[0].replace(/\D/g, '');
-      const SEU_LID = '177060848861240';
-
-      if (numeroDoSender !== SEU_LID) {
+      // 🔒 Permissão: APENAS donos do bot (lista OWNER_NUMBERS do config.js —
+      // mesma verificação usada em /soadm, /dono, /darvip e /servip).
+      // Antes, esta checagem comparava com um ÚNICO LID hardcoded (SEU_LID),
+      // então os demais donos configurados em OWNER_NUMBERS eram barrados.
+      if (!OWNER_NUMBERS.includes(limparNumero(sender))) {
         return await sock.sendMessage(jid, {
           text: '🌑 Hipnos recusa sua invocação... você não possui domínio sobre a lista de sombras.'
         }, { quoted: msg });
@@ -68,11 +71,7 @@ module.exports = {
       }
 
       let listaAtual = lerBlacklist();
-      const alvoLimpo = alvo.split('@')[0].split(':')[0].replace(/\D/g, '');
-
-      console.log('BANCO_BLACKLIST:', BANCO_BLACKLIST);
-      console.log('ALVO LIMPO:', alvoLimpo);
-      console.log('LISTA ATUAL:', listaAtual);
+      const alvoLimpo = limparNumero(alvo);
 
       if (listaAtual.includes(alvoLimpo)) {
         return await sock.sendMessage(jid, {
@@ -81,8 +80,7 @@ module.exports = {
       }
 
       listaAtual.push(alvoLimpo);
-      console.log('LISTA APÓS ADICIONAR:', listaAtual);
-      
+
       salvarBlacklist(listaAtual);
 
       // Tenta remover o alvo do grupo atual
