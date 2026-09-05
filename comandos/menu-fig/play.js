@@ -74,38 +74,120 @@ async function responder(sock, jid, msg, texto) {
 // Executa o binário real do yt-dlp com timeout + cancelamento garantido.
 // Retorna a saída bruta (stdout) do processo.
 async function executarYtDlp(url, flags, timeoutMs) {
-  const subprocess = youtubedl.exec(url, flags, {
-    windowsHide: true,
-    // Redes de segurança NATIVAS do spawn: se o processo travar, ele é
-    // morto sozinho mesmo que o timer abaixo falhe
-    timeout: timeoutMs + 10000,
-    killSignal: 'SIGKILL'
-  })
+  // Cookies: o --cookies NUNCA aponta para o arquivo ORIGINAL (que no Render
+  // é um Secret File em filesystem SOMENTE LEITURA). Entregamos ao yt-dlp uma
+  // CÓPIA TEMPORÁRIA e gravável criada agora — ele pode regravar à vontade na
+  // cópia, e ela é apagada no finally abaixo (ver bloco de cookies no topo).
+  const cookiesTemporario = criarCookiesTemporario()
+  if (cookiesTemporario) flags = { ...flags, cookies: cookiesTemporario }
 
-  let expirou = false
-  const timer = setTimeout(() => {
-    expirou = true
+  // try/finally EXTERNO: apaga a cópia temporária dos cookies em QUALQUER
+  // cenário — sucesso, erro do yt-dlp, timeout ou exceção síncrona do wrapper.
+  try {
+    const subprocess = youtubedl.exec(url, flags, {
+      windowsHide: true,
+      // Redes de segurança NATIVAS do spawn: se o processo travar, ele é
+      // morto sozinho mesmo que o timer abaixo falhe
+      timeout: timeoutMs + 10000,
+      killSignal: 'SIGKILL'
+    })
+
+    let expirou = false
+    const timer = setTimeout(() => {
+      expirou = true
+      try {
+        subprocess.kill('SIGKILL')
+      } catch (errKill) { /* o processo já morreu */ }
+    }, timeoutMs)
+
     try {
-      subprocess.kill('SIGKILL')
-    } catch (errKill) { /* o processo já morreu */ }
-  }, timeoutMs)
+      const processo = await subprocess
+      // O await do wrapper (tinyspawn) devolve o PROCESSO; a saída do yt-dlp
+      // fica na propriedade .stdout (string), preenchida quando ele termina.
+      if (processo && typeof processo.stdout === 'string') return processo.stdout
+      return processo
+    } catch (err) {
+      if (expirou) {
+        throw new ErroPlay(
+          '⏱️ O download demorou demais e foi cancelado. Tente uma música mais leve ou tente novamente em instantes.',
+          'timeout do download'
+        )
+      }
+      throw err
+    } finally {
+      clearTimeout(timer)
+    }
+  } finally {
+    // ✅ Limpeza SEMPRE executada: não deixa cópia de cookies acumulando em /tmp
+    if (cookiesTemporario) apagarCookiesTemporario(cookiesTemporario)
+  }
+}
+
+// ------------------------------------------------------------
+// 🍪 Cookies do YouTube — modo LEITURA GARANTIDO (fix do crash no Render)
+// ------------------------------------------------------------
+// A documentação oficial do yt-dlp define a opção assim:
+//   "--cookies FILE   Netscape formatted file to read cookies from and dump
+//                     cookie jar in"   (yt_dlp/options.py)
+// Ou seja: o yt-dlp não só LÊ o arquivo de cookies como REGRAVA a cookie jar
+// nele ao final de cada execução (YoutubeDL.close() → save_cookies() →
+// cookiejar.save()) para persistir cookies de sessão.
+//
+// No Render, os Secret Files ficam em /etc/secrets/ montados em um filesystem
+// SOMENTE LEITURA. A regravação então estoura:
+//   OSError: [Errno 30] Read-only file system: '/etc/secrets/cookies.txt'
+// e derruba o /play (mesmo a LEITURA funcionando perfeitamente).
+//
+// Não existe flag para "ler cookies de um arquivo sem regravar" — o único
+// --no-cookies desliga o uso de cookies inteiro, e o --cookies-from-browser
+// lê do banco do navegador (não existe em servidor headless). A solução
+// correta é: NUNCA apontar o --cookies para o arquivo ORIGINAL. Antes de
+// CADA execução do yt-dlp copiamos o cookies.txt de PLAY_COOKIES_PATH (ou do
+// fallback local cookies.txt da raiz) para um arquivo TEMPORÁRIO e GRAVÁVEL
+// em os.tmpdir() (no Linux do Render = /tmp), entregamos a cópia ao yt-dlp
+// via --cookies e apagamos a cópia no finally. Funciona igual no Render e
+// localmente, e não acumula arquivos a cada chamada do /play.
+// ------------------------------------------------------------
+let contadorCookiesTemp = 0
+
+// Caminho "fonte" dos cookies: PLAY_COOKIES_PATH ou cookies.txt na raiz.
+function caminhoCookiesFonte() {
+  const caminhoCookies = (process.env.PLAY_COOKIES_PATH || '').trim()
+  return caminhoCookies || path.join(process.cwd(), 'cookies.txt')
+}
+
+// Cria uma CÓPIA TEMPORÁRIA e gravável do cookies.txt e devolve o caminho.
+// Retorna null quando não há cookies para copiar ou a cópia falhou — nesses
+// casos o /play segue SEM cookies, como antes (nunca trava por causa disso).
+function criarCookiesTemporario() {
+  const fonte = caminhoCookiesFonte()
+  if (!fs.existsSync(fonte)) return null
+
+  contadorCookiesTemp += 1
+  const destino = path.join(
+    os.tmpdir(),
+    `play_cookies_${Date.now()}_${process.pid}_${contadorCookiesTemp}.txt`
+  )
 
   try {
-    const processo = await subprocess
-    // O await do wrapper (tinyspawn) devolve o PROCESSO; a saída do yt-dlp
-    // fica na propriedade .stdout (string), preenchida quando ele termina.
-    if (processo && typeof processo.stdout === 'string') return processo.stdout
-    return processo
+    fs.copyFileSync(fonte, destino)
+    // Garante que a cópia é gravável mesmo se a origem tiver permissões
+    // restritas (a cópia nunca herda atributo "read-only").
+    try { fs.chmodSync(destino, 0o600) } catch (errChmod) { /* sem suporte → ok */ }
+    return destino
   } catch (err) {
-    if (expirou) {
-      throw new ErroPlay(
-        '⏱️ O download demorou demais e foi cancelado. Tente uma música mais leve ou tente novamente em instantes.',
-        'timeout do download'
-      )
-    }
-    throw err
-  } finally {
-    clearTimeout(timer)
+    console.error('[play] Não consegui copiar cookies.txt para área temporária, seguindo sem cookies:', err?.message)
+    return null
+  }
+}
+
+// Apaga uma cópia temporária de cookies sem NUNCA estourar erro
+function apagarCookiesTemporario(caminho) {
+  if (!caminho) return
+  try {
+    fs.unlinkSync(caminho)
+  } catch (err) {
+    // Já foi apagada (ou nunca chegou a ser criada) — tanto faz.
   }
 }
 
@@ -141,20 +223,11 @@ function flagsBase(extra = {}) {
     flags.remoteComponents = 'ejs:github'
   }
 
-  // Cookies do YouTube (formato Netscape) — contorna o bloqueio
-  // "Sign in to confirm you're not a bot" em IPs de datacenter (ex.: Render).
-  // O yt-dlp entende o cookies.txt nativamente (sem precisar converter nada).
-  //
-  // Prioridade:
-  //   1. Variável PLAY_COOKIES_PATH (caminho absoluto; no Render aponta para
-  //      /etc/secrets/cookies.txt — Secret File subido manualmente no painel)
-  //   2. Fallback: cookies.txt na raiz do projeto (uso local)
-  // Se nenhum existir, segue sem cookies normalmente (não trava, não dá erro).
-  const caminhoCookies = (process.env.PLAY_COOKIES_PATH || '').trim()
-  const cookiesPath = caminhoCookies
-    ? caminhoCookies
-    : path.join(process.cwd(), 'cookies.txt')
-  if (fs.existsSync(cookiesPath)) flags.cookies = cookiesPath
+  // Cookies NÃO entram mais por aqui: o --cookies é montado dentro de
+  // executarYtDlp() usando uma CÓPIA TEMPORÁRIA GRAVÁVEL do cookies.txt
+  // (ver bloco "Cookies do YouTube — modo LEITURA GARANTIDO" acima). Isso
+  // evita o OSError "Read-only file system" quando o arquivo fonte é um
+  // Secret File somente leitura (ex.: /etc/secrets/cookies.txt no Render).
 
   return flags
 }
@@ -219,9 +292,16 @@ function limparTemporarios(pastaTemp, estampa) {
   }
 }
 
+// Helpers internos também expostos para permitir testes locais do fluxo de
+// cookies (o carregador de comandos usa apenas nome/descricao/executar).
 module.exports = {
   nome: 'play',
   descricao: 'Pesquisa e baixa uma música do YouTube usando o binário real do yt-dlp (com o Node.js resolvendo os desafios JS do YouTube).',
+  _caminhoCookiesFonte: caminhoCookiesFonte,
+  _criarCookiesTemporario: criarCookiesTemporario,
+  _apagarCookiesTemporario: apagarCookiesTemporario,
+  _executarYtDlp: executarYtDlp,
+  _flagsBase: flagsBase,
   async executar(sock, jid, msg, texto) {
     let estampaTemp = null
 
