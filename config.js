@@ -132,6 +132,16 @@ function formatarNumero(digitos) {
   return `+${digitos}`
 }
 
+// 🔮 RODAPÉ PADRÃO DOS MENUS — fonte ÚNICA da assinatura do bot.
+// Usado por /menu, /menu-vip, /menu-dono, /menu-admin e /menu-brincadeiras:
+// para trocar o número do criador ou a versão, edite SÓ esta constante
+// (evita rodapés dessincronizados espalhados pelos arquivos de menu).
+const RODAPE_MENU = [
+  '🌙 Hipnos Bot v1.0.0',
+  '🔮 Criador: Sanx7 (+63 948 392 3601)',
+  '💤 Guardião Supremo dos Sonhos'
+].join('\n')
+
 module.exports = {
   OWNER_NUMBERS,
   AVISAR_BLOQUEIO,
@@ -139,5 +149,6 @@ module.exports = {
   acharParticipante,
   ehAdminDoGrupo,
   getDonos,
-  formatarNumero
+  formatarNumero,
+  RODAPE_MENU
 }

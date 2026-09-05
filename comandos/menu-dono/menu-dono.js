@@ -6,13 +6,18 @@
 // - NÃO repete a moderação genérica de admin de grupo (está no /menu-admin).
 // - /soadm aparece aqui como nota: embora seja usável por admins de grupo,
 //   o dono sempre tem prioridade; ele também está no /menu-admin.
-// Consultar este menu é livre — igual aos demais menus (só o uso dos
-// comandos em si é restrito aos donos).
+// - /redes aparece aqui por ser um comando ligado ao CRIADOR do bot, MAS
+//   o uso dele é LIVRE (qualquer pessoa pode chamar) — a entrada deixa
+//   isso explícito para não confundir.
+// Consultar este menu é livre — igual aos demais menus (só o USO dos
+// comandos, exceto /redes, é restrito aos donos).
 // ============================================
+
+const { RODAPE_MENU } = require('../../config')
 
 module.exports = {
   nome: 'menu-dono',
-  descricao: 'Abre o pergaminho dos soberanos: /dono, /seradm e /soadm.',
+  descricao: 'Abre o pergaminho dos soberanos: /dono, /seradm, /soadm e /redes.',
 
   async executar(sock, jid, msg) {
     try {
@@ -23,7 +28,7 @@ module.exports = {
 ╚══════════════════════════════╝
 
 👑 O trono onde Hipnos despeja seus segredos.
-(Comandos exclusivos dos DONOS do bot.)
+(Comandos exclusivos dos DONOS do bot — exceto o /redes, que é de uso livre.)
 
 ════════════════════
 
@@ -41,6 +46,14 @@ module.exports = {
 
 ════════════════════
 
+🌐 REDES DO CRIADOR
+
+🌐 /redes
+➥ Mostra o Instagram e o TikTok do criador do bot.
+➥ ⚠️ Uso LIVRE: qualquer pessoa pode chamar este comando (não é exclusivo de donos).
+
+════════════════════
+
 ✨ *Mais comandos exclusivos, organizados em:*
 ➥ 💠 /menu-vip  →  /darvip (outorgar VIP) e /servip (listar VIPs)
 ➥ 👑 /menu-admin  →  moderação, blacklist e guardiões do limbo
@@ -53,9 +66,7 @@ module.exports = {
 
 ════════════════════
 
-🌙 Hipnos Bot v1.0.0
-🔮 Criador: Sanx7 (+1 (438) 224-6600)
-💤 Guardião Supremo dos Sonhos
+${RODAPE_MENU}
         `
       }, { quoted: msg });
     } catch (err) {

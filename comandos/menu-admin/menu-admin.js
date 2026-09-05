@@ -6,6 +6,8 @@
 // principal e do /menu-vip.
 // ============================================
 
+const { RODAPE_MENU } = require('../../config')
+
 module.exports = {
   nome: 'menu-admin',
   descricao: 'Abre o pergaminho da administração: moderação, blacklist e guardiões do limbo.',
@@ -115,9 +117,7 @@ module.exports = {
 
 ════════════════════
 
-🌙 Hipnos Bot v1.0.0
-🔮 Criador: Sanx7 (+1 (438) 224-6600)
-💤 Guardião Supremo dos Sonhos
+${RODAPE_MENU}
         `
       }, { quoted: msg });
     } catch (err) {

@@ -8,6 +8,8 @@
 // Alias: /brincadeira (ver brincadeira.js, mesmo padrão do /flip -> /moeda).
 // ============================================
 
+const { RODAPE_MENU } = require('../../config')
+
 module.exports = {
   nome: 'menu-brincadeiras',
   descricao: 'Abre o pergaminho das brincadeiras: sorteios, jogos e oráculos de Hipnos.',
@@ -32,6 +34,9 @@ module.exports = {
 
 🎰 /roleta
 ➥ Gira a roda onírica e marca um membro sorteado do grupo.
+
+🔫 /roletarussa
+➥ A roleta do limbo: sorteia um mortal comum ao acaso e o expulsa do grupo (Admins/Donos do bot).
 
 💞 /casal
 ➥ O oráculo do amor sorteia um casal do grupo e revela a compatibilidade.
@@ -74,9 +79,7 @@ module.exports = {
 
 ════════════════════
 
-🌙 Hipnos Bot v1.0.0
-🔮 Criador: Sanx7 (+1 (438) 224-6600)
-💤 Guardião Supremo dos Sonhos
+${RODAPE_MENU}
         `
       }, { quoted: msg });
     } catch (err) {

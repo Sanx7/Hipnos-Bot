@@ -7,6 +7,8 @@
 // mas consultar este menu é livre — igual ao /menu geral.
 // ============================================
 
+const { RODAPE_MENU } = require('../../config')
+
 module.exports = {
   nome: "menu-vip",
 
@@ -41,9 +43,7 @@ module.exports = {
 
 ════════════════════
 
-🌙 Hipnos Bot v1.0.0
-🔮 Criador: Sanx7 (+1 (438) 224-6600)
-💤 Guardião Supremo dos Sonhos
+${RODAPE_MENU}
         `
       }, { quoted: msg });
     } catch (err) {
