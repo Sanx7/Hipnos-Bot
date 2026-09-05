@@ -201,11 +201,12 @@ function flagsBase(extra = {}) {
     // no Windows local e em deploys tipo Render (onde não existe deno)
     noJsRuntimes: true,
     jsRuntimes: 'node',
-    // Cliente Android do YouTube: contorna o bloqueio "Sign in to confirm
-    // you're not a bot" aplicado a IPs de datacenter (ex.: Render). O
-    // cliente android fala direto com a API interna (youtubei) e não passa
-    // pelo muro anti-bot do cliente web — sem precisar de cookies/login.
-    extractorArgs: ['youtube:player_client=android'],
+    // NOTA (cliente): o cliente Android do YouTube (player_client=android)
+    // foi REMOVIDO porque ele NÃO suporta cookies de conta — o YouTube rejeita
+    // cookies nesse tipo de cliente no nível da própria API, o que anulava o
+    // cookies.txt o tempo todo. Deixando o yt-dlp usar o cliente padrão (Web),
+    // os cookies (cópia temporária gravável injetada em executarYtDlp) passam
+    // a valer de verdade contra o bloqueio "Sign in to confirm you're not a bot".
     // Rede: nunca trava sem resposta
     socketTimeout: 30,
     retries: 3,

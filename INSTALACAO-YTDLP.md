@@ -121,19 +121,25 @@ validado pelos outros comandos que enviam mídia.
 
 ### `Sign in to confirm you're not a bot` (IPs de datacenter, ex.: Render)
 - O YouTube bloqueia sessões anônimas vindas de IPs de datacenter no cliente web.
-- O /play já força `--extractor-args youtube:player_client=android` (o cliente
-  oficial do app Android fala direto com a API interna `youtubei` e normalmente
-  **não** passa pelo muro anti-bot do cliente web) — tanto na busca (`ytsearch1:`)
-  quanto no download.
-- Observação: com o cliente android o YouTube pode aplicar o experimento SABR e
-  oferecer menos formatos (ex.: só o formato 18, 360p progressivo). Para áudio
-  MP3 isso não é problema — o ffmpeg extrai o áudio normalmente.
-- Se mesmo assim o erro persistir no Render, o plano B é autenticar com cookies:
+- O /play usou por um tempo `--extractor-args youtube:player_client=android`, mas o
+  cliente Android **não suporta cookies de conta** (o YouTube descarta cookies nesse
+  tipo de cliente no nível da própria API), então o cookies.txt era ignorado o tempo
+  todo. Por isso o /play agora usa o **cliente padrão do yt-dlp (Web)**, que é
+  compatível com cookies — a autenticação do bloqueio é feita pelo cookies.txt
+  (via cópia temporária gravável, ver a seção de cookies deste README/deploy).
+- Se o erro "Sign in to confirm you're not a bot" persistir no Render, o caminho é
+  autenticar com cookies atualizados:
   1. Exporte o `cookies.txt` do YouTube (janela anônima → `youtube.com/robots.txt`
      → extensão "Get cookies.txt LOCALLY" → feche a janela logo após exportar).
   2. No Render: **Settings → Secret Files** → adicione o arquivo com caminho
-     `/etc/secrets/cookies.txt`.
-  3. Ajustar o código para ler esse caminho (variável `PLAY_COOKIES_PATH`).
+     `/etc/secrets/cookies.txt` (variável `PLAY_COOKIES_PATH`).
+  3. O /play copia esse arquivo para uma área temporária gravável antes de cada
+     execução do yt-dlp e usa a cópia no `--cookies` (o arquivo original em
+     `/etc/secrets/` é somente leitura e nunca é modificado).
+- ⚠️ Se o erro mudar de "Sign in to confirm" para algo do tipo "Requested format is
+  not available" / problemas de formato/PO token, é uma pista de um problema mais
+  estrutural (geração de token de autenticação do YouTube que o yt-dlp sozinho não
+  consegue fazer) — não é o mesmo bloqueio do bot check.
 
 ## Manutenção
 
