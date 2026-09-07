@@ -14,6 +14,7 @@
 // Uso LIVRE: qualquer pessoa pode chamar /perfil (sem checagem de dono/admin).
 // ============================================
 
+const { normalizeMessageContent } = require('@whiskeysockets/baileys')
 const { formatarNumero, acharParticipante, RODAPE_MENU } = require('../config')
 const { buscarEstatisticasUsuario, normalizarId } = require('../database')
 
@@ -32,8 +33,8 @@ function secaoEstatisticas(estatisticas, bancoIndisponivel, emGrupo) {
   if (estatisticas) {
     const palavra = estatisticas.total > 1 ? 'mensagens' : 'mensagem'
     return (
-      `🏆 Posição no ranking: *#${estatisticas.posicao} de ${estatisticas.totalUsuarios} ranqueados*\n` +
-      `💬 Mensagens registradas: *${estatisticas.total}* ${palavra}`
+      `🏆 Posição no ranking: *#${estatisticas.posicao ?? '—'} de ${estatisticas.totalUsuarios ?? '—'} ranqueados*\n` +
+      `💬 Mensagens registradas: *${estatisticas.total ?? 0}* ${palavra}`
     )
   }
 
@@ -54,7 +55,11 @@ module.exports = {
       const sender = msg.key.participant || msg.key.remoteJid
 
       // 1) Alvo: @menção (se houver) OU o próprio autor da mensagem
-      const contextInfo = msg.message?.extendedTextMessage?.contextInfo
+      // ⚠️ normalizeMessageContent desembrulha ephemeralMessage (grupos com
+      // mensagens temporárias), garantindo que o contextInfo da menção seja
+      // encontrado em qualquer formato de mensagem.
+      const conteudoMsg = normalizeMessageContent(msg.message) || {}
+      const contextInfo = conteudoMsg.extendedTextMessage?.contextInfo
       const alvoJid = contextInfo?.mentionedJid?.[0] || sender
 
       // 2) Metadados do grupo (quando em grupo): resolve phoneNumber (LID) e cargo
@@ -161,16 +166,29 @@ module.exports = {
       const card = linhas.join('\n')
 
       // 9) Envia: com a foto (imagem + legenda) ou só o texto
-      if (fotoUrl) {
-        await sock.sendMessage(jid, { image: { url: fotoUrl }, caption: card }, { quoted: msg })
-      } else {
-        await sock.sendMessage(jid, { text: card }, { quoted: msg })
+      // ⚠️ O envio da imagem pode falhar (URL da foto expirou, CDN fora,
+      // rede instável) — nesse caso cai para o card em TEXTO PURO em vez de
+      // estourar um erro, e o envio do texto nunca pode falhar por si só
+      // (.catch()), senão o erro vaza do comando e derruba o listener.
+      try {
+        if (fotoUrl) {
+          await sock.sendMessage(jid, { image: { url: fotoUrl }, caption: card }, { quoted: msg })
+        } else {
+          await sock.sendMessage(jid, { text: card }, { quoted: msg })
+        }
+      } catch (erroEnvio) {
+        console.error('[perfil] Envio do card com foto falhou, caindo para texto puro:', erroEnvio?.message || erroEnvio)
+        await sock.sendMessage(jid, { text: card }, { quoted: msg }).catch(() => {})
       }
     } catch (err) {
-      console.error('[perfil] Erro inesperado:', err?.message || err)
+      console.error('[perfil] Erro inesperado:', err)
+      // ⚠️ .catch(() => {}): a falha que chegou AQUI já significa que algo
+      // deu errado no comando — se o envio da mensagem de erro também
+      // falhar (é exatamente o cenário "TODO envio falhando"), a exceção
+      // não pode vazar do executar() nem para o nível de cima.
       await sock.sendMessage(jid, {
         text: '⛔ As sombras não conseguiram revelar este perfil... Tente novamente.'
-      }, { quoted: msg })
+      }, { quoted: msg }).catch(() => {})
     }
   }
 };

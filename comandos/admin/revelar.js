@@ -1,4 +1,8 @@
-const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
+const {
+  downloadMediaMessage,
+  normalizeMessageContent,
+  getContentType
+} = require('@whiskeysockets/baileys');
 const { exec } = require('child_process');
 const fs = require('fs');
 const path = require('path');
@@ -19,48 +23,50 @@ module.exports = {
     let caminhoOutput = null;
 
     try {
-      // 1. Identificar se a mensagem respondida (quoted) contém visualização única
-      const mQuoted = msg.message.extendedTextMessage?.contextInfo?.quotedMessage;
-      
+      // 1. Localizar a mensagem citada (quoted)
+      // ⚠️ A PRÓPRIA mensagem de resposta pode vir embrulhada em
+      // ephemeralMessage quando o grupo tem mensagens temporárias ativas,
+      // o que esconde o extendedTextMessage/contextInfo. O
+      // normalizeMessageContent (da própria Baileys) desembrulha todas
+      // essas camadas de forma segura.
+      const conteudoMsg = normalizeMessageContent(msg.message) || {};
+      const contexto = conteudoMsg.extendedTextMessage?.contextInfo;
+      const mQuoted = contexto?.quotedMessage;
+
       if (!mQuoted) {
         return await sock.sendMessage(jid, { 
           text: '❌ O ritual falhou... Você precisa responder (marcar) a uma imagem ou vídeo de visualização única.' 
-        }, { quoted: msg });
+        }, { quoted: msg }).catch(() => {});
       }
 
-      // Procura a estrutura interna de viewOnce (visualização única) do WhatsApp
-      const tipoMensagem = Object.keys(mQuoted)[0];
-      let dadosMidia = null;
+      // 2. Identificar a mídia de visualização única dentro do quoted
+      // ⚠️ A mensagem citada pode chegar sob QUALQUER embalagem do
+      // protocolo: viewOnceMessage (v1), viewOnceMessageV2,
+      // viewOnceMessageV2Extension (WhatsApp mais novo), ephemeralMessage,
+      // editedMessage — ou direto como imageMessage/videoMessage.
+      // Normalizar UMA vez cobre todas. (O código antigo olhava só a
+      // primeira chave do objeto: quebrava com TypeError em quoted
+      // malformado (message: null) e não reconhecia as embalagens novas.)
+      const conteudoQuoted = normalizeMessageContent(mQuoted) || {};
+      const tipoConteudo = getContentType(conteudoQuoted);
+
       let ehImagem = false;
       let ehVideo = false;
 
-      if (tipoMensagem === 'viewOnceMessage' || tipoMensagem === 'viewOnceMessageV2') {
-        const subMensagem = mQuoted[tipoMensagem].message;
-        const subTipo = Object.keys(subMensagem)[0];
-
-        if (subTipo === 'imageMessage') {
-          dadosMidia = subMensagem.imageMessage;
-          ehImagem = true;
-        } else if (subTipo === 'videoMessage') {
-          dadosMidia = subMensagem.videoMessage;
-          ehVideo = true;
-        }
-      } else if (tipoMensagem === 'imageMessage') {
-        dadosMidia = mQuoted.imageMessage;
+      if (tipoConteudo === 'imageMessage' && typeof conteudoQuoted.imageMessage === 'object') {
         ehImagem = true;
-      } else if (tipoMensagem === 'videoMessage') {
-        dadosMidia = mQuoted.videoMessage;
+      } else if (tipoConteudo === 'videoMessage' && typeof conteudoQuoted.videoMessage === 'object') {
         ehVideo = true;
       }
 
-      if (!dadosMidia) {
+      if (!ehImagem && !ehVideo) {
         return await sock.sendMessage(jid, { 
-          text: '❌ Hipnos não encontrou nenhuma ilusão ou mídia efêmera nesta mensagem para revelar.' 
-        }, { quoted: msg });
+          text: '❌ Hipnos não encontrou nenhuma mídia de visualização única nesta mensagem. Responda (marque) uma foto ou vídeo de visualização única.' 
+        }, { quoted: msg }).catch(() => {});
       }
 
       // Reage para indicar processamento
-      await sock.sendMessage(jid, { react: { text: '⏳', key: msg.key } });
+      await sock.sendMessage(jid, { react: { text: '⏳', key: msg.key } }).catch(() => {});
 
       // 2. Definir caminhos temporários
       const idUnico = Math.random().toString(36).substring(2, 10);
@@ -73,16 +79,17 @@ module.exports = {
       caminhoInput = path.join(pastaTemp, `in_${idUnico}`);
       caminhoOutput = path.join(pastaTemp, `out_${idUnico}.${ehImagem ? 'jpg' : 'mp4'}`);
 
-      // 3. Baixar o fluxo criptografado da mídia do WhatsApp
-      const tipoDownload = ehImagem ? 'image' : 'video';
-      const stream = await downloadContentFromMessage(dadosMidia, tipoDownload);
-      let buffer = Buffer.from([]);
-      
-      for await (const chunk of stream) {
-        buffer = Buffer.concat([buffer, chunk]);
-        if (buffer.length > 25 * 1024 * 1024) {
-          throw new Error('A mídia excede o limite de 25MB suportado.');
-        }
+      // 3. Baixar a mídia da mensagem citada
+      // ⚠️ O downloadMediaMessage exige o objeto de MENSAGEM COMPLETO
+      // ({ key, message }) — não só o conteúdo da mídia. Ele extrai,
+      // normaliza (desembrulha a view-once) e localiza o nó de mídia
+      // internamente antes de baixar. Tudo com await: o reenvio só
+      // acontece DEPOIS do download terminar.
+      const mensagemAlvo = { key: msg.key, message: mQuoted };
+      const buffer = await downloadMediaMessage(mensagemAlvo, 'buffer', {});
+
+      if (buffer.length > 25 * 1024 * 1024) {
+        throw new Error('A mídia excede o limite de 25MB suportado.');
       }
 
       if (buffer.length === 0) {
@@ -111,7 +118,7 @@ module.exports = {
       });
 
       // 5. Enviar de volta ao grupo sem as restrições
-      const legenda = `👁️‍🗨️ **VISÃO REVELADA** 👁️‍🗨️\n\n🪐 Hipnos materializou os dados que estavam prestes a sumir no limbo.`;
+      const legenda = `👁️‍🗨️ *VISÃO REVELADA* 👁️‍🗨️\n\n🪐 Hipnos materializou os dados que estavam prestes a sumir no limbo.`;
 
       if (ehImagem) {
         await sock.sendMessage(jid, { 
@@ -126,18 +133,30 @@ module.exports = {
       }
 
       // Reage com sucesso
-      await sock.sendMessage(jid, { react: { text: '✅', key: msg.key } });
+      await sock.sendMessage(jid, { react: { text: '✅', key: msg.key } }).catch(() => {});
 
     } catch (err) {
       console.error('Erro ao executar o comando revelar:', err);
       const detalheExtra = err?.mensagemFfmpeg ? `\n\n📎 Detalhe: ${err.mensagemFfmpeg}` : '';
+      // ⚠️ O .catch(() => {}) impede que uma falha ao ENVIAR a própria
+      // mensagem de erro (rede, rate limit) vaze do comando — era um dos
+      // vetores que derrubavam o bot.
       await sock.sendMessage(jid, { 
         text: `❌ Ocorreu um erro ao quebrar o feitiço da visualização única. Certifique-se de que o servidor possui o FFmpeg instalado.${detalheExtra}`
-      }, { quoted: msg });
+      }, { quoted: msg }).catch(() => {});
     } finally {
-      // Limpeza absoluta dos arquivos para não entupir o servidor
-      if (caminhoInput && fs.existsSync(caminhoInput)) fs.unlinkSync(caminhoInput);
-      if (caminhoOutput && fs.existsSync(caminhoOutput)) fs.unlinkSync(caminhoOutput);
+      // Limpeza tolerante dos arquivos temporários: unlinkSync pode falhar
+      // (EPERM/EBUSY no Windows, antivírus, handle aberto) e esse erro NUNCA
+      // pode vazar do finally — era outro vetor de crash.
+      for (const caminho of [caminhoInput, caminhoOutput]) {
+        if (caminho && fs.existsSync(caminho)) {
+          try {
+            fs.unlinkSync(caminho);
+          } catch (errLimpeza) {
+            console.error('⚠️ revelar: falha ao apagar temporário', caminho, errLimpeza?.message);
+          }
+        }
+      }
     }
   }
 };

@@ -1,3 +1,19 @@
+// ============================================================
+// ⚠️ REDE DE SEGURANÇA DO PROCESSO — o mais cedo possível!
+// ============================================================
+// Registrados ANTES de qualquer outro require/lógica rodar: qualquer erro
+// que vaze para o nível do processo é apenas LOGADO — nenhum dos dois
+// handlers chama process.exit(); o bot permanece vivo (evita reescanear o
+// QR Code) e os try/catch dos níveis inferiores continuam valendo.
+process.on('uncaughtException', (erro) => {
+  console.error('⚠️ Exceção não capturada (processo mantido vivo):', erro)
+})
+
+process.on('unhandledRejection', (motivo, promise) => {
+  console.error('⚠️ Promise rejeitada sem tratamento (processo mantido vivo):', motivo)
+  console.error('   ↳ Origem da promise:', promise)
+})
+
 const {
   default: makeWASocket,
   useMultiFileAuthState,
@@ -19,19 +35,6 @@ const { registrarMensagem } = require('./database')
 // - limparNumero / ehAdminDoGrupo / ehDonoDoBot: helpers p/ verificar admin
 //   de grupo e dono do bot (ehDonoDoBot resolve o LID do sender nos metadados)
 const { OWNER_NUMBERS, AVISAR_BLOQUEIO, limparNumero, ehAdminDoGrupo, ehDonoDoBot } = require('./config')
-
-// ====================
-// REDE DE SEGURANÇA DO PROCESSO
-// ====================
-// Impede que qualquer erro inesperado (fora dos try/catch dos handlers)
-// derrube o processo inteiro — o que forçaria escanear o QR Code de novo.
-process.on('uncaughtException', (err) => {
-  console.error('⚠️ Exceção não capturada (processo mantido vivo):', err)
-})
-
-process.on('unhandledRejection', (reason) => {
-  console.error('⚠️ Promise rejeitada sem tratamento (processo mantido vivo):', reason)
-})
 
 // ====================
 // CONFIGURAÇÃO DO EXPRESS (PARA O RENDER)
@@ -406,11 +409,19 @@ async function startBot() {
 
       // 🛡️ ISOLAMENTO DE ERROS: nenhum comando pode derrubar o listener
       // (messages.upsert) nem a conexão do Baileys com o WhatsApp.
-      // Cada comando deve tratar os próprios erros internamente; este
-      // .catch() é a última linha de defesa para rejeições que escaparem.
-      await Promise.resolve(comando.executar(sock, jid, msg, text)).catch((err) => {
-        console.error('❌ Erro não tratado dentro do comando (contido pelo isolation guard):', err)
-      })
+      // A chamada de CADA comando é envolvida em try/catch: um erro dentro
+      // de UM comando específico é apenas logado, o usuário recebe um aviso
+      // no chat e o bot segue rodando normalmente. O .catch() extra na
+      // mensagem de erro garante que nem a própria notificação de falha
+      // consiga vazar (rede fora, rate limit, etc.).
+      try {
+        await comando.executar(sock, jid, msg, text)
+      } catch (erro) {
+        console.error('❌ Erro no comando:', erro)
+        await sock.sendMessage(jid, {
+          text: '❌ Ocorreu um erro ao executar esse comando.'
+        }, { quoted: msg }).catch(() => {})
+      }
 
     } catch (err) {
       console.log('❌ Erro:')
