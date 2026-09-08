@@ -32,17 +32,28 @@
 //         um Binary — que o conversor da própria mongo-baileys transforma
 //         de volta no Buffer EXATO, byte a byte.
 //
-//    c) PRIMITIVO/ARRAY como valor (lib/Signal/lid-mapping.js:69-75):
+//    c) PRIMITIVO como valor (lib/Signal/lid-mapping.js:69-75):
 //         keys.set({ 'lid-mapping': { [telefone]: lidUser,
 //                                     [lidUser+'_reverse']: telefone } })
 //       → valores são STRINGS puras (números de telefone ↔ LID), gravados
 //         EM MASSA na sincronização logo após o QR. $set: "554184062975"
 //         derruba o servidor com "Modifiers operate on fields but we found
-//         type string instead" — e como a mongo-baileys engole o erro, o
+//         type string instead" — e como la mongo-baileys engole o erro, o
 //         mapeamento nunca persiste e a Baileys tenta gravar de novo a cada
-//         evento: o LOOP infinito de erros pós-QR. Fix: guardar o valor
-//         num campo dedicado (__rawValue__) e devolvê-lo puro na leitura
-//         (strings/números/booleanos atravessam o conversor da lib intactos).
+//         evento: o LOOP infinito de erros pós-QR.
+//
+//    d) ARRAY como valor (lib/Socket/messages-send.js:253-262):
+//         keys.set({ 'device-list': { [teléfono]: [dispositivo, ...] } })
+//       → device-list guarda a lista de dispositivos vinculados como ARRAY
+//         PURO de strings (["38", "0", ...]). $set: <array> também é inválido
+//         (MongoServerError: "we found type array instead"). Na leitura o
+//         Baileys espera o array original com .includes/.push/.filter
+//         (lib/Signal/libsignal.js:215-225).
+//
+//    ✋ RESULTADO: tanto (c) como (d) — e null/undefined defensivo — são
+//       guardados no MESMO campo dedicado (__rawValue__) e devolvidos PUROS
+//       na leitura (strings/números/booleanos/arrays atravessam o conversor
+//       da lib intactos).
 //
 // 4) ERROS RUIDOSOS: falha de conexão/autenticação com o Atlas é logada
 //    com causa provável e RELANÇADA — o bot nunca fica travado em
@@ -69,8 +80,10 @@ function descreverTipo(valor) {
 }
 
 /**
- * Envolve a collection do MongoDB com os fixes de integração (itens 3a/3b/3c
- * do cabeçalho). Mantém a MESMA superfície usada pela mongo-baileys:
+ * Envolve a collection do MongoDB com os fixes de integração (itens 3a–3d
+ * do cabeçalho: objeto → $set direto; Buffer → __rawBuffer__; primitivo,
+ * array, null e undefined → __rawValue__). Mantém a MESMA superfície usada
+ * pela mongo-baileys:
  * updateOne(filtro, {$set}, opcoes) / findOne(filtro) / deleteOne(filtro).
  */
 function vestirColecaoAuth(colecao) {
@@ -87,7 +100,7 @@ function vestirColecaoAuth(colecao) {
       if (Buffer.isBuffer(set)) {
         // (3b) VALOR CRU — Buffer: session/sender-key/identity-key. Os bytes
         // vão num campo dedicado; a leitura devolve Binary e a lib converte
-        // de volta para o Buffer exato. (NÃO MEXER: já validado byte a byte)
+        // de volta para el Buffer exato. (NÃO MEXER: já validado byte a byte)
         return colecao.updateOne(
           filtro,
           { $set: { [CHAVE_BUFFER_CRU]: set } },
@@ -95,15 +108,33 @@ function vestirColecaoAuth(colecao) {
         )
       }
 
+      if (Array.isArray(set)) {
+        // (3d) VALOR CRU — ARRAY: device-list guarda a lista de dispositivos
+        // como array puro (["38", "0", ...]). `$set: <array>` é inválido no
+        // MongoDB ("we found type array instead"). MESMO mecanismo do
+        // primitivo: campo dedicado __rawValue__ + devolução pura na leitura
+        // (o array original, com .includes/.push/.filter, como o Baileys espera).
+        return colecao.updateOne(
+          filtro,
+          { $set: { [CHAVE_VALOR_CRU]: set } },
+          opcoes
+        )
+      }
+
       if (set === null || typeof set !== 'object') {
-        // (3c) VALOR CRU — primitivo (string/number/boolean) ou array:
+        // (3c) VALOR CRU — primitivo (string/number/boolean) ou null/undefined:
         // lid-mapping grava telefone↔LID como STRING pura. $set direto com
         // primitivo é inválido no MongoDB ("Modifiers operate on fields").
         // Guardamos o valor num campo dedicado e devolvemos o primitivo puro
         // na leitura (o conversor da lib não altera primitivos).
+        // ⚠️ DEFENSIVO: undefined não é BSON válido → normalizado a null.
+        const valorAGuardar = set === undefined ? null : set
+        if (set === undefined) {
+          console.log(`[sessao-mongo] ⚠️ valor undefined para ${chave} — guardado como null (defensivo)`)
+        }
         return colecao.updateOne(
           filtro,
-          { $set: { [CHAVE_VALOR_CRU]: set } },
+          { $set: { [CHAVE_VALOR_CRU]: valorAGuardar } },
           opcoes
         )
       }
@@ -117,12 +148,15 @@ function vestirColecaoAuth(colecao) {
       const doc = await colecao.findOne(filtro, opcoes)
       if (doc && CHAVE_BUFFER_CRU in doc) {
         // Binary vindo do driver → convertBinaryToBuffer da lib retorna
-        // o Buffer original (mesmo mecanismo do resto da sessão)
+        // el Buffer original (mesmo mecanismo do resto da sessão)
         return doc[CHAVE_BUFFER_CRU]
       }
       if (doc && CHAVE_VALOR_CRU in doc) {
-        // Primitivo (string do lid-mapping, etc.) → devolvido puro;
-        // strings/números/booleanos atravessam o conversor da lib intactos
+        // VALOR CRU → devolvido PURO no formato original:
+        //  - string/número/boolean do lid-mapping → atravessan intactos;
+        //  - ARRAY do device-list → volta como array real (BSON array →
+        //    Array JS), com .includes/.push/.filter disponíveis;
+        //  - null/undefined normalizado → null (falsy, como espera la lib).
         return doc[CHAVE_VALOR_CRU]
       }
       return doc
