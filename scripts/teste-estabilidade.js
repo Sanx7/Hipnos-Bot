@@ -307,7 +307,7 @@ async function testarRevelar() {
   // de execuções anteriores (ou do teste EBUSY) não podem sujar o resultado.
   if (fs.existsSync(pastaTemp)) {
     for (const f of fs.readdirSync(pastaTemp)) {
-      if (f.startsWith('in_') || f.startsWith('out_')) {
+      if (f.startsWith('in_') || f.startsWith('out_') || f.startsWith('thumb_')) {
         try { fs.unlinkSync(path.join(pastaTemp, f)) } catch (e) { /* melhor esforço */ }
       }
     }
@@ -349,7 +349,7 @@ async function testarRevelar() {
     // Best-effort: remove o que o teste EBUSY deixou (esperado, por design)
     try {
       for (const f of fs.readdirSync(pastaTemp)) {
-        if (f.startsWith('in_') || f.startsWith('out_')) fs.unlinkSync(path.join(pastaTemp, f))
+        if (f.startsWith('in_') || f.startsWith('out_') || f.startsWith('thumb_')) fs.unlinkSync(path.join(pastaTemp, f))
       }
     } catch (e) { /* melhor esforço */ }
   }
