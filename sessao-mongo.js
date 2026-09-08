@@ -16,18 +16,33 @@
 //    Sem o ping explícito, URI errada/IP não liberado no Atlas poderia
 //    passar despercebido até a primeira escrita.
 //
-// 3) ⚠️ FIX DE INTEGRAÇÃO (vestirColecaoAuth): a Baileys grava ALGUMAS
-//    chaves de sessão com valor BUFFER CRU — lib/Signal/libsignal.js:
-//      linha 361: keys.set({ session: { [jid]: session.serialize() } })
-//      linha 419: keys.set({ 'sender-key': { [id]: Buffer.from(...) } })
-//    O mongo-baileys faz writeData com `$set: <o valor>` — e um Buffer
-//    cru na posição de $set é serializado pelo driver como DOCUMENTO de
-//    chaves numéricas ("0","1","2"...), CORROMPENDO os bytes. Na leitura,
-//    a sessão voltaria como objeto estragado em vez de Buffer.
-//    O wrapper detecta $set com Buffer cru, guarda os bytes num campo
-//    dedicado e, na leitura, devolve um Binary — que o conversor da
-//    própria mongo-baileys (convertBinaryToBuffer) transforma de volta
-//    no Buffer EXATO, byte a byte.
+// 3) ⚠️ FIX DE INTEGRAÇÃO (vestirColecaoAuth): o mongo-baileys faz TODA
+//    escrita como `$set: <o valor recebido>` (writeData → updateOne) — mas
+//    o MongoDB exige OBJETO no $set. A Baileys grava 3 formas diferentes:
+//
+//    a) OBJETO puro (maioria): pre-key, app-state-sync-key/version,
+//       sender-key-memory, sender-key (em alguns caminhos) → $set direto ok;
+//
+//    b) BUFFER CRU como valor (lib/Signal/libsignal.js):
+//         linha 361: keys.set({ session: { [jid]: session.serialize() } })
+//         linha 419: keys.set({ 'sender-key': { [id]: Buffer.from(...) } })
+//       → $set: <Buffer> seria serializado como DOCUMENTO de índices
+//         numéricos ("0","1","2"...), corrompendo os bytes. Fix: guardar os
+//         bytes num campo dedicado (__rawBuffer__) e, na leitura, devolver
+//         um Binary — que o conversor da própria mongo-baileys transforma
+//         de volta no Buffer EXATO, byte a byte.
+//
+//    c) PRIMITIVO/ARRAY como valor (lib/Signal/lid-mapping.js:69-75):
+//         keys.set({ 'lid-mapping': { [telefone]: lidUser,
+//                                     [lidUser+'_reverse']: telefone } })
+//       → valores são STRINGS puras (números de telefone ↔ LID), gravados
+//         EM MASSA na sincronização logo após o QR. $set: "554184062975"
+//         derruba o servidor com "Modifiers operate on fields but we found
+//         type string instead" — e como a mongo-baileys engole o erro, o
+//         mapeamento nunca persiste e a Baileys tenta gravar de novo a cada
+//         evento: o LOOP infinito de erros pós-QR. Fix: guardar o valor
+//         num campo dedicado (__rawValue__) e devolvê-lo puro na leitura
+//         (strings/números/booleanos atravessam o conversor da lib intactos).
 //
 // 4) ERROS RUIDOSOS: falha de conexão/autenticação com o Atlas é logada
 //    com causa provável e RELANÇADA — o bot nunca fica travado em
@@ -36,31 +51,65 @@
 
 const { MongoClient } = require('mongodb')
 
-// Campo dedicado usado apenas para valores de chave que são Buffer cru
-const CHAVE_BUFFER_CRU = '__rawBuffer__'
+// Campos dedicados (cada tipo de valor cru tem o seu):
+const CHAVE_BUFFER_CRU = '__rawBuffer__' // valores Buffer (session/sender-key/identity-key)
+const CHAVE_VALOR_CRU = '__rawValue__'   // valores primitivos (lid-mapping: strings) e arrays
+
+// 🪵 LOG TEMPORÁRIO de diagnóstico: imprime o TIPO de cada valor antes de
+// gravar. Deixe true na primeira conexão pós-migração; vire false (ou remova)
+// quando o bot estiver estável, para não poluir o log do Render.
+const LOG_ESCRITAS = true
+
+// Descrição compacta do tipo do valor, para o log de diagnóstico
+function descreverTipo(valor) {
+  if (Buffer.isBuffer(valor)) return `Buffer(${valor.length} bytes)`
+  if (valor === null) return 'null'
+  if (Array.isArray(valor)) return `array(${valor.length})`
+  return typeof valor
+}
 
 /**
- * Envolve a collection do MongoDB com o fix de Buffer cru (item 3 acima).
- * Mantém a MESMA superfície usada pela mongo-baileys:
+ * Envolve a collection do MongoDB com os fixes de integração (itens 3a/3b/3c
+ * do cabeçalho). Mantém a MESMA superfície usada pela mongo-baileys:
  * updateOne(filtro, {$set}, opcoes) / findOne(filtro) / deleteOne(filtro).
  */
 function vestirColecaoAuth(colecao) {
   return {
     updateOne(filtro, update, opcoes) {
-      if (
-        update &&
-        !Array.isArray(update) &&
-        Buffer.isBuffer(update.$set)
-      ) {
-        // Valor CRU (ex.: session/sender-key da Baileys): bytes puros num
-        // campo dedicado — na leitura, devolvemos o Binary e a lib converte
-        // de volta para o Buffer exato.
+      const set = update && !Array.isArray(update) ? update.$set : undefined
+      const chave = filtro && filtro._id
+
+      // 🪵 Diagnóstico temporário: tipo de cada valor antes de gravar
+      if (LOG_ESCRITAS) {
+        console.log(`[sessao-mongo] ✍️ ${descreverTipo(set)} → ${chave}`)
+      }
+
+      if (Buffer.isBuffer(set)) {
+        // (3b) VALOR CRU — Buffer: session/sender-key/identity-key. Os bytes
+        // vão num campo dedicado; a leitura devolve Binary e a lib converte
+        // de volta para o Buffer exato. (NÃO MEXER: já validado byte a byte)
         return colecao.updateOne(
           filtro,
-          { $set: { [CHAVE_BUFFER_CRU]: update.$set } },
+          { $set: { [CHAVE_BUFFER_CRU]: set } },
           opcoes
         )
       }
+
+      if (set === null || typeof set !== 'object') {
+        // (3c) VALOR CRU — primitivo (string/number/boolean) ou array:
+        // lid-mapping grava telefone↔LID como STRING pura. $set direto com
+        // primitivo é inválido no MongoDB ("Modifiers operate on fields").
+        // Guardamos o valor num campo dedicado e devolvemos o primitivo puro
+        // na leitura (o conversor da lib não altera primitivos).
+        return colecao.updateOne(
+          filtro,
+          { $set: { [CHAVE_VALOR_CRU]: set } },
+          opcoes
+        )
+      }
+
+      // (3a) OBJETO puro — pre-key, app-state-sync-key/version,
+      // sender-key-memory, creds, etc. → $set direto, como a lib espera.
       return colecao.updateOne(filtro, update, opcoes)
     },
 
@@ -70,6 +119,11 @@ function vestirColecaoAuth(colecao) {
         // Binary vindo do driver → convertBinaryToBuffer da lib retorna
         // o Buffer original (mesmo mecanismo do resto da sessão)
         return doc[CHAVE_BUFFER_CRU]
+      }
+      if (doc && CHAVE_VALOR_CRU in doc) {
+        // Primitivo (string do lid-mapping, etc.) → devolvido puro;
+        // strings/números/booleanos atravessam o conversor da lib intactos
+        return doc[CHAVE_VALOR_CRU]
       }
       return doc
     },
