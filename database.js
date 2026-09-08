@@ -1,72 +1,116 @@
-// ============================================
-// 🗄️ database.js — Banco do /ranking (SQLite)
-// ============================================
-// Módulo responsável por TODA a lógica de persistência do ranking:
-//   1. Conectar no banco SQLite (arquivo mensagens.db na raiz do projeto)
-//   2. Criar a tabela `mensagens` caso ainda não exista
-//   3. Inserir mensagens conforme chegam no messages.upsert
-//   4. Buscar o TOP usuários de UM grupo específico
+// ============================================================
+// 🗄️ database.js — Banco do /ranking (MongoDB)
+// ============================================================
+// Módulo responsável por TODA a lógica de persistência do ranking.
+// Migrado de SQLite (better-sqlite3) para MongoDB.
 //
-// Usa a lib better-sqlite3 (síncrona e rápida). Se ela não estiver
-// instalada, o bot continua funcionando normalmente — apenas o /ranking
-// fica desativado até que se rode `npm install better-sqlite3`.
-// ============================================
+// ESTRATÉGIA: contador agregado (1 documento por usuário por grupo)
+//   - Em vez de 1 linha por mensagem (crescimento ilimitado), usamos
+//     um campo "total" que é incrementado a cada mensagem via $inc.
+//   - Isso evita estourar o limite de 512MB do MongoDB Atlas free tier.
+//
+// ESTRUTURA DO DOCUMENTO (collection: "ranking"):
+//   {
+//     grupo_id:       "12036...@g.us",
+//     usuario_id:     "5511999999999",
+//     nome:           "João",
+//     total:          42,
+//     ultimaMensagem: 1700000000000
+//   }
+//
+// ÍNDICE ÚNICO COMPOSTO: { grupo_id: 1, usuario_id: 1 }
+// CONEXÃO: singleton com ping de saúde e auto-reconexão.
+// ============================================================
 
-const path = require('path')
+const { MongoClient } = require('mongodb')
+
+const NOME_BANCO = process.env.MONGODB_DB || 'whatsapp'
+const NOME_COLECAO = process.env.MONGODB_COLLECTION_RANKING || 'ranking'
+
+let clienteMongo = null
+let colecaoCacheada = null
 
 // -------------------------------------------------------------------
-// better-sqlite3 é dependência opcional (try/catch de segurança)
+// Obtém a collection de ranking, conectando se necessário.
+// Valida a conexão com ping antes de reusar e reconecta se morreu.
+// Erros são logados com causa provável e RELANÇADOS.
 // -------------------------------------------------------------------
-let Database = null
-try {
-  Database = require('better-sqlite3')
-  console.log('🗄️  better-sqlite3 carregado com sucesso.')
-} catch (err) {
-  console.error('⚠️  better-sqlite3 NÃO está instalado — o /ranking ficará desativado.')
-  console.error('   Para instalar, rode:  npm install better-sqlite3')
+async function obterColecaoRanking() {
+  if (colecaoCacheada && clienteMongo) {
+    try {
+      await clienteMongo.db('admin').command({ ping: 1 })
+      return colecaoCacheada
+    } catch (erroPing) {
+      console.error(
+        '⚠️ [database] conexão anterior com o MongoDB morreu — reconectando:',
+        erroPing?.message
+      )
+      try { await clienteMongo.close() } catch (e) { /* já morta */ }
+      clienteMongo = null
+      colecaoCacheada = null
+    }
+  }
+
+  const uri = process.env.MONGODB_URI
+  if (!uri) {
+    console.error('════════════════════════════════════════════════════════')
+    console.error('💥 MONGODB_URI NÃO CONFIGURADA — o /ranking ficará desativado!')
+    console.error('   Sem ela, o ranking não persiste entre redeploys.')
+    console.error('   → No Render: Settings → Environment → variável MONGODB_URI')
+    console.error('   → Local: adicione MONGODB_URI no arquivo .env da raiz')
+    console.error('════════════════════════════════════════════════════════')
+    throw new Error('MONGODB_URI ausente — impossível conectar ao ranking')
+  }
+
+  try {
+    console.log(`🗄️ [database] conectando ao MongoDB (db: ${NOME_BANCO}, collection: ${NOME_COLECAO})...`)
+    clienteMongo = new MongoClient(uri, { serverSelectionTimeoutMS: 15000 })
+    await clienteMongo.connect()
+    await clienteMongo.db('admin').command({ ping: 1 })
+
+    const colecao = clienteMongo.db(NOME_BANCO).collection(NOME_COLECAO)
+
+    // Índice único composto: 1 documento por (grupo_id, usuario_id)
+    await colecao.createIndex(
+      { grupo_id: 1, usuario_id: 1 },
+      { unique: true, name: 'idx_ranking_grupo_usuario' }
+    )
+    // Índice para buscas por grupo ordenadas por total (ranking)
+    await colecao.createIndex(
+      { grupo_id: 1, total: -1 },
+      { name: 'idx_ranking_grupo_total' }
+    )
+
+    colecaoCacheada = colecao
+    console.log('✅ [database] MongoDB conectado — ranking persiste entre redeploys.')
+    return colecaoCacheada
+  } catch (erro) {
+    console.error('════════════════════════════════════════════════════════')
+    console.error('💥 FALHA AO CONECTAR AO MONGODB (ranking):', erro?.message)
+    console.error('   Causas mais comuns:')
+    console.error('   → MONGODB_URI com usuário/senha/cluster errados')
+    console.error('   → IP não liberado no Atlas: Network Access → 0.0.0.0/0')
+    console.error('     (o Render free usa IPs de saída dinâmicos)')
+    console.error('   → Cluster pausado ou sem armazenamento no Atlas free tier')
+    console.error('════════════════════════════════════════════════════════')
+    try { await clienteMongo?.close() } catch (e) { /* nada a fechar */ }
+    clienteMongo = null
+    colecaoCacheada = null
+    throw erro
+  }
 }
 
-// Arquivo do banco fica na raiz do projeto (ex: Hipnos-Bot/mensagens.db).
-// 💡 Pode ser sobrescrito pela variável de ambiente DB_PATH (útil p/ testes
-//    automatizados ou p/ apontar o banco p/ outro local sem mexer no código).
-const CAMINHO_BANCO = process.env.DB_PATH || path.join(__dirname, 'mensagens.db')
-// Conexão única reutilizada pelo processo inteiro
-let db = null
-
 // -------------------------------------------------------------------
-// Conecta no banco (uma única vez) e garante que a tabela existe
+// Garante que a conexão está pronta (função exportada para compatibilidade).
+// Retorna true se conectou, false se não há MONGODB_URI configurada.
 // -------------------------------------------------------------------
-function conectar() {
-  if (db) return db
-  if (!Database) return null
-
-  db = new Database(CAMINHO_BANCO)
-
-  // WAL = melhor desempenho p/ gravações contínuas (típico de um chat)
-  db.pragma('journal_mode = WAL')
-
-  // Cria a tabela se ainda não existir.
-  // - grupo_id  : remoteJid do grupo (ex: 12036...@g.us) — NUNCA misturamos grupos
-  // - usuario_id: número do remetente já normalizado (apenas dígitos)
-  // - nome      : pushName do remetente capturado na hora (ajuda a exibir o nome)
-  // - timestamp : instante em que a mensagem foi registrada
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS mensagens (
-      grupo_id   TEXT NOT NULL,
-      usuario_id TEXT NOT NULL,
-      nome       TEXT,
-      timestamp  INTEGER NOT NULL
-    )
-  `)
-
-  // Índice acelera tanto o filtro por grupo quanto a contagem por usuário
-  db.exec(`
-    CREATE INDEX IF NOT EXISTS idx_mensagens_grupo_usuario
-    ON mensagens (grupo_id, usuario_id)
-  `)
-
-  console.log('🗄️  Banco de dados do ranking conectado.')
-  return db
+async function conectar() {
+  try {
+    await obterColecaoRanking()
+    return true
+  } catch (err) {
+    return false
+  }
 }
 
 // -------------------------------------------------------------------
@@ -81,116 +125,113 @@ function normalizarId(jid) {
 }
 
 // -------------------------------------------------------------------
-// RegistrarMensagem: contabiliza UMA mensagem no ranking
-// Chamada a partir do messages.upsert para TODA mensagem do grupo.
+// RegistrarMensagem: incrementa o contador de 1 usuário em 1 grupo.
+// Usa upsert com $inc (atômico) — cria o documento se não existe, ou
+// incrementa o campo "total" em 1 se já existe. Também atualiza "nome"
+// (caso a pessoa tenha trocado) e "ultimaMensagem".
 // -------------------------------------------------------------------
-function registrarMensagem(grupoId, usuarioId, nome) {
-  const conexao = conectar()
-  if (!conexao) return false
+async function registrarMensagem(grupoId, usuarioId, nome) {
+  try {
+    const colecao = await obterColecaoRanking()
+    const idNormalizado = normalizarId(usuarioId)
 
-  const insere = conexao.prepare(`
-    INSERT INTO mensagens (grupo_id, usuario_id, nome, timestamp)
-    VALUES (?, ?, ?, ?)
-  `)
-
-  insere.run(grupoId, normalizarId(usuarioId), nome || null, Date.now())
-  return true
+    await colecao.updateOne(
+      { grupo_id: grupoId, usuario_id: idNormalizado },
+      {
+        $inc: { total: 1 },
+        $set: {
+          nome: nome || null,
+          ultimaMensagem: Date.now()
+        }
+      },
+      { upsert: true }
+    )
+  } catch (err) {
+    console.error('⚠️ [database] falha ao registrar mensagem no ranking:', err?.message)
+  }
 }
 
 // -------------------------------------------------------------------
 // BuscarRanking: retorna os `limite` usuários que MAIS enviaram mensagens
 // no grupo `grupoId`.
 // ⚠️ Filtro obrigatório por grupo_id — cada grupo tem seu próprio ranking.
-// Utiliza ROW_NUMBER para pegar o pushName MAIS RECENTE de cada usuário.
 // Retorno: [ { usuario_id, nome, total }, ... ] (ordenado do maior p/ menor)
 // -------------------------------------------------------------------
-function buscarRanking(grupoId, limite = 10) {
-  const conexao = conectar()
-  if (!conexao) return []
+async function buscarRanking(grupoId, limite = 10) {
+  try {
+    const colecao = await obterColecaoRanking()
 
-  const consulta = conexao.prepare(`
-    SELECT usuario_id, nome, total
-    FROM (
-      SELECT
-        usuario_id,
-        nome,
-        COUNT(*) OVER (PARTITION BY usuario_id) AS total,
-        ROW_NUMBER() OVER (
-          PARTITION BY usuario_id
-          ORDER BY timestamp DESC
-        ) AS rn
-      FROM mensagens
-      WHERE grupo_id = ?
-    )
-    WHERE rn = 1
-    ORDER BY total DESC
-    LIMIT ?
-  `)
+    const documentos = await colecao
+      .find({ grupo_id: grupoId })
+      .sort({ total: -1 })
+      .limit(limite)
+      .toArray()
 
-  return consulta.all(grupoId, limite)
+    // Mantém EXATAMENTE o mesmo formato de retorno do SQLite
+    return documentos.map((doc) => ({
+      usuario_id: doc.usuario_id,
+      nome: doc.nome,
+      total: doc.total
+    }))
+  } catch (err) {
+    console.error('⚠️ [database] falha ao buscar ranking:', err?.message)
+    return []
+  }
 }
 
 // -------------------------------------------------------------------
 // BuscarEstatisticasUsuario: estatísticas de UM usuário em UM grupo
 // (usado pelo /perfil). Retorna:
-//   - total         : mensagens registradas do usuário naquele grupo
+//   - total         : campo "total" do documento do usuário (ou 0)
 //   - posicao       : posição no ranking do grupo (= nº de usuários com
-//                     MAIS mensagens + 1; empates dividem a posição)
-//   - totalUsuarios : quantos usuários distintos têm mensagens no grupo
-//   - nome          : pushName mais recente registrado p/ o usuário
-// Retorna null se o banco não estiver disponível (better-sqlite3 ausente);
+//                     total MAIOR + 1; empates dividem a posição)
+//   - totalUsuarios : contagem de documentos distintos daquele grupo
+//   - nome          : pushName mais recente do usuário
+// Retorna null se o banco não estiver disponível;
 // retorna { total: 0, posicao: null, ... } se o usuário ainda não tem
 // mensagens registradas (o /perfil mostra os dados básicos mesmo assim).
 // -------------------------------------------------------------------
-function buscarEstatisticasUsuario(grupoId, usuarioId) {
-  const conexao = conectar()
-  if (!conexao) return null
+async function buscarEstatisticasUsuario(grupoId, usuarioId) {
+  try {
+    const colecao = await obterColecaoRanking()
+    const alvo = normalizarId(usuarioId)
 
-  const alvo = normalizarId(usuarioId)
+    // Busca o documento do usuário
+    const docUsuario = await colecao.findOne({
+      grupo_id: grupoId,
+      usuario_id: alvo
+    })
 
-  const totalDoUsuario = conexao.prepare(`
-    SELECT COUNT(*) AS total
-    FROM mensagens
-    WHERE grupo_id = ? AND usuario_id = ?
-  `)
-  const nomeMaisRecente = conexao.prepare(`
-    SELECT nome
-    FROM mensagens
-    WHERE grupo_id = ? AND usuario_id = ? AND nome IS NOT NULL
-    ORDER BY timestamp DESC
-    LIMIT 1
-  `)
-  const posicaoConsulta = conexao.prepare(`
-    SELECT COUNT(*) + 1 AS posicao
-    FROM (
-      SELECT usuario_id
-      FROM mensagens
-      WHERE grupo_id = ?
-      GROUP BY usuario_id
-      HAVING COUNT(*) > ?
-    )
-  `)
-  const totalUsuariosConsulta = conexao.prepare(`
-    SELECT COUNT(DISTINCT usuario_id) AS totalUsuarios
-    FROM mensagens
-    WHERE grupo_id = ?
-  `)
+    // Conta total de usuários distintos no grupo
+    const totalUsuarios = await colecao.countDocuments({ grupo_id: grupoId })
 
-  const { total } = totalDoUsuario.get(grupoId, alvo)
-  const { totalUsuarios } = totalUsuariosConsulta.get(grupoId)
+    // Se o usuário não tem documento ainda
+    if (!docUsuario) {
+      return { total: 0, posicao: null, totalUsuarios, nome: null }
+    }
 
-  if (!total) {
-    return { total: 0, posicao: null, totalUsuarios, nome: null }
+    // Posição = quantos usuários têm total MAIOR + 1 (empates dividem posição)
+    const usuariosComTotalMaior = await colecao.countDocuments({
+      grupo_id: grupoId,
+      total: { $gt: docUsuario.total }
+    })
+    const posicao = usuariosComTotalMaior + 1
+
+    return {
+      total: docUsuario.total,
+      posicao,
+      totalUsuarios,
+      nome: docUsuario.nome || null
+    }
+  } catch (err) {
+    console.error('⚠️ [database] falha ao buscar estatísticas do usuário:', err?.message)
+    return null
   }
-
-  const { posicao } = posicaoConsulta.get(grupoId, total)
-  const linhaNome = nomeMaisRecente.get(grupoId, alvo)
-
-  return { total, posicao, totalUsuarios, nome: linhaNome?.nome || null }
 }
 
 // -------------------------------------------------------------------
-// Exporta apenas o que o resto do bot precisa
+// Exporta apenas o que o resto do bot precisa (mesmas funções,
+// mesmas assinaturas — implementação interna mudou p/ MongoDB)
 // -------------------------------------------------------------------
 module.exports = {
   conectar,

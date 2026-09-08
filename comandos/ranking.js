@@ -44,7 +44,7 @@ module.exports = {
       }
 
       // 2) Busca no banco os TOP 10 do grupo atual (filtrado por grupo_id)
-      const top = buscarRanking(jid, 10)
+      const top = await buscarRanking(jid, 10)
 
       // 3) Grupo ainda sem mensagens registradas -> resposta amigável
       if (!top.length) {

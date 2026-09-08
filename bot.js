@@ -31,7 +31,7 @@ const qrcode = require('qrcode-terminal')
 const fs = require('fs')
 const path = require('path')
 
-// 📊 Módulo do banco de dados do /ranking (SQLite / better-sqlite3)
+// 📊 Módulo do banco de dados do /ranking (MongoDB)
 // Expõe: registrarMensagem(grupoId, usuarioId, nome)
 const { registrarMensagem } = require('./database')
 

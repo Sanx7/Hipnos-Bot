@@ -263,7 +263,7 @@ module.exports = {
         for (const candidato of candidatos) {
           let e = null
           try {
-            e = buscarEstatisticasUsuario(jid, candidato)
+            e = await buscarEstatisticasUsuario(jid, candidato)
           } catch (errBanco) {
             console.error('[perfil] ⚠️ banco do ranking não disponível:', errBanco?.message || errBanco)
           }
