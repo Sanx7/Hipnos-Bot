@@ -69,7 +69,7 @@ const CHAVE_VALOR_CRU = '__rawValue__'   // valores primitivos (lid-mapping: str
 // 🪵 LOG TEMPORÁRIO de diagnóstico: imprime o TIPO de cada valor antes de
 // gravar. Deixe true na primeira conexão pós-migração; vire false (ou remova)
 // quando o bot estiver estável, para não poluir o log do Render.
-const LOG_ESCRITAS = true
+const LOG_ESCRITAS = false
 
 // Descrição compacta do tipo do valor, para o log de diagnóstico
 function descreverTipo(valor) {
