@@ -16,9 +16,15 @@ process.on('unhandledRejection', (motivo, promise) => {
 
 const {
   default: makeWASocket,
-  useMultiFileAuthState,
+  initAuthCreds,
   DisconnectReason
 } = require('@whiskeysockets/baileys')
+
+// 🗄️ SESSÃO NO MONGODB — substitui a pasta ./auth (useMultiFileAuthState),
+// que se perdia a cada redeploy/restart do Render (filesystem efêmero),
+// forçando novo QR Code. Detalhes e fixes de integração: sessao-mongo.js
+const { useMongoDBAuthState } = require('mongo-baileys')
+const { obterColecaoAuth } = require('./sessao-mongo')
 
 const P = require('pino')
 const qrcode = require('qrcode-terminal')
@@ -147,7 +153,26 @@ async function startBot() {
     }
   }
 
-  const { state, saveCreds } = await useMultiFileAuthState('./auth')
+  // 🗄️ SESSÃO NO MONGODB — sobrevive a redeploys/restarts do Render.
+  // A collection guarda 1 doc "auth_creds" + 1 doc por chave de sessão.
+  // Se o Mongo falhar, obterColecaoAuth lança com log ruidoso e o
+  // startBot().catch de fora mostra "Falha ao iniciar/reconectar".
+  const colecaoAuth = await obterColecaoAuth()
+
+  // Sessão NOVA? Cria as credenciais com o initAuthCreds DO PRÓPRIO Baileys
+  // (estrutura exata da versão instalada) em vez da cópia interna embutida
+  // na lib mongo-baileys, que pode ficar desatualizada em relação ao @rc.
+  const docCreds = await colecaoAuth.findOne({ _id: 'auth_creds' })
+  if (!docCreds || !docCreds.creds) {
+    await colecaoAuth.updateOne(
+      { _id: 'auth_creds' },
+      { $set: { creds: initAuthCreds() } },
+      { upsert: true }
+    )
+    console.log('🆕 Sessão nova criada no MongoDB — escaneie o QR Code abaixo (só desta vez).')
+  }
+
+  const { state, saveCreds } = await useMongoDBAuthState(colecaoAuth)
 
   const sock = makeWASocket({
     auth: state,
