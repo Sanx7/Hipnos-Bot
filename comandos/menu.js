@@ -44,6 +44,22 @@ enfrentam o julgamento das sombras."
 
 ════════════════════
 
+🌤️ UTILITÁRIOS
+
+🌤️ /clima <cidade>
+➥ Consulta a carta do clima: temperatura, sensação térmica, condição e umidade (ex: /clima Campinas).
+
+🎵 /tomp3 (responda a um vídeo/áudio)
+➥ Extrai o som da mídia citada e envia de volta como MP3.
+
+📜 /transcrever (responda a um áudio/vídeo)
+➥ Transcreve o que é dito na mídia citada (áudio/vídeo) para texto.
+
+🧰 /menu-utilitario
+➥ Abre o pergaminho das ferramentas do dia a dia.
+
+════════════════════
+
 🔮 MENU STICKER (FIGURINHAS)
 
 🔮 /s

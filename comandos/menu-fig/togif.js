@@ -1,95 +1,165 @@
-const { downloadContentFromMessage } = require('@whiskeysockets/baileys')
-const ffmpeg = require('fluent-ffmpeg')
-const fs = require('fs')
-const path = require('path')
+// ============================================
+// 🎞️ TOGIF — Figurinha animada → GIF (uso LIVRE)
+// ============================================
+// Converte a figurinha ANIMADA citada em vídeo MP4 com gifPlayback: true
+// (roda em loop como GIF no WhatsApp). Também aceita um vídeo citado
+// (reenvia em formato GIF-playback).
+//
+// ⚠️ CAUSA RAIZ DO BUG ANTIGO: o ffmpeg embutido NÃO decodifica WebP
+// animado (container ANMF) — "Invalid data found when processing input".
+// A ponte (módulo webp-animado.js) usa o anim_dump da libwebp p/ extrair
+// os frames e o ffmpeg p/ montar o MP4 — tudo em PROCESSO FILHO
+// (execFile, args em array, sem shell injection), com timeouts e logs do
+// stderr reais.
+// ============================================
 
-// Garante que o FFmpeg funcione mesmo sem estar instalado/exposto no PATH
-try {
-  const ffmpegInstaller = require('@ffmpeg-installer/ffmpeg');
-  ffmpeg.setFfmpegPath(ffmpegInstaller.path);
-} catch (err) {
-  console.warn('Binário local de FFmpeg não encontrado; usando o ffmpeg do PATH.');
+const { downloadContentFromMessage } = require('@whiskeysockets/baileys')
+const fs = require('fs')
+const os = require('os')
+const path = require('path')
+const { webpAnimadoParaMp4, webpEhAnimado } = require('./webp-animado')
+
+const LIMITE_BYTES = 25 * 1024 * 1024
+
+/** Apaga temporário com retry (EPERM/EBUSY no Windows). NUNCA lança. */
+function apagarComRetry(caminho, tentativas = 3) {
+  const espera = (ms) => new Promise((r) => setTimeout(r, ms))
+  return (async () => {
+    for (let i = 0; i < tentativas; i++) {
+      try {
+        if (!fs.existsSync(caminho)) return
+        fs.unlinkSync(caminho)
+        return
+      } catch (err) {
+        if (i < tentativas - 1) await espera(150)
+        else console.error('⚠️ togif: falha ao apagar', caminho, err?.message)
+      }
+    }
+  })()
+}
+
+/** Re-encodação direta de vídeo citado p/ MP4 (ffmpeg decodifica vídeo ok) */
+async function reencodarParaMp4(caminhoInput, caminhoMp4) {
+  const { rodarExecutavel } = require('./webp-animado')
+  const binFfmpeg = (() => {
+    try {
+      return require('@ffmpeg-installer/ffmpeg').path
+    } catch (err) {
+      return 'ffmpeg'
+    }
+  })()
+  await rodarExecutavel(binFfmpeg, [
+    '-y', '-nostdin',
+    '-i', caminhoInput,
+    '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2,fps=15',
+    '-pix_fmt', 'yuv420p',
+    '-c:v', 'libx264',
+    '-movflags', 'faststart',
+    caminhoMp4
+  ], 120000)
+  if (!fs.existsSync(caminhoMp4) || fs.statSync(caminhoMp4).size === 0) {
+    throw new Error('ffmpeg não produziu o MP4 do vídeo')
+  }
 }
 
 module.exports = {
   nome: 'togif',
-  descricao: 'Transforma uma figurinha animada em GIF.',
-  async executar(sock, jid, msg, texto) {
-    try {
-      // Verifica se o usuário está respondendo a uma mensagem
-      const cotada = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage
-      const ehSticker = cotada?.stickerMessage
+  descricao: 'Transforma uma figurinha animada em GIF (vídeo em loop).',
 
-      if (!ehSticker) {
-        return await sock.sendMessage(jid, { 
-          text: '❌ Você precisa responder a uma figurinha animada usando o comando `/togif`!' 
+  async executar(sock, jid, msg, texto) {
+    let caminhoWebp = null
+    let caminhoMp4 = null
+
+    try {
+      // 1) 🎯 Exige figurinha (animada) OU vídeo citado
+      const cotada = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage
+      const stickerMessage = cotada?.stickerMessage
+      const videoMessage = cotada?.videoMessage
+
+      if (!stickerMessage && !videoMessage) {
+        return await sock.sendMessage(jid, {
+          text: '🎞️ *Falta a mídia...*\n\nResponda (marque) uma figurinha animada (ou um vídeo) com `/togif`.'
         }, { quoted: msg })
       }
 
-      // Avisa que está processando
-      await sock.sendMessage(jid, { text: '⏳ Invocando as forças do limbo para converter seu GIF...' }, { quoted: msg })
+      // 2) ⏳ Sinaliza processamento
+      await sock.sendMessage(jid, { react: { text: '⏳', key: msg.key } }).catch(() => {})
 
-      // Cria a pasta temp se ela não existir
-      const pastaTemp = path.join(__dirname, 'dados', 'temp')
-      if (!fs.existsSync(pastaTemp)) {
-        fs.mkdirSync(pastaTemp, { recursive: true })
-      }
+      const idUnico = `togif-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`
+      caminhoMp4 = path.join(os.tmpdir(), `${idUnico}.mp4`)
 
-      // Baixa o arquivo .webp da figurinha animada
-      const stream = await downloadContentFromMessage(cotada.stickerMessage, 'image')
-      let buffer = Buffer.from([])
-      for await (const chunk of stream) {
-        buffer = Buffer.concat([buffer, chunk])
-        if (buffer.length > 25 * 1024 * 1024) {
-          throw new Error('A figurinha excede o limite de 25MB suportado.')
+      if (stickerMessage) {
+        // ─── CAMINHO 1: figurinha animada → MP4 (ponte anim_dump + ffmpeg) ───
+        const stream = await downloadContentFromMessage(stickerMessage, 'image')
+        let buffer = Buffer.from([])
+        for await (const chunk of stream) {
+          buffer = Buffer.concat([buffer, chunk])
+          if (buffer.length > LIMITE_BYTES) {
+            throw new Error('A figurinha excede o limite de 25MB suportado.')
+          }
         }
-      }
+        if (buffer.length === 0) {
+          throw new Error('A figurinha foi baixada vazia (0 bytes).')
+        }
 
-      if (buffer.length === 0) {
-        throw new Error('A figurinha foi baixada vazia (0 bytes).')
-      }
-
-      // Define os caminhos temporários dos arquivos
-      const nomeArquivo = `togif_${Date.now()}`
-      const caminhoWebp = path.join(pastaTemp, `${nomeArquivo}.webp`)
-      const caminhoMp4 = path.join(pastaTemp, `${nomeArquivo}.mp4`)
-
-      // Salva o buffer do webp animado temporariamente
-      fs.writeFileSync(caminhoWebp, buffer)
-
-      // Converte o WebP animado para MP4 (que o WhatsApp interpreta como GIF se enviado corretamente)
-      ffmpeg(caminhoWebp, { timeout: 120 }) // Proteção: aborta a conversão se passar de 120s
-        .outputOptions([
-          '-nostdin',
-          '-pix_fmt yuv420p',
-          '-c:v libx264',
-          '-movflags faststart',
-          '-filter:v fps=fps=20'
-        ])
-        .toFormat('mp4')
-        .save(caminhoMp4)
-        .on('end', async () => {
-          // Envia o arquivo como vídeo curto/GIF (gifPlayback: true faz ele rodar em loop igual um GIF)
-          await sock.sendMessage(jid, { 
-            video: fs.readFileSync(caminhoMp4),
-            caption: '🔮 Aqui está seu GIF desperto!',
-            gifPlayback: true
+        if (!webpEhAnimado(buffer)) {
+          await sock.sendMessage(jid, { react: { text: '❌', key: msg.key } }).catch(() => {})
+          return await sock.sendMessage(jid, {
+            text: '🖼️ *Essa figurinha é estática (sem animação)...*\n\nPara ela, use `/toimg` — o /togif só desperta figurinhas ANIMADAS.'
           }, { quoted: msg })
+        }
 
-          // Deleta os arquivos temporários do disco
-          if (fs.existsSync(caminhoWebp)) fs.unlinkSync(caminhoWebp)
-          if (fs.existsSync(caminhoMp4)) fs.unlinkSync(caminhoMp4)
-        })
-        .on('error', async (err) => {
-          console.error('Erro no FFmpeg:', err)
-          await sock.sendMessage(jid, { text: '❌ Ocorreu um erro interno no FFmpeg ao processar o GIF.' }, { quoted: msg })
-          if (fs.existsSync(caminhoWebp)) fs.unlinkSync(caminhoWebp)
-          if (fs.existsSync(caminhoMp4)) fs.unlinkSync(caminhoMp4)
-        })
+        caminhoWebp = path.join(os.tmpdir(), `${idUnico}.webp`)
+        fs.writeFileSync(caminhoWebp, buffer)
+
+        console.log(`[togif] 🌉 ponte anim_dump+ffmpeg sobre webp animado (${buffer.length} bytes)...`)
+        const resultado = await webpAnimadoParaMp4(caminhoWebp, caminhoMp4, 12)
+        console.log(`[togif] ✅ MP4 pronto: ${fs.statSync(caminhoMp4).size} bytes (${resultado.quantidadeFrames} frames @ ${resultado.fps}fps)`)
+      } else {
+        // ─── CAMINHO 2: vídeo citado → MP4 (re-encode direto, ffmpeg decodifica) ───
+        const stream = await downloadContentFromMessage(videoMessage, 'video')
+        let buffer = Buffer.from([])
+        for await (const chunk of stream) {
+          buffer = Buffer.concat([buffer, chunk])
+          if (buffer.length > LIMITE_BYTES) {
+            throw new Error('O vídeo excede o limite de 25MB suportado.')
+          }
+        }
+        if (buffer.length === 0) {
+          throw new Error('O vídeo foi baixado vazio (0 bytes).')
+        }
+        caminhoWebp = path.join(os.tmpdir(), `${idUnico}-in.mp4`)
+        fs.writeFileSync(caminhoWebp, buffer)
+        console.log('[togif] 🎬 re-encodando vídeo citado p/ GIF-playback...')
+        await reencodarParaMp4(caminhoWebp, caminhoMp4)
+        console.log(`[togif] ✅ MP4 pronto: ${fs.statSync(caminhoMp4).size} bytes`)
+      }
+
+      // 3) 📤 Envia em loop (gifPlayback: true = roda como GIF), citando a original
+      await sock.sendMessage(jid, {
+        video: fs.readFileSync(caminhoMp4),
+        caption: '🔮 Aqui está seu GIF desperto!',
+        gifPlayback: true
+      }, { quoted: msg })
+
+      await sock.sendMessage(jid, { react: { text: '✅', key: msg.key } }).catch(() => {})
+      console.log('[togif] ✅ GIF enviado com sucesso')
 
     } catch (err) {
-      console.error('Erro ao converter figurinha em GIF:', err)
-      await sock.sendMessage(jid, { text: '❌ Ocorreu um erro ao tentar converter essa figurinha.' }, { quoted: msg })
+      // 🛡️ Nada escapa pro socket: loga o erro REAL e avisa com calma
+      console.error('[togif] 💥 erro capturado (o bot segue vivo):', err?.stack || err)
+      if (err?.mensagemExecutavel) {
+        console.error('[togif] 📎 stderr do conversor:', err.mensagemExecutavel)
+      }
+      await sock.sendMessage(jid, { react: { text: '❌', key: msg.key } }).catch(() => {})
+      await sock.sendMessage(jid, {
+        text: '❌ Não consegui converter essa mídia agora — o feitiço falhou, mas Hipnos segue de pé. Tente novamente em instantes.'
+      }, { quoted: msg }).catch(() => {})
+    } finally {
+      // 🧹 Limpeza SEMPRE — nunca acumula lixo no disco efêmero
+      for (const caminho of [caminhoWebp, caminhoMp4]) {
+        if (caminho) await apagarComRetry(caminho)
+      }
     }
   }
 }
