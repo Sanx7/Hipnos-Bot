@@ -86,7 +86,75 @@ module.exports = {
   caminhoBinarioWebp
 };
 
-// ─── 🖼️ Extrai TODOS os frames de um webp animado p/ PNGs ───
+// ─── 🧯 THUMBNAIL SEGURO (lição do /revelar, agora p/ QUALQUER envio de imagem) ───
+// ⚠️ REGRA DE OURO DO RENDER: enviar `image:` SEM `jpegThumbnail` faz a
+// Baileys gerar a miniatura NA HORA com sharp/libvips IN-PROCESS — e o
+// libvips/GLib quebra o processo inteiro ("GLib-GObject-CRITICAL: cannot
+// retrieve class for invalid (unclassed) type"), sem chance de try/catch
+// em JS. O /toimg usava esse caminho e derrubava o bot logo após o log
+// "✅ JPG pronto" (a conversão era segura; o ENVIO não).
+// Solução: gerar o JPEG (~64px) com o ffmpeg em PROCESSO FILHO e entregar
+// `jpegThumbnail` pronto no sendMessage → `requiresThumbnailComputation`
+// vira false e a Baileys PULA o sharp/libvips por completo.
+// Se até o ffmpeg falhar, o JPEG 8x8 embutido (gerado pelo próprio
+// @ffmpeg-installer do projeto) garante que a mensagem sai — com preview
+// simples, mas sai — e o bot permanece de pé. NUNCA lança.
+const THUMB_FALLBACK_JPEG_BASE64 =
+  '/9j/4AAQSkZJRgABAgAAAQABAAD//gAQTGF2YzU4LjQyLjEwMgD/2wBDAAgEBAQEBAUFBQUFBQYGBgYGBgYGBgYGBgYHBwcICAgHBwcGBgcHCAgICAkJCQgICAgJCQoKCgwMCwsODg4RERT/xABLAAEBAAAAAAAAAAAAAAAAAAAABwEBAAAAAAAAAAAAAAAAAAAAABABAAAAAAAAAAAAAAAAAAAAABEBAAAAAAAAAAAAAAAAAAAAAP/AABEIAAgACAMBIgACEQADEQD/2gAMAwEAAhEDEQA/AL+AD//Z';
+
+/**
+ * Gera um thumbnail JPEG (~64px) da imagem usando o binário do ffmpeg em
+ * PROCESSO FILHO (execFile, args em ARRAY — sem shell, sem interpolação).
+ * NUNCA rejeita: em qualquer falha devolve o fallback 8x8 embutido.
+ * @returns {Promise<{base64: string, fonte: 'ffmpeg'|'fallback', caminho: string}>}
+ */
+function gerarJpegThumbnail(caminhoImagem, pastaTemp, idUnico) {
+  return new Promise((resolve) => {
+    const caminhoThumb = path.join(pastaTemp, `thumb_${idUnico}.jpg`);
+    const binFfmpeg = (() => {
+      try {
+        return require('@ffmpeg-installer/ffmpeg').path;
+      } catch (err) {
+        return 'ffmpeg';
+      }
+    })();
+
+    rodarExecutavel(
+      binFfmpeg,
+      ['-y', '-nostdin', '-i', caminhoImagem, '-vf', 'scale=64:-1', '-vframes', '1', caminhoThumb],
+      30000
+    )
+      .then(() => {
+        try {
+          if (fs.existsSync(caminhoThumb)) {
+            const bufferThumb = fs.readFileSync(caminhoThumb);
+            if (bufferThumb.length > 0) {
+              return resolve({ base64: bufferThumb.toString('base64'), fonte: 'ffmpeg', caminho: caminhoThumb });
+            }
+          }
+        } catch (errLeitura) {
+          console.error('[webp-animado] ⚠️ falha ao ler thumbnail gerado — usando fallback 8x8:', errLeitura?.message);
+        }
+        console.error('[webp-animado] ⚠️ ffmpeg não produziu thumbnail — usando fallback 8x8');
+        resolve({ base64: THUMB_FALLBACK_JPEG_BASE64, fonte: 'fallback', caminho: caminhoThumb });
+      })
+      .catch((err) => {
+        console.error('[webp-animado] ⚠️ ffmpeg falhou no thumbnail (fallback 8x8):',
+          err?.mensagemExecutavel || err?.message || err);
+        resolve({ base64: THUMB_FALLBACK_JPEG_BASE64, fonte: 'fallback', caminho: caminhoThumb });
+      });
+  });
+}
+
+Object.assign(module.exports, {
+  extrairFramesAnimados,
+  montarMp4DeFrames,
+  webpAnimadoParaMp4,
+  webpParaJpg,
+  gerarJpegThumbnail,
+  THUMB_FALLBACK_JPEG_BASE64
+});
+
 // Usa o anim_dump da libwebp (binário que ENTENDE o container animado).
 // O anim_dump nomeia os frames com prefixo + índice de 4 dígitos:
 //   frame_0000.png, frame_0001.png, ...
