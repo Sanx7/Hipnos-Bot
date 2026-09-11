@@ -110,6 +110,22 @@ function carregarComandos(pasta) {
         if (comando.nome && comando.executar) {
           comandos.set(comando.nome, comando)
           console.log(`✅ Comando carregado: ${comando.nome}`)
+
+          // 🏷️ ALIASES: registra apelidos extras para o MESMO módulo
+          // (ex.: /checkativo também responde a /mensagens, /msgs e /ativo).
+          // Não sobrescreve nomes já registrados — o 1º comando carregado
+          // mantém a precedência (mesma regra dos arquivos de alias).
+          if (Array.isArray(comando.aliases)) {
+            for (const apelido of comando.aliases) {
+              if (!apelido || typeof apelido !== 'string') continue
+              if (comandos.has(apelido)) {
+                console.log(`⚠️ Alias ignorado (já existe): ${apelido}`)
+                continue
+              }
+              comandos.set(apelido, comando)
+              console.log(`   ↳ apelido: /${apelido}`)
+            }
+          }
         }
       } catch (err) {
         console.log(`❌ Erro ao carregar ${arquivo}`)

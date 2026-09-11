@@ -39,7 +39,7 @@ module.exports = {
       }
 
       // 2) Lista de ativos (expirados já são removidos do banco nessa chamada)
-      const lista = vip.listarVipsAtivos()
+      const lista = await vip.listarVipsAtivos()
 
       if (!lista.length) {
         return await sock.sendMessage(jid, {

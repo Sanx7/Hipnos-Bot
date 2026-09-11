@@ -164,7 +164,7 @@ async function savePlayer(jid, data) {
     { upsert: true }
   )
 
-  // Sustitui o jid do objeto retornado pelo limpo (defensivo)
+  // Substitui o jid do objeto retornado pelo limpo (defensivo)
   if (jogadorGravado.jid !== jidLimpo) jogadorGravado.jid = jidLimpo
   return jogadorGravado
 }

@@ -87,7 +87,7 @@ module.exports = {
       }
 
       // 5) Outorga no banco (soma automática se já for VIP ativo)
-      const resultado = vip.adicionarVip(alvo, dias)
+      const resultado = await vip.adicionarVip(alvo, dias)
       if (!resultado) {
         return await sock.sendMessage(jid, {
           text: '⛔ Não foi possível outorgar o VIP... Tente novamente.'

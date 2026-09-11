@@ -77,6 +77,9 @@ module.exports = {
 📢 /hidetag [texto]
 ➥ Convocação oculta de todas as almas do grupo.
 
+🗑️ /delete (ou /d)
+➥ Apaga a mensagem respondida e o próprio comando. (Responda à mensagem.)
+
 ════════════════════
 
 🛡️ GUARDIÕES DO LIMBO (ANTIS)
