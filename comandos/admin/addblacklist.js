@@ -81,6 +81,14 @@ module.exports = {
         }, { quoted: msg });
       }
 
+      // 🚫 PROTEÇÃO DO DONO DO BOT: nem outro dono pode lançar um dono à
+      // blacklist — isso também removeria o alvo do grupo, lá embaixo.
+      if (ehDonoDoBot(participantes, alvo)) {
+        return await sock.sendMessage(jid, {
+          text: '⛔ Não é possível executar essa ação contra o dono do bot.'
+        }, { quoted: msg });
+      }
+
       let listaAtual = lerBlacklist();
       const alvoLimpo = limparNumero(alvo);
 

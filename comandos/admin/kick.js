@@ -1,5 +1,8 @@
 const cooldown = new Map();
 
+// Configuração global do bot (helper de dono — PROOF-LID)
+const { ehDonoDoBot } = require('../../config');
+
 function isAdmin(p) {
   return p?.admin === "admin" || p?.admin === "superadmin";
 }
@@ -50,6 +53,14 @@ module.exports = {
       if (mentioned === sender) {
         return sock.sendMessage(jid, {
           text: "❌ Você não pode se remover."
+        }, { quoted: msg });
+      }
+
+      // 🚫 PROTEÇÃO DO DONO DO BOT: não importa quem executou — se o alvo é
+      // dono do bot, o kick é recusado na hora.
+      if (ehDonoDoBot(participants, mentioned)) {
+        return sock.sendMessage(jid, {
+          text: "⛔ Não é possível executar essa ação contra o dono do bot."
         }, { quoted: msg });
       }
 

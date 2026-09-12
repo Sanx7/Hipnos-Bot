@@ -95,6 +95,22 @@ function configAtiva(configs, chaveCamelCase, chaveMinuscula, id) {
   )
 }
 
+// 👑 O remetente é DONO DO BOT? (usado pelas automações que removem o sender)
+// Mesmo padrão PROOF-LID do modo restrito: 1º teste direto com o número real
+// (zero custo de API); se não bater, busca os metadados e resolve via
+// ehDonoDoBot — cobre o caso do WhatsApp entregar o sender como "@lid".
+// Nunca lança: em falha de metadados, cai na comparação direta.
+async function ehRemetenteEhDono(sock, jid, sender) {
+  if (OWNER_NUMBERS.includes(limparNumero(sender))) return true
+  try {
+    const metadados = await sock.groupMetadata(jid)
+    return ehDonoDoBot(metadados?.participants, sender)
+  } catch (err) {
+    console.error('Erro ao buscar metadados p/ verificar dono do remetente:', err)
+    return OWNER_NUMBERS.includes(limparNumero(sender))
+  }
+}
+
 function carregarComandos(pasta) {
   const arquivos = fs.readdirSync(pasta)
 
@@ -226,7 +242,9 @@ async function startBot() {
 
           const intrusos = participants.filter(p => {
             const clean = normalizar(p);
-            return clean && listaNegra.includes(clean);
+            // 🛡️ Donos do bot são IMUNES até à anti-blacklist automática
+            // (a proteção é sobre QUEM é o alvo, não sobre quem executou).
+            return clean && listaNegra.includes(clean) && !OWNER_NUMBERS.includes(clean);
           });
 
           if (intrusos.length > 0) {
@@ -362,6 +380,12 @@ async function startBot() {
             const ehPagamentoStealth = msg.messageStubType === 63 || msg.messageStubType === 40 || msg.messageStubType === 41;
 
             if (ehPagamentoNormal || ehPagamentoStealth) {
+              // 🛡️ PROTEÇÃO DO DONO DO BOT: a automação também não remove o
+              // dono (vale mesmo quando o sender chega como "@lid").
+              if (await ehRemetenteEhDono(sock, jid, sender)) {
+                console.log('💤 antiPayment ignorado — o remetente é dono do bot.');
+                return;
+              }
               await sock.sendMessage(jid, { delete: { remoteJid: jid, fromMe: false, id: msg.key.id, participant: sender } });
               await sock.groupSettingUpdate(jid, 'announcement');
               await sock.groupParticipantsUpdate(jid, [sender], 'remove');
@@ -377,6 +401,12 @@ async function startBot() {
             const marcouStatus = contextInfo?.remoteJid === 'status@broadcast';
 
             if (marcouStatus) {
+              // 🛡️ PROTEÇÃO DO DONO DO BOT: a automação também não remove o
+              // dono (vale mesmo quando o sender chega como "@lid").
+              if (await ehRemetenteEhDono(sock, jid, sender)) {
+                console.log('💤 antiStatus ignorado — o remetente é dono do bot.');
+                return;
+              }
               await sock.sendMessage(jid, { delete: { remoteJid: jid, fromMe: false, id: msg.key.id, participant: sender } });
               await sock.groupParticipantsUpdate(jid, [sender], 'remove');
               await sock.sendMessage(jid, {

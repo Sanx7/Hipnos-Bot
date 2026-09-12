@@ -1,6 +1,9 @@
 const fs = require('fs');
 const path = require('path');
 
+// Configuração global do bot (helper de dono — PROOF-LID)
+const { ehDonoDoBot } = require('../../config');
+
 // Caminho da lista negra (comandos/dados/blacklist.json)
 const BANCO_BLACKLIST = path.join(__dirname, '..', 'dados', 'blacklist.json');
 
@@ -50,6 +53,14 @@ module.exports = {
 
       if (!ehAdmin) {
         return await sock.sendMessage(jid, { text: '❌ Apenas administradores podem usar este comando.' }, { quoted: msg });
+      }
+
+      // 🚫 PROTEÇÃO DO DONO DO BOT (falha de segurança corrigida):
+      // A checagem é sobre QUEM É O ALVO — vale para admin, outro dono ou
+      // até o próprio bot processando o comando por engano. Nada é gravado
+      // na blacklist nem removido antes desta verificação.
+      if (ehDonoDoBot(metadados.participants, alvo)) {
+        return await sock.sendMessage(jid, { text: '⛔ Não é possível executar essa ação contra o dono do bot.' }, { quoted: msg });
       }
 
       // IDs Fixos de Segurança (Mestre e Bot)

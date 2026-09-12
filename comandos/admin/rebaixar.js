@@ -4,6 +4,9 @@ function isAdmin(p) {
 
 const cooldown = new Map();
 
+// Configuração global do bot (helper de dono — PROOF-LID)
+const { ehDonoDoBot } = require('../../config');
+
 module.exports = {
   nome: "rebaixar",
 
@@ -64,6 +67,18 @@ module.exports = {
           jid,
           {
             text: "❌ Usuário não encontrado no grupo."
+          },
+          { quoted: msg }
+        );
+      }
+
+      // 🚫 PROTEÇÃO DO DONO DO BOT: retirar o cargo de admin do dono também
+      // é recusado (mesmo vindo de outro dono ou do próprio bot).
+      if (ehDonoDoBot(metadata.participants, alvo)) {
+        return sock.sendMessage(
+          jid,
+          {
+            text: "⛔ Não é possível executar essa ação contra o dono do bot."
           },
           { quoted: msg }
         );
