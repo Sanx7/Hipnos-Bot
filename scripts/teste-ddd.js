@@ -34,7 +34,7 @@ global.fetch = async (url) => {
   return fetchReal(url)
 }
 
-const comando = require('../comandos/utilitario/ddd')
+const comando = require('../comandos/menu-utilitario/ddd')
 
 // ─── Mocks de mensagem/sock ───
 const JID_GRUPO = '120363000000000000@g.us'

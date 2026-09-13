@@ -36,6 +36,12 @@ enfrentam o julgamento das sombras."
 👤 /perfil
 ➥ Mostra o perfil do autor (ou de um @mencionado): foto, número, cargo e posição no ranking do grupo.
 
+ 💡 /sugestao <texto>
+ ➥ Envia uma ideia de melhoria direto aos donos do bot (ex: /sugestao criar comando de lembretes).
+
+ ⭐ /avaliar <1-5>
+ ➥ Avalie o bot com uma nota de 1 a 5 (ex: /avaliar 5). Veja a média com /mediaavaliacoes.
+
 👁️‍🗨️ /revelar
 ➥ Revela fotos/vídeos de visualização única (Responda à mídia).
 
@@ -88,7 +94,10 @@ enfrentam o julgamento das sombras."
 🎲 BRINCADEIRAS
 
 🎲 /menu-brincadeiras (ou /brincadeira)
-➥ Abre o pergaminho das brincadeiras e oráculos do sono.
+➥ Abre o pergaminho das brincadeiras, oráculos e ações animadas do sono.
+
+🎭 /tapa, /beijo, /abraço, /soco, /chute, /carinho, /mordida, /cutucada, /aconchego, /comer
+➥ Ações animadas com GIFs — marque alguém (@usuario) para interagir.
 
 ════════════════════
 

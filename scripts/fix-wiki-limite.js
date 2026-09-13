@@ -1,5 +1,5 @@
 const fs = require('fs')
-const p = 'comandos/utilitario/wiki.js'
+const p = 'comandos/menu-utilitario/wiki.js'
 let t = fs.readFileSync(p, 'utf8')
 const alvo = "const USER_AGENT = 'HipnosBot/1.0 (https://github.com/Sanx7/Hipnos-Bot)'"
 if (!t.includes(alvo)) {

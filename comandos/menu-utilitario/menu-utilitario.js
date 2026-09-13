@@ -1,8 +1,8 @@
 // ============================================
 // 🧰 MENU-UTILITARIO — Pergaminho das Ferramentas
 // ============================================
-// Lista TODOS os comandos utilitários do bot (comandos/menu-utilitario/ e
-// comandos/utilitario/), seguindo o mesmo estilo visual do /menu principal.
+// Lista TODOS os comandos utilitários do bot (todos vivem em comandos/menu-utilitario/),
+// seguindo o mesmo estilo visual do /menu principal.
 // Consultar este menu é livre — igual ao /menu geral.
 // ============================================
 
@@ -38,6 +38,9 @@ module.exports = {
 
 🎵 /tiktok <link>
 ➥ Baixa e envia vídeos do TikTok sem marca d'água (também: /tt, /tk e /tiktokdl). Ex.: /tiktok https://vm.tiktok.com/XXXXXXX
+
+ 📌 /pinterest <link>
+ ➥ Baixa imagem ou vídeo de um pin sem marca d'água (também: /pin e /pindl). Ex.: /pinterest https://pin.it/XXXXX
 
 📜 /transcrever (responda a um áudio/vídeo)
 ➥ Escreve o que é dito na mídia citada — transcrição em texto (Groq Whisper).

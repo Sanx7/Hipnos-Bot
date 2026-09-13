@@ -46,6 +46,40 @@ module.exports = {
 
 ════════════════════
 
+🎭 AÇÕES (INTERAÇÃO ANIMADA)
+
+👋 /tapa @usuario
+➥ Dá um tapa em alguém (GIF animado).
+
+💋 /beijo @usuario
+➥ Dá um beijo em alguém (GIF animado).
+
+🤗 /abraço @usuario
+➥ Dá um abraço em alguém (GIF animado).
+
+👊 /soco @usuario
+➥ Dá um soco em alguém (GIF animado).
+
+🦶 /chute @usuario
+➥ Dá um chute em alguém (GIF animado).
+
+🫳 /carinho @usuario
+➥ Faz carinho em alguém (GIF animado).
+
+🦷 /mordida @usuario
+➥ Dá uma mordida em alguém (GIF animado).
+
+👉 /cutucada @usuario
+➥ Cutuca alguém (GIF animado).
+
+🫂 /aconchego @usuario
+➥ Aconchega alguém (GIF animado).
+
+😋 /comer @usuario
+➥ Come alguém (GIF animado).
+
+════════════════════
+
 🎲 JOGOS
 
 🪙 /moeda (ou /flip)
@@ -59,6 +93,12 @@ module.exports = {
 
 🔢 /numero [min] [max]
 ➥ Sorteia um número no intervalo (ex: /numero 10 20). Padrão: 1 a 100.
+
+🕹️ /velha @usuario
+➥ Desafia quem você marcar para uma partida de jogo da velha 3x3 (tabuleiro em ❌/⭕/▫️). Para encerrar: /velha cancelar.
+
+❌ /jogar [1-9]
+➥ Marca uma posição no tabuleiro da partida em curso (ex: /jogar 5, teclado numérico). Só joga quem é a vez.
 
 ════════════════════
 

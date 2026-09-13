@@ -16,7 +16,7 @@ global.fetch = async (url) => {
   if (modo === 'rede-fora') throw new Error('ENOTFOUND')
   return { ok: true, status: 200, text: async () => JSON.stringify(corpo) }
 }
-const comando = require('../comandos/utilitario/dicionario')
+const comando = require('../comandos/menu-utilitario/dicionario')
 const JID_GRUPO = '120363000000000000@g.us'
 const JID_PRIVADO = '5555000000001@s.whatsapp.net'
 function criarMsg(texto, jid) {

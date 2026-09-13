@@ -20,8 +20,8 @@ global.fetch = async (url, opcoes) => {
   return { ok: true, status: 200, json: async () => corpoOk }
 }
 
-const gpt = require('../comandos/utilitario/gpt')
-const gemini = require('../comandos/utilitario/gemini')
+const gpt = require('../comandos/menu-utilitario/gpt')
+const gemini = require('../comandos/menu-utilitario/gemini')
 
 const JID_GRUPO = '120363000000000000@g.us'
 const CHAVE_REAL = process.env.GROQ_API_KEY

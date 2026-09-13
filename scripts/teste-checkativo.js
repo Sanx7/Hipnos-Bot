@@ -26,7 +26,7 @@ database.buscarEstatisticasUsuario = async (grupoId, usuarioId) => {
   return estatisticasFake.dados
 }
 
-const comando = require('../comandos/utilitario/checkativo')
+const comando = require('../comandos/menu-utilitario/checkativo')
 
 // ─── Mocks ───
 const JID_GRUPO = '120363000000000000@g.us'

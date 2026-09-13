@@ -123,6 +123,32 @@ function carregarComandos(pasta) {
       try {
         const comando = require(caminho)
 
+        // 📦 Módulo que exporta um ARRAY de comandos (ex.: menu-brincadeira/acoes.js)
+        // Cada elemento do array é registrado independentemente no Map.
+        if (Array.isArray(comando)) {
+          for (const item of comando) {
+            if (item?.nome && item.executar) {
+              comandos.set(item.nome, item)
+              console.log(`✅ Comando carregado: ${item.nome}`)
+
+              if (Array.isArray(item.aliases)) {
+                for (const apelido of item.aliases) {
+                  if (!apelido || typeof apelido !== 'string') continue
+                  if (comandos.has(apelido)) {
+                    console.log(`⚠️ Alias ignorado (já existe): ${apelido}`)
+                    continue
+                  }
+                  comandos.set(apelido, item)
+                  console.log(`   ↳ apelido: /${apelido}`)
+                }
+              }
+            } else {
+              console.log(`⚠️ Item ignorado em ${arquivo}: sem nome/executar`)
+            }
+          }
+          continue
+        }
+
         if (comando.nome && comando.executar) {
           comandos.set(comando.nome, comando)
           console.log(`✅ Comando carregado: ${comando.nome}`)

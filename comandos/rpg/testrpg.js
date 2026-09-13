@@ -28,8 +28,15 @@ module.exports = {
       const jogador = await getPlayer(sender)
 
       // 2) Formata a data de criação
-      const criadoEm = jogador.criadoEm
-        ? new Date(criadoEm).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })
+      // ⚠️ FIX DO TDZ (temporal dead zone): o código antigo era
+      // `const criadoEm = jogador.criadoEm ? new Date(criadoEm)...` — a própria
+      // `criadoEm` era usada DENTRO do inicializador do `const` (linha 32),
+      // antes de existir → ReferenceError: Cannot access 'criadoEm' before
+      // initialization. Agora a data bruta fica numa variável própria e só
+      // depois é formatada (declaração sempre antes do uso).
+      const criadoEmBruto = jogador.criadoEm
+      const criadoEm = criadoEmBruto
+        ? new Date(criadoEmBruto).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })
         : '?'
       const novoJogador = !jogador._id ? '✅ Criado agora!' : '📖 Já existia'
 
