@@ -45,8 +45,19 @@ module.exports = {
 🌙 /unmute @membro
 ➥ Devolve a voz ao silenciado.
 
-👋 /bemvindo (1 ou 0)
-➥ Ativa ou desativa a saudação de novos membros.
+ /welcome (1 ou 0)
+ Ativa ou desativa a saudação de novos membros. Sem argumento mostra o status. (Também responde a /bemvindo.)
+
+🖼️ /setbannerbv
+➥ Define o banner próprio deste grupo (envie ou responda a uma imagem). A foto do novo membro entra na moldura da arte. Sem imagem mostra as instruções.
+
+📝 /legendabv [texto]
+➥ Define a legenda das boas-vindas deste grupo. Placeholders: @nome, @numero, @grupo e @quantidade. Sem texto mostra a legenda atual + prévia.
+
+♻️ /resetbannerbv · /resetlegendabv
+➥ Apagam o banner/legenda próprios: as boas-vindas voltam ao padrão.
+
+ℹ️ Também valem: /setbannerbv reset e /legendabv reset.
 
 ════════════════════
 

@@ -42,6 +42,17 @@ const { registrarMensagem } = require('./database')
 //   de grupo e dono do bot (ehDonoDoBot resolve o LID do sender nos metadados)
 const { OWNER_NUMBERS, AVISAR_BLOQUEIO, limparNumero, ehAdminDoGrupo, ehDonoDoBot } = require('./config')
 
+// 🗄️ Configurações POR GRUPO no MongoDB (hoje: liga/desliga do /welcome).
+// welcomeHabilitado(grupoId) é a checagem usada pelo handler de entrada de
+// membros (group-participants.update) antes de saudar — NUNCA lança.
+const { welcomeHabilitado } = require('./configuracoes-grupo')
+
+// 🌙 BOAS-VINDAS COM BANNER (boasvindas.js): monta a arte com a foto do novo
+// membro na moldura do banner (jimp — JS puro) + a legenda do grupo
+// (customizada via /legendabv ou a padrão). NUNCA lança: em qualquer falha
+// ele mesmo cai para uma saudação em TEXTO.
+const { enviarBoasVindas } = require('./boasvindas')
+
 // ====================
 // CONFIGURAÇÃO DO EXPRESS (PARA O RENDER)
 // ====================
@@ -256,12 +267,6 @@ async function startBot() {
     if (!participants) return;
 
     try {
-      const caminhoConfigs = path.join(__dirname, 'comandos', 'dados', 'antias.json');
-      let configs = { welcome: [] };
-      if (fs.existsSync(caminhoConfigs)) {
-        configs = JSON.parse(fs.readFileSync(caminhoConfigs, 'utf-8'));
-      }
-
       // --- PARTE 1: ANTI-BLACKLIST ---
       if (action === 'add') {
         const caminhoBL = path.join(__dirname, 'comandos', 'dados', 'blacklist.json');
@@ -292,10 +297,25 @@ async function startBot() {
         }
       }
 
-      // --- PARTE 2: SISTEMA DE BOAS-VINDAS / DESPEDIDAS (APENAS TEXTO) ---
-      if (configs.welcome?.includes(grupoId)) {
+      // --- PARTE 2: SISTEMA DE BOAS-VINDAS / DESPEDIDAS ---
+      // 🌙 O liga/desliga vem do MongoDB, POR GRUPO (comando /welcome),
+      // via configuracoes-grupo.js — não mora mais no antias.json.
+      // welcomeHabilitado nunca lança (fail-safe: assume DESLIGADO).
+      if (await welcomeHabilitado(grupoId)) {
 
         console.log('Atualização recebida:', participants)
+
+        // 📋 Metadados do grupo UMA única vez por atualização (antes
+        // a busca ficava DENTRO do laço: uma chamada de rede extra por membro).
+        let nomeGrupo = "Recinto"
+        let contagemMembros = "—"
+        try {
+          const metadados = await sock.groupMetadata(grupoId)
+          nomeGrupo = metadados.subject || "Recinto"
+          contagemMembros = metadados.participants.length
+        } catch (e) {
+          console.error("Erro ao obter metadados do grupo:", e)
+        }
 
         for (const participante of participants) {
 
@@ -308,32 +328,30 @@ async function startBot() {
 
           const numeroMembro = participanteId.split('@')[0]
 
-          let nomeGrupo = "Recinto"
-          let contagemMembros = "—"
-          try {
-            const metadados = await sock.groupMetadata(grupoId)
-            nomeGrupo = metadados.subject || "Recinto"
-            contagemMembros = metadados.participants.length
-          } catch (e) {
-            console.error("Erro ao obter metadados do grupo:", e)
-          }
-
-          // 📥 PORTAL DE ENTRADA (WELCOME)
+          // 📥 PORTAL DE ENTRADA (WELCOME) — BANNER + LEGENDA PERSONALIZADOS
+          // 🖼️ enviarBoasVindas (boasvindas.js) monta a arte com a foto do
+          // novo membro na moldura do banner (jimp, JS puro) + a legenda do
+          // grupo (customizada via /legendabv ou a padrão).
+          // Se QUALQUER etapa falhar (banco, rede, imagem, envio), ele mesmo
+          // cai para texto e NUNCA lança — o listener segue intacto.
           if (action === 'add') {
-            const textoEntrada = `👁️‍🗨️ *NOVA ALMA NO RECINTO* 👁️‍🗨️\n\n🪐 Seja bem-vindo ao domínio de Hipnos, @${numeroMembro}.\n\n"Mantenha o silêncio e respeite o sono dos justos no grupo *${nomeGrupo}*, ou as sombras cuidarão de você." 🥱💤\n\n*Membro nº ${contagemMembros}*`;
-            
-            await sock.sendMessage(grupoId, { 
-              text: textoEntrada, 
-              mentions: [participanteId] 
-            });
+            await enviarBoasVindas(sock, {
+              grupoId,
+              participanteId,
+              nome: typeof participante === 'object'
+                ? (participante.name || participante.notify || null)
+                : null,
+              nomeGrupo,
+              totalMembros: contagemMembros
+            })
 
           // 📤 PORTAL DE SAÍDA / DESPEDIDA (GOODBYE)
           } else if (action === 'remove') {
             const textoSaida = `🌑 *DESCENSO AO ESQUECIMENTO* 🌑\n\n@${numeroMembro} deixou nosso território e retornou para o mundo desperto. Que o limbo ignore seus passos. 🪐`;
-            
-            await sock.sendMessage(grupoId, { 
-              text: textoSaida, 
-              mentions: [participanteId] 
+
+            await sock.sendMessage(grupoId, {
+              text: textoSaida,
+              mentions: [participanteId]
             });
           }
         }
