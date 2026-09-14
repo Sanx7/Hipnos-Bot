@@ -49,34 +49,34 @@ module.exports = {
 🎭 AÇÕES (INTERAÇÃO ANIMADA)
 
 👋 /tapa @usuario
-➥ Dá um tapa em alguém (GIF animado).
+➥ Dá um tapa em alguém (GIF animado) — responda a mensagem da pessoa (reply) ou mencione com @usuario.
 
 💋 /beijo @usuario
-➥ Dá um beijo em alguém (GIF animado).
+➥ Dá um beijo em alguém (GIF animado) — responda a mensagem da pessoa (reply) ou mencione com @usuario.
 
 🤗 /abraço @usuario
-➥ Dá um abraço em alguém (GIF animado).
+➥ Dá um abraço em alguém (GIF animado) — responda a mensagem da pessoa (reply) ou mencione com @usuario.
 
 👊 /soco @usuario
-➥ Dá um soco em alguém (GIF animado).
+➥ Dá um soco em alguém (GIF animado) — responda a mensagem da pessoa (reply) ou mencione com @usuario.
 
 🦶 /chute @usuario
-➥ Dá um chute em alguém (GIF animado).
+➥ Dá um chute em alguém (GIF animado) — responda a mensagem da pessoa (reply) ou mencione com @usuario.
 
 🫳 /carinho @usuario
-➥ Faz carinho em alguém (GIF animado).
+➥ Faz carinho em alguém (GIF animado) — responda a mensagem da pessoa (reply) ou mencione com @usuario.
 
 🦷 /mordida @usuario
-➥ Dá uma mordida em alguém (GIF animado).
+➥ Dá uma mordida em alguém (GIF animado) — responda a mensagem da pessoa (reply) ou mencione com @usuario.
 
 👉 /cutucada @usuario
-➥ Cutuca alguém (GIF animado).
+➥ Cutuca alguém (GIF animado) — responda a mensagem da pessoa (reply) ou mencione com @usuario.
 
 🫂 /aconchego @usuario
-➥ Aconchega alguém (GIF animado).
+➥ Aconchega alguém (GIF animado) — responda a mensagem da pessoa (reply) ou mencione com @usuario.
 
 😋 /comer @usuario
-➥ Come alguém (GIF animado).
+➥ Come alguém (GIF animado) — responda a mensagem da pessoa (reply) ou mencione com @usuario.
 
 ════════════════════
 
@@ -96,6 +96,12 @@ module.exports = {
 
 🕹️ /velha @usuario
 ➥ Desafia quem você marcar para uma partida de jogo da velha 3x3 (tabuleiro em ❌/⭕/▫️). Para encerrar: /velha cancelar.
+
+🔠 /anagrama [categoria]
+➥ Descubra a palavra secreta letra por letra — 6 erros e o limbo vence (um jogo por grupo; ex: /anagrama animais). Com jogo ativo: /anagrama <letra> chuta, /anagrama palpite <palavra> arrisca tudo, /anagrama desistir desiste.
+
+🎨 /gartic [categoria]
+➥ Adivinhe a palavra pela imagem (Pixabay) — quem acertar primeiro vence (um jogo por grupo, 3 min por rodada; ex: /gartic animais).
 
 ❌ /jogar [1-9]
 ➥ Marca uma posição no tabuleiro da partida em curso (ex: /jogar 5, teclado numérico). Só joga quem é a vez.

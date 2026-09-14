@@ -67,6 +67,16 @@ module.exports = {
 
 ════════════════════
 
+🔮 HORÓSCOPO
+
+🔮 /horoscopo <signo>
+➥ Leitura do dia do Limbo para o seu signo — a mesma para todos no mesmo dia (aceita com ou sem acento). Ex.: /horoscopo leao
+
+🎤 /letra <artista> - <musica>
+➥ Busca a letra de uma música (Lyrics.ovh) e envia em partes se for longa. Ex.: /letra Coldplay - Yellow
+
+════════════════════
+
 🤖 INTELIGÊNCIA ARTIFICIAL
 
 🤖 /gpt <pergunta>

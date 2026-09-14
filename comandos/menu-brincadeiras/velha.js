@@ -15,6 +15,9 @@
 // ============================================
 
 const { limparNumero, acharParticipante } = require('../../config')
+// 🎮 Registro COMPARTILHADO de jogos por grupo: garante o BLOQUEIO CRUZADO
+// (/velha × /anagrama × /gartic) e mantém o bot.js ciente do jogo ativo.
+const { TIPOS, rotuloDoTipo, registrarJogo, removerJogo, jogoDeOutroTipo } = require('../../dados/jogos-ativos')
 
 // ─── Numeração tipo teclado numérico (pad) ───
 //   7 8 9
@@ -157,9 +160,20 @@ async function iniciarPartida(sock, jid, msg, texto) {
       return await sock.sendMessage(jid, { text: AVISO_FORA_GRUPO }, { quoted: msg })
     }
 
+    // 🔒 Bloqueio cruzado: se outro jogo (anagrama/gartic) já está rolando
+    // neste grupo, nem começa — evita dois jogos disputando o mesmo grupo.
+    const outroJogo = jogoDeOutroTipo(jid, TIPOS.VELHA)
+    if (outroJogo) {
+      return await sock.sendMessage(jid, {
+        text: `🔒 Já tem um *${rotuloDoTipo(outroJogo.tipo)}* rolando neste grupo. ` +
+          'Termine (ou cancele) ele antes de abrir um jogo da velha.'
+      }, { quoted: msg })
+    }
+
     // /velha cancelar -> encerra a partida em curso
     if (/^\/velha\s+cancel/i.test(String(texto || ''))) {
       partidas.delete(jid)
+      removerJogo(jid, TIPOS.VELHA)
       return await sock.sendMessage(jid, { text: CONFIRMA_CANCEL }, { quoted: msg })
     }
 
@@ -215,6 +229,8 @@ async function iniciarPartida(sock, jid, msg, texto) {
       }
     }
     partidas.set(jid, partida)
+    // 🎮 Registro compartilhado (bloqueio cruzado + jogos de texto livre)
+    registrarJogo(jid, TIPOS.VELHA, { partida })
 
     const textoInicio =
       '❌⭕ *JOGO DA VELHA* ❌⭕\n\n' +
@@ -294,6 +310,7 @@ async function jogar(sock, jid, msg, texto) {
 
     if (estado.resultado === 'vitoria') {
       partidas.delete(jid)
+      removerJogo(jid, TIPOS.VELHA)
       const textoFinal =
         '❌⭕ *JOGO DA VELHA* ❌⭕\n\n' +
         `${tabuleiroDesenhado}\n\n` +
@@ -306,6 +323,7 @@ async function jogar(sock, jid, msg, texto) {
 
     if (estado.resultado === 'empate') {
       partidas.delete(jid)
+      removerJogo(jid, TIPOS.VELHA)
       const textoFinal =
         '❌⭕ *JOGO DA VELHA* ❌⭕\n\n' +
         `${tabuleiroDesenhado}\n\n` +

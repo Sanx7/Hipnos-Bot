@@ -32,7 +32,7 @@ const path = require('path')
 const { execFile } = require('child_process')
 const axios = require('axios')
 const { Downloader } = require('@tobyg74/tiktok-api-dl')
-const { caminhoFfmpeg, apagarComRetry } = require('./audio-extrator')
+const { caminhoFfmpeg, apagarComRetry } = require('../menu-utilitario/audio-extrator')
 
 // ─── Configurações ───
 const LIMITE_MB = 50 // mesmo padrão do /tomp3

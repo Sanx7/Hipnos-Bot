@@ -4,9 +4,12 @@
 //
 // Uso (na raiz do projeto):  node scripts/teste-play.js
 // ============================================================
-process.env.PLAY_TIMEOUT_MS = '90000'
+// Carrega o .env da raiz (sem sobrescrever o ambiente real) para o
+// teste usar a MESMA BRONXYS_API_KEY configurada no projeto.
+require('../config')
+process.env.PLAY_TIMEOUT_MS = '30000'
 
-const comando = require('../comandos/menu-fig/play')
+const comando = require('../comandos/menu-download/play')
 
 const jidFalso = 'teste-play@s.whatsapp.net'
 const msgFalsa = { key: { id: 'TESTE-PLAY' }, pushName: 'Harness' }
@@ -16,7 +19,12 @@ function criarSockFalso(registro) {
     async sendMessage(jid, conteudo) {
       registro.push(conteudo)
       if (conteudo.audio) {
-        console.log(`   ✅ ÁUDIO ENVIADO: ${(conteudo.audio.length / (1024 * 1024)).toFixed(2)} MB | mimetype=${conteudo.mimetype}`)
+        const tipoAudio = (conteudo.audio && typeof conteudo.audio === 'object' && conteudo.audio.url)
+          ? 'URL' : 'Buffer'
+        console.log(`   ✅ ÁUDIO ENVIADO (${tipoAudio}): fileName=${conteudo.fileName || '-'} | mimetype=${conteudo.mimetype}`)
+      } else if (conteudo.image) {
+        const primeiraLinha = String(conteudo.caption || '').split('\n')[0].slice(0, 100)
+        console.log(`   🖼️ PREVIEW ENVIADO (imagem + legenda): ${primeiraLinha}`)
       } else {
         const primeiraLinha = String(conteudo.text || '').split('\n')[0].slice(0, 100)
         console.log(`   💬 Mensagem: ${primeiraLinha}`)
@@ -46,25 +54,25 @@ const CASOS = [
     }
   },
   {
-    nome: '3) Busca por termo SEM resultado (frase exata inexistente entre aspas)',
-    texto: '/play "zxq jqv bnm plk jjhgfdsa poiuytrewq"',
+    nome: '3) Uso sem argumento (instruções, sem buscar nada)',
+    texto: '/play',
     validar(mensagens) {
-      const temErroAmigavel = mensagens.some(m => typeof m.text === 'string' && (m.text.startsWith('❌') || m.text.startsWith('🔎')))
+      const mostrouUso = mensagens.some(m => typeof m.text === 'string' && m.text.includes('Como usar'))
       const semAudio = !mensagens.some(m => m.audio)
-      return temErroAmigavel && semAudio
-        ? '✅ PASSOU (respondeu mensagem amigável SEM derrubar nada)'
-        : '❌ FALHOU (esperava mensagem amigável sem áudio)'
+      return mostrouUso && semAudio
+        ? '✅ PASSOU (mostrou instruções de uso sem tocar na API)'
+        : '❌ FALHOU (esperava mensagem de uso sem áudio)'
     }
   },
   {
-    nome: '4) BÔNUS — Link INVÁLIDO/inexistente (caminho de link direto)',
-    texto: '/play https://www.youtube.com/watch?v=dQw4w9WgXc9',
+    nome: '4) Vídeo com duração > 1 hora (não deve baixar)',
+    texto: '/play lofi hip hop para estudar 1 hora',
     validar(mensagens) {
-      const temErroAmigavel = mensagens.some(m => typeof m.text === 'string' && m.text.startsWith('❌'))
+      const avisouDuracao = mensagens.some(m => typeof m.text === 'string' && m.text.includes('1 hora'))
       const semAudio = !mensagens.some(m => m.audio)
-      return temErroAmigavel && semAudio
-        ? '✅ PASSOU (respondeu erro amigável SEM derrubar nada)'
-        : '❌ FALHOU (esperava mensagem de erro amigável sem áudio)'
+      return avisouDuracao && semAudio
+        ? '✅ PASSOU (avisou a duração e NÃO tentou baixar)'
+        : '❌ FALHOU (esperava aviso de duração sem áudio)'
     }
   }
 ]

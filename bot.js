@@ -86,6 +86,14 @@ app.listen(port, () => {
 // dependência circular (comando -> bot -> comando) durante o carregamento.
 const { comandos } = require('./comandos-registry')
 
+// 🎮 Registro COMPARTILHADO de jogos por grupo (dados/jogos-ativos.js).
+// Duas responsabilidades que o bot.js usa aqui:
+//   1) 🔒 um jogo ativo por grupo (bloqueio cruzado /velha × /anagrama × /gartic);
+//   2) 💬 entregar as mensagens de TEXTO LIVRE (sem "/") aos jogos que
+//      dependem de ler palpites, como o /gartic.
+// Módulo sem dependências → pode ser exigido pelo bot.js sem ciclo.
+const { processarMensagemLivre } = require('./dados/jogos-ativos')
+
 // Verifica se um JID está ativo na config aceitando tanto camelCase (novo padrão)
 // quanto minúsculas (dados antigos), evitando quebra de compatibilidade.
 function configAtiva(configs, chaveCamelCase, chaveMinuscula, id) {
@@ -455,7 +463,20 @@ async function startBot() {
       if (mutedUsers?.has(sender)) {
         return
       }
-      if (!text.startsWith('/')) return
+      // 🎮 TEXTO LIVRE PARA JOGOS — mensagens que NÃO são comandos podem ser
+      // palpites de uma partida ativa no grupo (ex.: /gartic). O registro
+      // compartilhado (dados/jogos-ativos.js) decide se há um ouvinte
+      // interessado; se a mensagem for consumida, paramos aqui. O fluxo
+      // normal de comandos abaixo nem é tocado.
+      if (!text.startsWith('/')) {
+        try {
+          if (await processarMensagemLivre(sock, jid, msg, text)) return
+        } catch (errPalpite) {
+          // 🛡️ Um ouvinte problemático nunca derruba o listener do Baileys
+          console.error('❌ Erro ao processar palpite de jogo:', errPalpite)
+        }
+        return
+      }
 
       const nomeComando = text
         .slice(1)

@@ -2,8 +2,6 @@ node_modules/
 auth/
 comandos/dados/temp/
 *.exe
-cookies.txt
-cookies*.txt
 mensagens.db
 mensagens.db-wal
 mensagens.db-shm

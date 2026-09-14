@@ -61,6 +61,12 @@ enfrentam o julgamento das sombras."
 📜 /transcrever (responda a um áudio/vídeo)
 ➥ Transcreve o que é dito na mídia citada (áudio/vídeo) para texto.
 
+🔮 /horoscopo <signo>
+➥ Leitura do dia do Limbo para o seu signo — a mesma para todos no mesmo dia (ex: /horoscopo leao).
+
+🎤 /letra <artista> - <musica>
+➥ Busca a letra de uma música (ex: /letra Coldplay - Yellow).
+
 🧰 /menu-utilitario
 ➥ Abre o pergaminho das ferramentas do dia a dia.
 
@@ -97,7 +103,13 @@ enfrentam o julgamento das sombras."
 ➥ Abre o pergaminho das brincadeiras, oráculos e ações animadas do sono.
 
 🎭 /tapa, /beijo, /abraço, /soco, /chute, /carinho, /mordida, /cutucada, /aconchego, /comer
-➥ Ações animadas com GIFs — marque alguém (@usuario) para interagir.
+➥ Ações animadas com GIFs — responda a mensagem da pessoa (reply) ou mencione com @usuario.
+
+🔠 /anagrama [categoria]
+➥ Descubra a palavra secreta letra por letra (um jogo por grupo; ex: /anagrama animais).
+
+🎨 /gartic [categoria]
+➥ Adivinhe a palavra pela imagem (Pixabay) — 3 min por rodada, um jogo por grupo (ex: /gartic animais).
 
 ════════════════════
 

@@ -10,10 +10,14 @@
 //   (testado ao vivo: aceita https://pin.it/4CVodSq). Se o resultado vier
 //   vazio, fazemos um redirect manual via http(s) antes de reenviar.
 // - Detecta imagem vs vídeo pelo conteúdo retornado e envia no formato certo.
-// - Thumbnail via ffmpeg em PROCESSO FILHO (@ffmpeg-installer + execFile
-//   com args em ARRAY — nunca sharp/libvips in-process). Ao passar
-//   jpegThumbnail pronto, a Baileys PULA a geração interna (único ponto
-//   onde ela importaria sharp).
+// - Thumbnail SEMPRE gerada via ffmpeg em PROCESSO FILHO (helper central
+//   gerarJpegThumbnail do webp-animado — nunca sharp/libvips in-process),
+//   com fallback de JPEG 8x8 embutido caso até o ffmpeg falhe. O
+//   jpegThumbnail é entregue SEMPRE no sendMessage: antes, quando o ffmpeg
+//   falhava (ex.: o -ss de 1s nunca achava frame em IMAGEM de 1 frame só),
+//   a imagem saía SEM thumbnail, a Baileys gerava a miniatura sozinha via
+//   sharp/libvips in-process e CRASHAVA o processo inteiro
+//   (GLib-GObject-CRITICAL) — sem chance de try/catch.
 // - Limite de 50 MB (mesmo padrão do /tomp3 e /tiktok).
 // - Erros amigáveis em pt-BR.
 // ============================================================
@@ -21,10 +25,12 @@
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
-const { execFile } = require('child_process')
 const axios = require('axios')
 const { pinterest } = require('btch-downloader')
-const { caminhoFfmpeg, apagarComRetry } = require('../menu-utilitario/audio-extrator')
+const { apagarComRetry } = require('../menu-utilitario/audio-extrator')
+// 🖼️ Helper CENTRAL de thumbnail do projeto (ffmpeg em processo filho +
+// fallback de JPEG 8x8 embutido — NUNCA deixa a Baileys usar sharp/libvips)
+const { gerarJpegThumbnail } = require('../menu-fig/webp-animado')
 
 // ─── Configurações ───
 const LIMITE_MB = 50 // mesmo padrão do /tomp3
@@ -216,27 +222,6 @@ async function baixarArquivo (url) {
   }
 }
 
-// ─── Thumbnail via ffmpeg (processo filho) — nunca sharp/libvips ───
-function gerarThumbnail (caminhoArquivo, idUnico) {
-  return new Promise((resolver) => {
-    const pastaTemp = os.tmpdir()
-    const caminhoThumb = path.join(pastaTemp, `pinterest_thumb_${idUnico}.jpg`)
-    const args = ['-y', '-nostdin', '-ss', '00:00:01.000', '-i', caminhoArquivo, '-vframes', '1', '-vf', 'scale=320:-2', '-q:v', '5', caminhoThumb]
-    execFile(caminhoFfmpeg(), args, { timeout: 30000, maxBuffer: 10 * 1024 * 1024 }, (erro) => {
-      try {
-        if (!erro && fs.existsSync(caminhoThumb)) {
-          const buf = fs.readFileSync(caminhoThumb)
-          if (buf.length > 0) return resolver({ base64: buf.toString('base64'), caminho: caminhoThumb })
-        }
-        console.error('[pinterest] ⚠️ ffmpeg não gerou thumbnail — enviando sem preview:', erro?.message || 'arquivo ausente')
-      } catch (errLeitura) {
-        console.error('[pinterest] ⚠️ falha ao ler thumbnail:', errLeitura?.message)
-      }
-      resolver({ base64: null, caminho: caminhoThumb })
-    })
-  })
-}
-
 // ─── Monta a legenda do pin ───
 function montarLegenda (media) {
   const linhas = ['📌 *Pin do Pinterest baixado*']
@@ -245,36 +230,48 @@ function montarLegenda (media) {
   return linhas.join('\n')
 }
 
-// ─── Envia imagem (com thumbnail do ffmpeg — nunca sharp) ───
+// ─── Envia imagem (SEMPRE com thumbnail do ffmpeg — nunca sharp) ───
 async function enviarImagem (sock, jid, msg, buffer, media) {
   const idUnico = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
   const caminhoTemp = path.join(os.tmpdir(), `pinterest_${idUnico}.jpg`)
   let caminhoThumb = null
   try {
     fs.writeFileSync(caminhoTemp, buffer)
-    const thumb = await gerarThumbnail(caminhoTemp, idUnico)
+    // 🖼️ jpegThumbnail SEMPRE presente: gerado por nós (ffmpeg processo
+    // filho) com fallback 8x8 — sem isso a Baileys usaria sharp/libvips
+    // in-process e mataria o processo (crash não capturável).
+    const thumb = await gerarJpegThumbnail(caminhoTemp, os.tmpdir(), idUnico)
     caminhoThumb = thumb.caminho
-    const conteudo = { image: buffer, caption: montarLegenda(media) }
-    if (thumb.base64) conteudo.jpegThumbnail = Buffer.from(thumb.base64, 'base64')
-    return await sock.sendMessage(jid, conteudo, { quoted: msg })
+    console.log(`[pinterest] 🧯 jpegThumbnail pronto (fonte: ${thumb.fonte}, ${thumb.base64.length} chars base64)`)
+    return await sock.sendMessage(jid, {
+      image: buffer,
+      caption: montarLegenda(media),
+      jpegThumbnail: Buffer.from(thumb.base64, 'base64')
+    }, { quoted: msg })
   } finally {
     await apagarComRetry(caminhoTemp)
     await apagarComRetry(caminhoThumb)
   }
 }
 
-// ─── Envia vídeo (com thumbnail do ffmpeg — nunca sharp) ───
+// ─── Envia vídeo (SEMPRE com thumbnail do ffmpeg — nunca sharp) ───
 async function enviarVideo (sock, jid, msg, buffer, media) {
   const idUnico = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
   const caminhoTemp = path.join(os.tmpdir(), `pinterest_${idUnico}.mp4`)
   let caminhoThumb = null
   try {
     fs.writeFileSync(caminhoTemp, buffer)
-    const thumb = await gerarThumbnail(caminhoTemp, idUnico)
+    // 🖼️ Mesma proteção da imagem: ffmpeg extrai o 1º frame do mp4 em
+    // processo filho e entregamos o jpegThumbnail pronto (fallback 8x8).
+    const thumb = await gerarJpegThumbnail(caminhoTemp, os.tmpdir(), idUnico)
     caminhoThumb = thumb.caminho
-    const conteudo = { video: buffer, caption: montarLegenda(media), mimetype: 'video/mp4' }
-    if (thumb.base64) conteudo.jpegThumbnail = Buffer.from(thumb.base64, 'base64')
-    return await sock.sendMessage(jid, conteudo, { quoted: msg })
+    console.log(`[pinterest] 🧯 jpegThumbnail pronto (fonte: ${thumb.fonte}, ${thumb.base64.length} chars base64)`)
+    return await sock.sendMessage(jid, {
+      video: buffer,
+      caption: montarLegenda(media),
+      mimetype: 'video/mp4',
+      jpegThumbnail: Buffer.from(thumb.base64, 'base64')
+    }, { quoted: msg })
   } finally {
     await apagarComRetry(caminhoTemp)
     await apagarComRetry(caminhoThumb)
