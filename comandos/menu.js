@@ -67,6 +67,9 @@ enfrentam o julgamento das sombras."
 🎤 /letra <artista> - <musica>
 ➥ Busca a letra de uma música (ex: /letra Coldplay - Yellow).
 
+😂 /meme
+➥ Puxa um meme aleatório do Reddit com o título original (imagem, GIF ou vídeo).
+
 🧰 /menu-utilitario
 ➥ Abre o pergaminho das ferramentas do dia a dia.
 
@@ -111,6 +114,12 @@ enfrentam o julgamento das sombras."
 🎨 /gartic [categoria]
 ➥ Adivinhe a palavra pela imagem (Pixabay) — 3 min por rodada, um jogo por grupo (ex: /gartic animais).
 
+🐱 /gatofato
+➥ Solta um fato aleatório sobre gatos, traduzido pro português.
+
+🔢 /curiosidadenumero [número]
+➥ Revela a curiosidade de um número — sem número, a sorte escolhe entre 1 e 1000 (ex: /curiosidadenumero 73).
+
 ════════════════════
 
 👑 ADMINISTRAÇÃO
@@ -130,7 +139,7 @@ enfrentam o julgamento das sombras."
 💠 MEMBROS VIP (SÓ DONO)
 
 💠 /menu-vip
-➥ Abre o pergaminho dos privilegiados: /darvip (outorgar dias de VIP) e /servip (listar VIPs ativos).
+➥ Abre o pergaminho dos privilegiados: /darvip (outorgar dias de VIP) e /listavip (listar VIPs ativos).
 
 ════════════════════
 

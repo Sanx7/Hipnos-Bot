@@ -24,6 +24,17 @@ const fs = require('fs')
 const os = require('os')
 const path = require('path')
 
+// ⏳ COOLDOWN do /s (dados/cooldowns.js — Map em memória, mesmo padrão do
+// jogos-ativos.js) + 💠 verificação de VIP (vip.js — o MESMO sistema do
+// /darvip e do /listavip; isVip aceita JID "@lid" e resolve pelo mapeamento).
+const { verificar: verificarCooldown, marcar: marcarCooldown } = require('../../dados/cooldowns')
+const vip = require('../../vip')
+const { limparNumero } = require('../../config')
+
+// ⏱️ Cooldown: 3 minutos POR USUÁRIO (vale em grupo e no PV) — VIPs ficam
+// isentos (a checagem de VIP pula o cooldown inteiramente, nem consulta o Map).
+const COOLDOWN_S_MS = 3 * 60 * 1000
+
 // ⏱️ Limites
 const LIMITE_VIDEO_SEGUNDOS = 10
 const LIMITE_BYTES_VIDEO = 25 * 1024 * 1024 // 25 MB ao baixar (igual que /togif e /tomp4)
@@ -123,6 +134,30 @@ module.exports = {
     let caminhoWebp = null
 
     try {
+      // ─── ⏳ COOLDOWN / 💠 VIP (por USUÁRIO, vale em grupo e no PV) ───
+      // O VIP pula o cooldown inteiramente (nem consulta o Map). Sem VIP,
+      // quem está dentro dos 3min desde o último uso BEM-SUCEDIDO recebe o
+      // aviso e o pedido NEM é processado (a mídia nem é tocada).
+      const autor = msg.key.participant || msg.key.remoteJid
+      const chaveAutor = limparNumero(autor)
+      let ehVip = false
+      try {
+        ehVip = await vip.isVip(autor)
+      } catch (errVip) {
+        // 🛡️ Falha de infra (ex.: Mongo fora) não pune o usuário: segue com o
+        // cooldown normal — o pior caso é esperar os 3min, nunca um bloqueio.
+        console.error('[s] ⚠️ falha ao verificar VIP (seguindo com cooldown):', errVip?.message || errVip)
+      }
+      if (!ehVip) {
+        const estado = verificarCooldown(chaveAutor, COOLDOWN_S_MS)
+        if (estado.emCooldown) {
+          console.log(`[s] ⏳ cooldown ativo p/ ${chaveAutor}: faltam ${estado.restanteFormatado}`)
+          return await sock.sendMessage(jid, {
+            text: `⏳ *Cooldown do /s* — a nuvem precisa descansar.\n\nAguarde *${estado.restanteFormatado}* para tecer outra figurinha.\n\n💠 VIPs têm invocação livre, sem espera.`
+          }, { quoted: msg })
+        }
+      }
+
       // Verifica se a mensagem é imagem/GIF ou vídeo, direta ou respondida
       const cotada = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage
       const imagem = msg.message?.imageMessage || cotada?.imageMessage
@@ -210,6 +245,10 @@ module.exports = {
 
       // Envia a figurinha de volta para o grupo ou chat privado
       await sock.sendMessage(jid, { sticker: stickerBuffer }, { quoted: msg })
+
+      // ⏳ Cooldown contado SÓ AGORA — uso BEM-SUCEDIDO (a figurinha saiu).
+      // Falhas na geração/envio caem no catch abaixo sem consumir o uso.
+      if (!ehVip) marcarCooldown(chaveAutor)
 
     } catch (err) {
       console.error('[s] 💥 erro ao criar figurinha:', err?.stack || err)

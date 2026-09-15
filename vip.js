@@ -9,7 +9,7 @@
 //   - SINGLETON: um único MongoClient criado uma vez no processo;
 //   - PING DE SAÚDE a cada uso + reconexão automática se a conexão morreu;
 //   - ERROS RUIDOSOS: falha de conexão é logada com causa provável e
-//     RELANÇADA (os comandos /darvip e /servip tratam).
+//     RELANÇADA (os comandos /darvip e /listavip tratam).
 //
 // Funções (todas assíncronas desde a migração):
 //   1. adicionarVip(numero, dias) — outorga VIP por N dias (SOMANDO os dias
@@ -17,8 +17,12 @@
 //   2. listarVipsAtivos() — VIPs vigentes ordenados pela expiração mais
 //      próxima, removendo os expirados do banco (limpeza automática);
 //   3. isVip(numero) — verificação reutilizável p/ qualquer comando que
-//      queira restringir a VIPs (apaga o registro se já venceu);
-//   4. limparExpirados() — remove do banco os VIPs vencidos.
+//      queira restringir a VIPs (apaga o registro se já venceu). Aceita
+//      JID "@lid" (resolve o número real pelo mapeamento da sessão);
+//   4. corrigirVipsComLid() — correção pontual dos registros gravados com
+//      LID no lugar do número real (usada pelo /listavip e pelo script
+//      scripts/migrar-vip-lid.js);
+//   5. limparExpirados() — remove do banco os VIPs vencidos.
 //
 // NÃO existe VIP vitalício: todo registro tem `expira_em` obrigatório
 // (sempre uma data futura calculada a partir dos dias concedidos).
@@ -33,6 +37,10 @@
 
 const { MongoClient } = require('mongodb')
 const { limparNumero } = require('./config')
+// 🪪 Resolução LID→telefone (mapeamento gravado pela Baileys na sessão) —
+// usada pelo isVip (checagem "é VIP?" robusta p/ remetentes que chegam
+// como "@lid") e pela correção pontual corrigirVipsComLid().
+const { resolverLidParaTelefone } = require('./lid')
 
 const DIA_EM_MS = 24 * 60 * 60 * 1000
 // Teto de segurança p/ os dias concedidos (10 anos): evita gravar valores absurdos.
@@ -182,22 +190,83 @@ async function listarVipsAtivos() {
 }
 
 // -------------------------------------------------------------------
+// 🪪 corrigirVipsComLid(): correção PONTUAL dos registros gravados com o
+// LID (ex.: "175952680210489") no lugar do número real. Para cada registro
+// que tiver mapeamento na sessão (lid-mapping reverse, gravado pela
+// Baileys), troca o LID pelo telefone real. Se o número real já tiver
+// registro próprio, os dois são MESCLADOS (menor adicionado_em + maior
+// expira_em) e o registro-LID é apagado. Roda no /listavip (auto-correção)
+// e no scripts/migrar-vip-lid.js (migração manual). NUNCA lança.
+// -------------------------------------------------------------------
+async function corrigirVipsComLid() {
+  const colecao = await obterColecaoVips()
+  const registros = await colecao
+    .find({}, { projection: { _id: 0, numero: 1, adicionado_em: 1, expira_em: 1 } })
+    .toArray()
+
+  let corrigidos = 0
+  for (const registro of registros) {
+    const telefoneReal = await resolverLidParaTelefone(registro.numero)
+    if (!telefoneReal || telefoneReal === registro.numero) continue
+
+    const existente = await colecao.findOne({ numero: telefoneReal })
+    if (existente) {
+      // 🔀 Mescla: mantém o 1º outorgado e a expiração MAIS LONGE dos dois
+      await colecao.updateOne(
+        { numero: telefoneReal },
+        {
+          $set: {
+            numero: telefoneReal,
+            adicionado_em: existente.adicionado_em ?? registro.adicionado_em,
+            expira_em: Math.max(existente.expira_em || 0, registro.expira_em || 0)
+          }
+        }
+      )
+      await colecao.deleteOne({ numero: registro.numero })
+    } else {
+      // ✏️ Correção in-place: troca o LID pelo número real no mesmo registro
+      await colecao.updateOne(
+        { numero: registro.numero },
+        { $set: { numero: telefoneReal } }
+      )
+    }
+    corrigidos += 1
+    console.log(`[vip] 🪪 registro corrigido: LID ${registro.numero} → ${telefoneReal}`)
+  }
+
+  return { corrigidos, total: registros.length }
+}
+
+// -------------------------------------------------------------------
 // ✅ Verificação reutilizável (aceita JID cru ou só dígitos):
 //   true  = existe registro E a expiração ainda não passou
 //   false = não é VIP — e, se o registro já venceu, ele é APAGADO
 //           do banco na hora (auto-limpeza).
+// 🪪 Aceita também JID "@lid": se não houver registro pelo LID, resolve
+// o número real pelo mapeamento da sessão (lid-mapping) e reconsulta —
+// sem isso, comandos restritos a VIP (ex.: o futuro /s) falhariam para
+// quem chega como "@lid" em grupos com LID habilitado.
 // -------------------------------------------------------------------
 async function isVip(numeroBruto) {
   const numero = limparNumero(numeroBruto)
   if (!numero) return false
 
   const colecao = await obterColecaoVips()
-  const registro = await colecao.findOne({ numero })
+  let registro = await colecao.findOne({ numero })
+
+  // 🪪 Caminho LID: o bruto é "@lid" e não há registro pelo LID cru
+  if (!registro && String(numeroBruto || '').endsWith('@lid')) {
+    const telefoneReal = await resolverLidParaTelefone(numero)
+    if (telefoneReal && telefoneReal !== numero) {
+      registro = await colecao.findOne({ numero: telefoneReal })
+    }
+  }
+
   if (!registro) return false
 
   if (registro.expira_em <= Date.now()) {
     // 🧹 VIP vencido deixa de ocupar lugar no banco
-    await colecao.deleteOne({ numero })
+    await colecao.deleteOne({ numero: registro.numero })
     return false
   }
 
@@ -239,9 +308,12 @@ module.exports = {
   adicionarVip,
   listarVipsAtivos,
   isVip,
+  corrigirVipsComLid,
   limparExpirados,
   formatarData,
   DIAS_MAX,
   DIA_EM_MS,
+  NOME_BANCO,
+  NOME_COLECAO,
   __definirColecaoTeste
 }

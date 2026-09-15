@@ -2,7 +2,7 @@
 // 👑 MENU-DONO — Pergaminho dos Soberanos
 // ============================================
 // Lista os comandos EXCLUSIVOS dos DONOS DO BOT que não têm menu próprio.
-// - NÃO repete /darvip e /servip (já estão no /menu-vip);
+// - NÃO repete /darvip e /listavip (já estão no /menu-vip);
 // - NÃO repete a moderação genérica de admin de grupo (está no /menu-admin).
 // - /soadm aparece aqui como nota: embora seja usável por admins de grupo,
 //   o dono sempre tem prioridade; ele também está no /menu-admin.
@@ -55,7 +55,7 @@ module.exports = {
 ════════════════════
 
 ✨ *Mais comandos exclusivos, organizados em:*
-➥ 💠 /menu-vip  →  /darvip (outorgar VIP) e /servip (listar VIPs)
+➥ 💠 /menu-vip  →  /darvip (outorgar VIP) e /listavip (listar VIPs)
 ➥ 👑 /menu-admin  →  moderação, blacklist e guardiões do limbo
 
 ════════════════════

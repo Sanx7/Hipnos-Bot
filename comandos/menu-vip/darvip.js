@@ -14,6 +14,8 @@
 // ============================================
 
 const { limparNumero, ehDonoDoBot } = require('../../config')
+// 🪪 Resolução LID→número real (menção/reply pode chegar como "@lid")
+const { resolverNumeroAlvo } = require('../../lid')
 const vip = require('../../vip')
 
 module.exports = {
@@ -51,9 +53,31 @@ module.exports = {
       //    (mesma ordem usada em /addblacklist e /remblacklist)
       const contextInfo = msg.message.extendedTextMessage?.contextInfo
       const alvoBruto = contextInfo?.mentionedJid?.[0] || contextInfo?.participant
-      const alvo = alvoBruto
-        ? limparNumero(alvoBruto)
-        : (numericos.find((n) => n.length >= 10) || '')
+
+      // 🪪 RESOLUÇÃO LID→NÚMERO REAL (lid.js): em grupos com LID habilitado
+      // a menção/reply chega como "175952680210489@lid". Gravar o LID no
+      // banco fazia o /listavip exibir o LID e o bypass de VIP (isVip, usado
+      // p/ ex. pelo /s) não achar o registro. Resolvemos p/ o número REAL
+      // (metadados do grupo → mapeamento da sessão) ANTES de gravar.
+      let alvo = ''
+      if (alvoBruto) {
+        const resolucao = await resolverNumeroAlvo(participantes, alvoBruto)
+        if (!resolucao.numero || resolucao.via === null) {
+          console.warn(
+            `[darvip] 🪪 LID ${resolucao.numero || limparNumero(alvoBruto)} não resolvível p/ número real — recusando para NÃO gravar LID no banco`
+          )
+          return await sock.sendMessage(jid, {
+            text: '🪪 *Não consegui identificar o número real dessa menção* (o WhatsApp entregou só o LID).\n\nOutorgue direto pelo número: */darvip 5511999999999 30*.'
+          }, { quoted: msg })
+        }
+        alvo = resolucao.numero
+        if (resolucao.via !== 'direto') {
+          console.log(`[darvip] 🪪 alvo resolvido de @lid p/ número real via ${resolucao.via}: ${alvo}`)
+        }
+      } else {
+        // Número digitado no texto: já é o número real (sem domínio)
+        alvo = numericos.find((n) => n.length >= 10) || ''
+      }
 
       if (!alvo) {
         return await sock.sendMessage(jid, {
@@ -61,7 +85,8 @@ module.exports = {
         }, { quoted: msg })
       }
 
-      // JID real p/ a menção (preserva @lid do Baileys v7 quando houver)
+      // JID p/ a menção (preserva o @lid do Baileys v7 quando houver — o
+      // WhatsApp resolve a menção pelo JID, mesmo gravando o número real)
       const alvoJid = alvoBruto || `${alvo}@s.whatsapp.net`
 
       // 4) Dias: OBRIGATÓRIO — último número da mensagem que não seja o próprio alvo

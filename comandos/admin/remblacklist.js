@@ -4,6 +4,9 @@ const path = require('path');
 // Configuração global do bot (helpers de dono — verificação PROOF-LID)
 const { limparNumero, ehDonoDoBot } = require('../../config');
 
+// 🪪 Resolução LID→número real (menção/reply pode chegar como "@lid")
+const { resolverNumeroAlvo } = require('../../lid');
+
 // Caminho corrigido apontando para comandos/dados
 const BANCO_BLACKLIST = path.join(__dirname, '..', 'dados', 'blacklist.json');
 
@@ -75,20 +78,33 @@ module.exports = {
 
       let listaAtual = lerBlacklist();
 
-      // Purifica o alvo para ficar APENAS o número puro, igualzinho está salvo no JSON
-      const alvoLimpo = limparNumero(alvo);
+      // 🪪 RESOLUÇÃO LID→NÚMERO REAL (lid.js): a menção/reply pode chegar como
+      // "@lid" enquanto o JSON guarda o número REAL — sem resolver, o indexOf
+      // falhava e o perdão nunca saía. Também remove a variante LID legada do
+      // JSON, se existir (higiene: o mesmo alvo não fica duplicado na lista).
+      const resolucao = await resolverNumeroAlvo(participantes, alvo);
+      const alvoBrutoLimpo = limparNumero(alvo);
+      const variantes = [...new Set([resolucao.numero, alvoBrutoLimpo].filter(Boolean))];
 
-      // Procura a posição exata do número puro na lista
-      const index = listaAtual.indexOf(alvoLimpo);
+      // Remove TODAS as variantes presentes do mesmo alvo
+      let removidos = 0;
+      for (const variante of variantes) {
+        const index = listaAtual.indexOf(variante);
+        if (index !== -1) {
+          listaAtual.splice(index, 1);
+          removidos += 1;
+        }
+      }
 
-      if (index === -1) {
+      if (removidos === 0) {
         return await sock.sendMessage(jid, {
           text: '💀 Este espírito não foi encontrado nas profundezas do limbo.'
         }, { quoted: msg });
       }
 
-      // Remove o número da lista usando o index encontrado
-      listaAtual.splice(index, 1);
+      if (removidos > 1) {
+        console.log(`[remblacklist] 🪪 ${removidos} variantes do mesmo alvo removidas (limpeza de LID legado)`);
+      }
 
       salvarBlacklist(listaAtual);
 

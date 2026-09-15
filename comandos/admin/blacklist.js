@@ -8,15 +8,18 @@
 //   (quem entra sendo blacklist é removido na hora pelo bot.js). Por isso o
 //   acesso à listagem é restrito aos DONOS do bot — a mesma decisão de
 //   permissão já usada por /addblacklist e /remblacklist (e pelos /darvip e
-//   /servip): OWNER_NUMBERS do config.js.
+//   /listavip): OWNER_NUMBERS do config.js.
 // - Formata os números de forma legível com formatarNumero (mesma função
-//   usada em /dono e /servip).
+//   usada em /dono e /listavip).
 // ============================================
 
 const fs = require('fs')
 const path = require('path')
 
 const { formatarNumero, ehDonoDoBot } = require('../../config')
+
+// 🪪 Resolução LID→número real (registros antigos podem ter LID gravado)
+const { resolverLidParaTelefone } = require('../../lid')
 
 // Mesmo banco usado por /addblacklist e /remblacklist
 const BANCO_BLACKLIST = path.join(__dirname, '..', 'dados', 'blacklist.json')
@@ -61,6 +64,32 @@ module.exports = {
       }
 
       const lista = lerBlacklist()
+
+      // 🪪 Correção pontual: registros antigos podem ter o LID gravado no lugar
+      // do número real (mesmo problema que houve no sistema VIP). Antes de
+      // listar, troca cada LID resolvível (mapeamento da sessão, lid.js) pelo
+      // número real e persiste o JSON — best-effort: sem mapeamento, o registro
+      // fica como está; duplicatas (real já presente) têm o registro-LID removido.
+      let corrigidos = 0
+      for (let i = lista.length - 1; i >= 0; i--) {
+        const numeroReal = await resolverLidParaTelefone(lista[i])
+        if (!numeroReal || numeroReal === lista[i]) continue
+        if (lista.includes(numeroReal)) {
+          // 🔀 O número real já está na lista → apaga o registro-LID duplicado
+          lista.splice(i, 1)
+        } else {
+          lista[i] = numeroReal
+        }
+        corrigidos += 1
+      }
+      if (corrigidos > 0) {
+        try {
+          fs.writeFileSync(BANCO_BLACKLIST, JSON.stringify(lista, null, 2))
+          console.log(`[blacklist] 🪪 ${corrigidos} registro(s) corrigido(s) de LID p/ o número real`)
+        } catch (err) {
+          console.error('[blacklist] ⚠️ falha ao salvar o JSON corrigido (exibindo como está):', err?.message || err)
+        }
+      }
 
       // 2) Blacklist vazia -> aviso amigável
       if (!lista.length) {

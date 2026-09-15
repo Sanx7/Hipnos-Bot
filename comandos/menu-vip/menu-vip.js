@@ -1,7 +1,7 @@
 // ============================================
 // 💠 MENU-VIP — Pergaminho dos Privilegiados
 // ============================================
-// Lista SOMENTE os comandos do sistema de VIP (hoje: /darvip e /servip),
+// Lista SOMENTE os comandos do sistema de VIP (hoje: /darvip e /listavip),
 // seguindo o mesmo estilo visual do /menu principal.
 // Os comandos em si são exclusivos dos DONOS do bot (OWNER_NUMBERS),
 // mas consultar este menu é livre — igual ao /menu geral.
@@ -30,7 +30,7 @@ module.exports = {
 ➥ Aceita também número digitado: /darvip 5511999999999 30.
 ➥ Se o membro já for VIP ativo, os dias são SOMADOS à expiração atual.
 
-📜 /servip
+📜 /listavip
 ➥ Lista os VIPs ativos e suas expirações, da mais próxima para a mais distante.
 ➥ VIPs vencidos são varridos do livro automaticamente.
 

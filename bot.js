@@ -42,6 +42,11 @@ const { registrarMensagem } = require('./database')
 //   de grupo e dono do bot (ehDonoDoBot resolve o LID do sender nos metadados)
 const { OWNER_NUMBERS, AVISAR_BLOQUEIO, limparNumero, ehAdminDoGrupo, ehDonoDoBot } = require('./config')
 
+// 🪪 Resolução LID→número real (lid.js) — usada pela anti-blacklist: a entrada
+// pode chegar como "@lid" (identificador novo do WhatsApp) enquanto o
+// blacklist.json guarda números REAIS.
+const { ehLid, resolverLidParaTelefone } = require('./lid')
+
 // 🗄️ Configurações POR GRUPO no MongoDB (hoje: liga/desliga do /welcome).
 // welcomeHabilitado(grupoId) é a checagem usada pelo handler de entrada de
 // membros (group-participants.update) antes de saudar — NUNCA lança.
@@ -279,12 +284,28 @@ async function startBot() {
             return idStr.split('@')[0].split(':')[0].replace(/\D/g, '');
           };
 
-          const intrusos = participants.filter(p => {
+          const intrusos = [];
+          for (const p of participants) {
             const clean = normalizar(p);
             // 🛡️ Donos do bot são IMUNES até à anti-blacklist automática
             // (a proteção é sobre QUEM é o alvo, não sobre quem executou).
-            return clean && listaNegra.includes(clean) && !OWNER_NUMBERS.includes(clean);
-          });
+            if (!clean || OWNER_NUMBERS.includes(clean)) continue;
+
+            let ehIntruso = listaNegra.includes(clean);
+
+            // 🪪 LID: a entrada pode chegar como "@lid" (identificador novo do
+            // WhatsApp). O blacklist.json guarda números REAIS — então, se o
+            // JID é @lid, resolvemos o número real pelo mapeamento da sessão
+            // (lid.js, com cache) antes de comparar. Sem isso, um banido podia
+            // entrar impune só por chegar identificado como @lid.
+            const jidEntrante = typeof p === 'object' ? (p.id || p.jid || '') : String(p);
+            if (!ehIntruso && ehLid(jidEntrante)) {
+              const numeroReal = await resolverLidParaTelefone(clean);
+              ehIntruso = Boolean(numeroReal && listaNegra.includes(numeroReal));
+            }
+
+            if (ehIntruso) intrusos.push(p);
+          }
 
           if (intrusos.length > 0) {
             const jidsParaRemover = intrusos.map(p => typeof p === 'object' ? (p.id || p.jid) : p);

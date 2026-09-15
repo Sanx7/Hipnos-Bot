@@ -4,6 +4,9 @@ const path = require('path');
 // Configuração global do bot (helpers de dono — verificação PROOF-LID)
 const { limparNumero, ehDonoDoBot } = require('../../config');
 
+// 🪪 Resolução LID→número real (menção/reply pode chegar como "@lid")
+const { resolverNumeroAlvo } = require('../../lid');
+
 // Caminho atualizado apontando para a pasta 'dados'
 const BANCO_BLACKLIST = path.join(__dirname, '..', 'dados', 'blacklist.json');
 
@@ -90,7 +93,25 @@ module.exports = {
       }
 
       let listaAtual = lerBlacklist();
-      const alvoLimpo = limparNumero(alvo);
+
+      // 🪪 RESOLUÇÃO LID→NÚMERO REAL (lid.js): a menção/reply pode chegar como
+      // "175952680210489@lid" em grupos com LID habilitado. Gravar o LID no
+      // blacklist.json quebrava a checagem automática de entrada (o bot.js
+      // compara números REAIS). Resolvemos p/ o número REAL antes de gravar
+      // (metadados do grupo → mapeamento da sessão). Número digitado é direto.
+      const resolucao = await resolverNumeroAlvo(participantes, alvo);
+      if (!resolucao.numero || resolucao.via === null) {
+        console.warn(
+          `[addblacklist] 🪪 LID ${resolucao.numero || limparNumero(alvo)} não resolvível p/ número real — recusando para NÃO gravar LID`
+        );
+        return await sock.sendMessage(jid, {
+          text: '🪪 *Não consegui identificar o número real desse alvo* (o WhatsApp entregou só o LID).\n\nCondene direto pelo número: */addblacklist 5511999999999*.'
+        }, { quoted: msg });
+      }
+      const alvoLimpo = resolucao.numero;
+      if (resolucao.via !== 'direto') {
+        console.log(`[addblacklist] 🪪 alvo resolvido de @lid p/ número real via ${resolucao.via}: ${alvoLimpo}`);
+      }
 
       if (listaAtual.includes(alvoLimpo)) {
         return await sock.sendMessage(jid, {

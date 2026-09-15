@@ -14,8 +14,10 @@
 //      foto pública/privacidade/erro → avatar padrão GERADO NA HORA;
 //   4) 🎨 compõe a foto dentro da área reservada do banner (modo "cover",
 //      preenchendo sem distorcer) — ver AREA_FOTO;
-//   5) 📤 envia imagem + legenda, com fallback para TEXTO puro se QUALQUER
-//      etapa falhar e com fallback final silencioso (nunca lança).
+//   5) 📤 envia imagem + legenda com RETRY para quedas de conexão do
+//      Baileys (3 tentativas com delay para a reconexão — padrão do
+//      acoes.js), fallback para TEXTO puro (também com retry) se QUALQUER
+//      etapa falhar e fallback final silencioso (nunca lança).
 //
 // ️ REGRA DE OURO DO PROJETO — NUNCA usar lib nativa in-process
 // (sharp / libvips / canvas nativo) para manipular imagem: já causou
@@ -363,6 +365,111 @@ function garantirMencao(legenda, numero) {
 }
 
 // -------------------------------------------------------------------
+// 🔄 RETRY NO ENVIO — quedas de conexão do Baileys (mesmo padrão de
+//    comandos/menu-brincadeiras/acoes.js: 3 tentativas, delay entre elas)
+//
+// Problema de produção: o banner era gerado, mas o sock.sendMessage podia
+// explodir com 408 "Connection was lost" — o socket já estava fechado e
+// TANTO a imagem quanto o fallback de texto falhavam com "Connection
+// Closed". O bot reconectava ~3s depois, mas a boas-vindas daquela
+// entrada específica se perdia.
+//
+// Solução: quando o erro é de CONEXÃO, esperamos DELAY_ENVIO_MS (tempo
+// para a reconexão automática do Baileys completar) e tentamos de novo.
+// Outros erros (bad-request, media-upload, conteúdo inválido...) NÃO
+// ganham retry — falhariam igual em qualquer tentativa e sobem na hora
+// para o fallback (texto) ou para o log final.
+// -------------------------------------------------------------------
+const MAX_TENTATIVAS_ENVIO = 3   // 1 tentativa inicial + 2 retries
+const DELAY_ENVIO_MS = 2500      // 2,5s — tempo p/ a reconexão automática completar
+
+// ⏱️ Delay SEM bloquear o event loop (mesmo utilitário do acoes.js)
+function delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+// 📡 PADRÕES de erro de CONEXÃO (case-insensitive) — os únicos que valem
+// retry. "Connection Closed" (e similares) significa que o socket morreu
+// no meio do envio; com a reconexão automática, a próxima tentativa sai.
+const PADROES_ERRO_CONEXAO = Object.freeze([
+  'connection closed',
+  'connection was lost',
+  'connection lost',
+  'connection replacing',
+  'socket closed',
+  'stream errored',
+  'timed out',
+  'service unavailable',
+  'precondition required',
+  'intervention required'
+])
+
+// 🚦 Status clássicos de queda de conexão do Baileys/WhatsApp-Web:
+//   408 (timed out) · 428 (precondition required) · 440 (connection
+//   replacing) · 503 (service unavailable) · 511 (intervention required)
+const STATUS_CONEXAO = Object.freeze([408, 428, 440, 503, 511])
+
+// 📡 ehErroDeConexao(err): true se o erro foi queda/fechamento de conexão.
+// Olha a mensagem (err.message, incluindo a aninhada de erros Boom do
+// Baileys em err.content.message) e os códigos de status, sem diferenciar
+// caixa. Só esses erros acionam o retry do enviarComRetry().
+function ehErroDeConexao(err) {
+  const texto = [
+    err?.message,
+    err?.content?.message
+  ].filter(Boolean).join(' ').toLowerCase()
+
+  if (PADROES_ERRO_CONEXAO.some(padrao => texto.includes(padrao))) return true
+
+  const status = Number(err?.output?.statusCode ?? err?.statusCode)
+  return Number.isFinite(status) && STATUS_CONEXAO.includes(status)
+}
+
+// -------------------------------------------------------------------
+// 📤 enviarComRetry(sock, jid, conteudo): tenta sock.sendMessage até
+// MAX_TENTATIVAS_ENVIO vezes. O retry SÓ é acionado para erros de conexão
+// (socket fechado/queda — ex.: 408 "Connection was lost"); antes de cada
+// nova tentativa espera DELAY_ENVIO_MS para a reconexão automática do
+// Baileys completar (tentar imediatamente com o socket morto só reproduz
+// "Connection Closed"). NUNCA lança: devolve true se a mensagem saiu e
+// false se falhou de vez (o fallback/tratamento decide o próximo passo).
+// -------------------------------------------------------------------
+async function enviarComRetry(sock, jid, conteudo) {
+  for (let tentativa = 1; tentativa <= MAX_TENTATIVAS_ENVIO; tentativa++) {
+    try {
+      if (tentativa > 1) {
+        console.log(`[boasvindas] 🔄 reenviando — tentativa ${tentativa}/${MAX_TENTATIVAS_ENVIO}`)
+      }
+      await sock.sendMessage(jid, conteudo)
+      if (tentativa > 1) {
+        console.log(`[boasvindas] ✅ envio saiu na tentativa ${tentativa} (conexão reestabelecida)`)
+      }
+      return true
+    } catch (err) {
+      console.warn(
+        `[boasvindas] ⚠️ envio falhou na tentativa ${tentativa}/${MAX_TENTATIVAS_ENVIO}:`,
+        err?.message || err
+      )
+
+      // Erro que NÃO é de conexão (ou última tentativa): não adianta
+      // insistir — devolve false imediatamente para o fallback (texto)
+      // ou para o log de perda definitiva.
+      if (!ehErroDeConexao(err) || tentativa === MAX_TENTATIVAS_ENVIO) {
+        return false
+      }
+
+      // ⏳ Queda de conexão: espera a reconexão automática do Baileys
+      // completar ANTES da próxima tentativa (em vez de tentar na hora).
+      console.log(
+        `[boasvindas] ⏳ queda de conexão detectada — aguardando ${DELAY_ENVIO_MS}ms para a reconexão automática completar antes da próxima tentativa...`
+      )
+      await delay(DELAY_ENVIO_MS)
+    }
+  }
+  return false
+}
+
+// -------------------------------------------------------------------
 // 🔒 ehAutorizadoNoGrupo(sock, jid, sender): MESMO critério de autorização do
 // /soadm e do /welcome — dono do bot (PROOF-LID, pois o sender pode chegar
 // como "@lid") OU admin do grupo OU dono do grupo.
@@ -500,33 +607,47 @@ async function enviarBoasVindas(sock, entrada = {}) {
   }
 
   // ── 5) 📤 ENVIAR (imagem + legenda; texto como fallback) ──────────
+  // Ambos os meios passam pelo enviarComRetry(): se a conexão cair no meio
+  // do envio (ex.: 408 "Connection was lost"), esperamos a reconexão
+  // automática do Baileys e tentamos de novo — a boas-vindas daquela
+  // entrada não se perde por uma queda momentânea do socket.
   if (composicao?.buffer?.length) {
-    try {
-      await sock.sendMessage(grupoId, {
-        image: composicao.buffer,
-        caption: legenda,
-        mentions: [jidMembro],
-        // 📎 Pronta: faz a Baileys pular o processamento nativo de imagem
-        jpegThumbnail: composicao.jpegThumbnail || undefined
-      })
+    const saiuImagem = await enviarComRetry(sock, grupoId, {
+      image: composicao.buffer,
+      caption: legenda,
+      mentions: [jidMembro],
+      // 📎 Pronta: faz a Baileys pular o processamento nativo de imagem
+      jpegThumbnail: composicao.jpegThumbnail || undefined
+    })
+    if (saiuImagem) {
       console.log('[boasvindas] ✅ boas-vindas enviadas COM banner 🖼️')
       return true
-    } catch (err) {
-      console.error(
-        '[boasvindas] 💥 falha ao enviar a imagem — caindo para TEXTO puro:',
-        err?.message || err
-      )
     }
+    console.error(
+      '[boasvindas] 💥 imagem não saiu (mesmo com retry) — caindo para TEXTO puro'
+    )
   }
 
-  try {
-    await sock.sendMessage(grupoId, { text: legenda, mentions: [jidMembro] })
+  const saiuTexto = await enviarComRetry(sock, grupoId, {
+    text: legenda,
+    mentions: [jidMembro]
+  })
+  if (saiuTexto) {
     console.log('[boasvindas] ✅ boas-vindas enviadas em TEXTO (fallback)')
     return true
-  } catch (err) {
-    console.error('[boasvindas] 💥 nem o texto pôde ser enviado:', err?.message || err)
-    return false
   }
+
+  // 🪦 Nenhum meio saiu (imagem E texto, cada um com retry): a boas-vindas
+  // desta entrada foi PERDIDA definitivamente. Registramos com destaque e
+  // seguimos — NUNCA lançamos, para não derrubar o listener do Baileys.
+  console.error('════════════════════════════════════════════════════════')
+  console.error(
+    `[boasvindas] 💀 boas-vindas PERDIDAS desta entrada: ${numero} em "${nomeGrupo}" (${grupoId})`
+  )
+  console.error('   → todas as tentativas falharam (imagem E texto, com retry) e a mensagem não será reenviada.')
+  console.error('   → o bot segue operando normalmente para as próximas entradas.')
+  console.error('════════════════════════════════════════════════════════')
+  return false
 }
 
 module.exports = {
