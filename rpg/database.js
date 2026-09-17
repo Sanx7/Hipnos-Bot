@@ -1,7 +1,8 @@
 // ============================================================
 // 🎲 rpg/database.js — Persistência do RPG "vida real" no MongoDB
 // ============================================================
-// Módulo de acesso a dados da Fase 0 do sistema de RPG.
+// Módulo de acesso a dados do RPG (Fase 0 = base do jogador; Fase 1 =
+// identidade; Fase 2 = economia — ver a nota 💰 no fim deste cabeçalho).
 // Segue EXATAMENTE o mesmo padrão de conexão já usado no resto do
 // projeto (sessao-mongo.js e database.js):
 //   - SINGLETON: um único MongoClient criado uma vez no processo
@@ -31,6 +32,17 @@
 // Se um comando futuro da Fase 2+ precisar do jid do jogador, use
 // getPlayer() normalmente — ele já devolve o doc chaveado pelo número
 // real. NUNCA grave o jid cru de msg.key direto no banco.
+//
+// 💰 FASE 2+ (economia): NUNCA mova dinheiro com "getPlayer → altera o
+// objeto → savePlayer" — duas chamadas simultâneas perderiam uma das
+// operações. Use os helpers de rpg/economia.js:
+//   - moverSaldo(jid, valor, 'depositar'|'sacar')  → 1 update atômico
+//     ($inc duplo + filtro $gte no MESMO documento);
+//   - transferirEntreJogadores(a, b, valor)        → usa a
+//     executarTransacao() abaixo (transação real com ROLLBACK) e, se o
+//     deployment não suportar transação, plano compensatório próprio.
+// Qualquer operação futura que toque DOIS jogadores (roubo/assalto da
+// Fase 7, casamento, empregos de patrão...) deve usar executarTransacao().
 // ============================================================
 
 const { MongoClient } = require('mongodb')
@@ -376,6 +388,53 @@ function mesclarJogadores(docReal, docLid) {
 
 
 // -------------------------------------------------------------------
+// 💱 executarTransacao(fn): executa `fn(colecao, sessao)` dentro de uma
+// TRANSAÇÃO multi-documento do MongoDB (usada p/ /transferir e futuras
+// operações de 2 jogadores — roubo da Fase 7).
+//   - Suportado (Atlas/replica set) → { transacional: true, retorno }
+//     (o retorno é o valor devolvido por `fn`; falha de negócio dentro
+//     de `fn` lança e o withTransaction faz ROLLBACK automático)
+//   - Deployment sem suporte (standalone) → { transacional: false }
+//     (o chamador usa seu plano compensatório próprio)
+//   - Sem cliente ativo (modo teste) → lança erro com
+//     codigo = 'TRANSACAO_INDISPONIVEL' (o chamador faz o fallback)
+// Erros reais (rede/abort) são RELANÇADOS — o comando trata.
+// -------------------------------------------------------------------
+function transacaoNaoSuportada(err) {
+  const msg = String(err?.message || '')
+  return (
+    err?.code === 40515 ||
+    /Transaction numbers are only allowed/i.test(msg) ||
+    /transactions are not supported/i.test(msg) ||
+    /not supported on standalone/i.test(msg) ||
+    /requires a replica set/i.test(msg)
+  )
+}
+
+async function executarTransacao(fn) {
+  // Modo teste (ou conexão ainda não aberta): sem cliente p/ sessão
+  if (!clienteMongo) {
+    const erro = new Error('Transação indisponível: sem cliente Mongo ativo (modo teste)')
+    erro.codigo = 'TRANSACAO_INDISPONIVEL'
+    throw erro
+  }
+  const sessao = clienteMongo.startSession()
+  try {
+    let retorno
+    await sessao.withTransaction(async () => {
+      const colecao = await obterColecaoRpg()
+      retorno = await fn(colecao, sessao)
+    })
+    return { transacional: true, retorno }
+  } catch (err) {
+    if (transacaoNaoSuportada(err)) return { transacional: false }
+    throw err
+  } finally {
+    try { await sessao.endSession() } catch (e) { /* sessão já encerrada */ }
+  }
+}
+
+// -------------------------------------------------------------------
 // 🧪 GANCHO DE TESTE (mesmo padrão dos demais módulos): injeta uma
 // collection fake e desativa a conexão real até o fim do processo.
 // Passando `null`, o modo teste é desligado e o módulo volta a exigir
@@ -401,6 +460,7 @@ module.exports = {
   criarJogadorPadrao,
   resolverJidJogador,
   corrigirJogadoresComLid,
+  executarTransacao,
   NOME_BANCO,
   NOME_COLECAO,
   __definirColecaoTeste

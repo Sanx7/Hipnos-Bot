@@ -21,6 +21,8 @@
 const { getPlayer } = require('../../rpg/database')
 // 🪪 Resolução LID→número real (lid.js — mesmo módulo do /darvip)
 const { resolverNumeroAlvo } = require('../../lid')
+// 💰 Formatação de dinheiro unificada com a Fase 2 (R$ 1.234,56)
+const { formatarReais } = require('../../rpg/economia')
 
 // 📝 Uma barra temática p/ separar seções (estilo onírico do projeto)
 const LINHA = '━━━━━━━━━━━━━━━━━━━'
@@ -96,8 +98,8 @@ module.exports = {
           `🚻 Gênero: ${jogador.genero === 'F' ? 'F (feminino)' : jogador.genero === 'M' ? 'M (masculino)' : '— (defina no /registrar)'}\n` +
           `🎂 Idade: *${jogador.idade ?? '?'} anos*\n` +
           `💼 Emprego: ${jogador.emprego ? `*${jogador.emprego}* (cargo ${jogador.cargo})` : '*sem emprego*'}\n\n` +
-          `💵 Carteira: *R$ ${carteira.toLocaleString('pt-BR')}*\n` +
-          `🏦 Banco: *R$ ${banco.toLocaleString('pt-BR')}*\n` +
+          `💵 Carteira: *${formatarReais(carteira)}*\n` +
+          `🏦 Banco: *${formatarReais(banco)}*\n` +
           `⭐ Fama: *${Number(jogador.fama) || 0}*\n\n` +
           `🍽️ Fome: ${barra(jogador.fome)}\n` +
           `⚡ Energia: ${barra(jogador.energia)}\n\n` +
