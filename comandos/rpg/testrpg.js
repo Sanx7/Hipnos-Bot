@@ -12,6 +12,8 @@
 // ============================================================
 
 const { getPlayer } = require('../../rpg/database')
+// 🪪 Resolução LID→número real (lid.js — mesmo módulo do /darvip)
+const { resolverNumeroAlvo } = require('../../lid')
 
 module.exports = {
   nome: 'testrpg',
@@ -22,7 +24,31 @@ module.exports = {
       // 🔎 JID do remetente: em grupos o autêntico está em
       // msg.key.participant (o remetente da mensagem); fora de grupos
       // usa msg.key.remoteJid (o próprio chat). Igual aos outros comandos.
-      const sender = msg.key?.participant || msg.key?.remoteJid || jid
+      let sender = msg.key?.participant || msg.key?.remoteJid || jid
+
+      // 🪪 RESOLUÇÃO LID→NÚMERO REAL (lid.js — mesmo padrão do /darvip):
+      // o remetente pode chegar como "@lid"; consultar o jogador por LID
+      // quebra a base indexada por telefone (MESMO bug dos VIPs).
+      // Grupo → metadados (phoneNumber); privado → mapeamento da sessão.
+      // Sem resolução possível, segue com o LID cru + warning no log
+      // (scripts/migrar-rpg-lid.js corrige os registros depois — idempotente).
+      if (String(sender).endsWith('@lid')) {
+        let participantes = null
+        if (jid.endsWith('@g.us')) {
+          try {
+            participantes = (await sock.groupMetadata(jid)).participants
+          } catch (err) {
+            console.error('[testrpg] sem metadados do grupo p/ resolver @lid:', err?.message || err)
+          }
+        }
+        const resolucao = await resolverNumeroAlvo(participantes, sender)
+        if (resolucao.numero && resolucao.via !== null) {
+          console.log(`[testrpg] 🪪 remetente resolvido de @lid p/ o número real ${resolucao.numero} via ${resolucao.via}`)
+          sender = resolucao.numero
+        } else {
+          console.warn('[testrpg] 🪪 @lid do remetente não resolvível — seguindo com o LID cru (corrigível via scripts/migrar-rpg-lid.js)')
+        }
+      }
 
       // 1) Lê/cria o jogador (getPlayer cria com os padrões se não existir)
       const jogador = await getPlayer(sender)

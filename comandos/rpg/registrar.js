@@ -19,6 +19,8 @@
 // ============================================================
 
 const { getPlayer, savePlayer } = require('../../rpg/database')
+// 🪪 Resolução LID→número real (lid.js — mesmo módulo do /darvip)
+const { resolverNumeroAlvo } = require('../../lid')
 
 // 🔒 Limites do nome (evita nome vazio/absurdamente longo)
 const NOME_MIN = 2
@@ -38,8 +40,35 @@ module.exports = {
 
   async executar(sock, jid, msg, texto) {
     try {
-      // 👤 JID do remetente (mesma convenção do testrpg)
-      const sender = msg.key?.participant || msg.key?.remoteJid || jid
+      // 👤 JID do remetente: em grupos o autêntico está em
+      // msg.key.participant (o remetente da mensagem); fora de grupos
+      // usa msg.key.remoteJid (o próprio chat). Igual aos outros comandos.
+      let sender = msg.key?.participant || msg.key?.remoteJid || jid
+
+      // 🪪 RESOLUÇÃO LID→NÚMERO REAL (lid.js — mesmo padrão do /darvip):
+      // o WhatsApp v7 pode entregar o remetente como "@lid" e gravar/consultar
+      // o jogador por LID quebra a base indexada por telefone (MESMO bug dos
+      // VIPs). Em grupo resolvemos pelos METADADOS (phoneNumber); no privado,
+      // pelo mapeamento da sessão (lid-mapping). Se não houver como resolver
+      // agora, seguimos com o LID cru + warning (o scripts/migrar-rpg-lid.js
+      // corrige o registro depois — é idempotente).
+      if (String(sender).endsWith('@lid')) {
+        let participantes = null
+        if (jid.endsWith('@g.us')) {
+          try {
+            participantes = (await sock.groupMetadata(jid)).participants
+          } catch (err) {
+            console.error('[registrar] sem metadados do grupo p/ resolver @lid:', err?.message || err)
+          }
+        }
+        const resolucao = await resolverNumeroAlvo(participantes, sender)
+        if (resolucao.numero && resolucao.via !== null) {
+          console.log(`[registrar] 🪪 remetente resolvido de @lid p/ o número real ${resolucao.numero} via ${resolucao.via}`)
+          sender = resolucao.numero
+        } else {
+          console.warn('[registrar] 🪪 @lid do remetente não resolvível — seguindo com o LID cru (corrigível via scripts/migrar-rpg-lid.js)')
+        }
+      }
 
       // ✂️ Parse: "/registrar <nome...> <gênero>" — o gênero é o ÚLTIMO
       // token, o nome é todo o resto (nomes com espaço funcionam).
