@@ -23,6 +23,10 @@ const NOME_COLECAO = process.env.MONGODB_COLLECTION_RPG || 'rpgPlayers'
 // múltiplas chamadas de getPlayer/savePlayer
 let clienteMongo = null
 let colecaoCacheada = null
+// 🧪 Modo teste (scripts/teste-rpg-fase1.js): usa a collection injetada
+// pelo gancho __definirColecaoTeste e NÃO conecta ao MongoDB real.
+// Mesmo padrão de vip.js / configuracoes-grupo.js / afk.js.
+let modoTeste = false
 
 // ⚠️ IMPORTANTE: valores padrão c/ referência
 // (objetos/arrays) NÃO podem ser compartilhados entre chamadas.
@@ -60,6 +64,9 @@ function criarJogadorPadrao(jid) {
 // Erros são logados com causa provável e RELANÇADOS.
 // -------------------------------------------------------------------
 async function obterColecaoRpg() {
+  // 🧪 No modo teste, devolve a collection injetada SEM tocar em rede.
+  if (modoTeste && colecaoCacheada) return colecaoCacheada
+
   if (colecaoCacheada && clienteMongo) {
     try {
       await clienteMongo.db('admin').command({ ping: 1 })
@@ -180,10 +187,29 @@ async function mergeAtualizacao(jid, dadosParciais) {
   return { ...jogador, ...dadosParciais }
 }
 
+// -------------------------------------------------------------------
+// 🧪 GANCHO DE TESTE (mesmo padrão dos demais módulos): injeta uma
+// collection fake e desativa a conexão real até o fim do processo.
+// Passando `null`, o modo teste é desligado e o módulo volta a exigir
+// MONGODB_URI (útil p/ provar que o erro sem URI é ruidoso).
+// -------------------------------------------------------------------
+function __definirColecaoTeste(colecao) {
+  if (colecao) {
+    colecaoCacheada = colecao
+    clienteMongo = null
+    modoTeste = true
+  } else {
+    colecaoCacheada = null
+    clienteMongo = null
+    modoTeste = false
+  }
+}
+
 module.exports = {
   getPlayer,
   savePlayer,
   mergeAtualizacao,
   obterColecaoRpg,
-  criarJogadorPadrao
+  criarJogadorPadrao,
+  __definirColecaoTeste
 }
