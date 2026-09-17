@@ -35,12 +35,29 @@ const path = require('path')
 // Expõe: registrarMensagem(grupoId, usuarioId, nome)
 const { registrarMensagem } = require('./database')
 
+// 📝 Extração do texto/LEGENDA da mensagem (dados/texto-comando.js) — é o que
+// permite mandar a foto com "/s" na legenda e o comando ser roteado (antes só
+// o fluxo de reply funcionava: legenda não é conversation nem
+// extendedTextMessage.text). Módulo separado p/ poder ser testado sem subir o bot.
+const { extrairTextoComando } = require('./dados/texto-comando')
+
 // ⚙️ Configurações globais do bot
 // - OWNER_NUMBERS: lista de donos SEMPRE pode usar os comandos (mesmo no modo restrito)
 // - AVISAR_BLOQUEIO: true = avisa não-admin | false = ignora silenciosamente
 // - limparNumero / ehAdminDoGrupo / ehDonoDoBot: helpers p/ verificar admin
 //   de grupo e dono do bot (ehDonoDoBot resolve o LID do sender nos metadados)
 const { OWNER_NUMBERS, AVISAR_BLOQUEIO, limparNumero, ehAdminDoGrupo, ehDonoDoBot } = require('./config')
+
+// 💤 SISTEMA AFK (afk.js): marcação de ausente (/afk), aviso automático
+// quando alguém menciona/responde a um usuário AFK e remoção automática
+// quando o próprio usuário volta a falar. MongoDB — persiste entre redeploys.
+const {
+  definirAfk,
+  removerAfk,
+  buscarVariosAfk,
+  formatarDuracao,
+  MOTIVO_PADRAO
+} = require('./afk')
 
 // 🪪 Resolução LID→número real (lid.js) — usada pela anti-blacklist: a entrada
 // pode chegar como "@lid" (identificador novo do WhatsApp) enquanto o
@@ -491,10 +508,17 @@ async function startBot() {
         }
       }
 
-      const text =
-        msg.message.conversation ||
-        msg.message.extendedTextMessage?.text ||
-        ''
+      // 📝 TEXTO DA MENSAGEM — fonte ÚNICA do roteador de comandos.
+      // A extração (incluindo 📸 LEGENDA de mídia: imageMessage.caption,
+      // videoMessage.caption e documentMessage.caption) vive em
+      // dados/texto-comando.js — módulo próprio e testável. Antes disso, uma
+      // foto enviada com "/s" na legenda chegava aqui com text = '' e o
+      // comando NEM era roteado (só o fluxo de reply funcionava), porque a
+      // legenda não está em conversation nem em extendedTextMessage.text.
+      // 🔓 A função usa normalizeMessageContent (view-once/temporárias/
+      // documento-com-legenda) SEM alterar msg.message: os monitores de grupo
+      // (antiDocument etc.) precisam ver a estrutura ORIGINAL.
+      const text = extrairTextoComando(msg)
 
       const muteCmd = comandos.get("mute")
       const mutedUsers = muteCmd?.mutedUsers
@@ -502,6 +526,116 @@ async function startBot() {
       if (mutedUsers?.has(sender)) {
         return
       }
+
+      // 💤━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      // 💤 SISTEMA AFK — checagem única por mensagem (UMA consulta ao Mongo)
+      // ─────────────────────────────────────────────────────────────
+      // Roda CEDO no fluxo (antes de jogos/comandos) e cobre, numa tacada só:
+      //   1) 👋 O PRÓPRIO remetente estava AFK? → remove e dá boas-vindas
+      //      de volta (qualquer mensagem conta; exceção: a própria mensagem
+      //      sendo o comando /afk, que só atualiza o motivo — sem o
+      //      remove-e-re-adiciona confuso);
+      //   2) 💤 Alguém MENCIONADO (contextInfo.mentionedJid) ou RESPONDIDO
+      //      (contextInfo.participant do quoted) está AFK? → avisa o chat,
+      //      cobrindo TODAS as pessoas AFK da mesma mensagem, não só a 1ª.
+      //
+      // 🏠 PRIVADO: não há menção em conversa individual, mas a remoção
+      // automática continua valendo. DECISÃO DE DESIGN (documentada): no
+      // privado, quando alguém escreve PARA um usuário AFK (sem comando),
+      // o bot também avisa que ele está ausente — é o análogo natural da
+      // menção no grupo e evita a impressão de que a pessoa te ignorou.
+      //
+      // ⚡ EFICIÊNCIA: remetente + todos os alvos (mencionados/respondidos)
+      // são resolvidos e consultados com UMA ÚNICA busca $in (buscarVariosAfk).
+      // 🪪 LID: menções podem chegar como "@lid" — resolvemos para o número
+      // real (lid.js, com cache) antes de consultar, já que a base guarda
+      // números reais (mesmo padrão do /darvip).
+      // 🛡️ Nada aqui lança: falha de banco/rede é logada e o fluxo segue.
+      try {
+        // 📋 Candidatos: remetente + jids vindos de menções/reply
+        const contextoInfo =
+          msg.message.extendedTextMessage?.contextInfo ||
+          msg.message[Object.keys(msg.message)[0]]?.contextInfo ||
+          null
+
+        const jidsAlvoBrutos = [
+          ...(contextoInfo?.mentionedJid || []),
+          // Reply sem menção explícita: o autor da mensagem citada
+          ...(contextoInfo?.participant && !contextoInfo.mentionedJid?.length
+            ? [contextoInfo.participant]
+            : [])
+        ].filter(Boolean)
+
+        // 🪪 Resolve LID → número real (best-effort; sem mapeamento, usa o cru)
+        const numerosAlvo = []
+        for (const jidAlvo of jidsAlvoBrutos) {
+          const bruto = String(jidAlvo).split('@')[0].replace(/\D/g, '')
+          if (!bruto) continue
+          if (String(jidAlvo).endsWith('@lid')) {
+            const numeroReal = await resolverLidParaTelefone(bruto)
+            numerosAlvo.push(numeroReal || bruto)
+          } else {
+            numerosAlvo.push(bruto)
+          }
+        }
+
+        const numeroRemetente = limparNumero(sender)
+        // Só é "o próprio /afk" se for exatamente o comando (não /afkxyz etc.)
+        const ehComandoAfk = /^\/afk(\s|$)/i.test(text.trim())
+
+        // ⚡ UMA consulta só: remetente + todos os alvos de uma vez
+        const afkMapa = await buscarVariosAfk(
+          [numeroRemetente, ...numerosAlvo].filter(Boolean)
+        )
+
+        // ── 1) 👋 O REMETENTE estava AFK e voltou ──
+        // Se a mensagem é o próprio /afk, NÃO removemos: o comando apenas
+        // atualiza o motivo/timestamp (definirAfk cuida disso lá embaixo).
+        const docRemetente = afkMapa.get(numeroRemetente)
+        if (docRemetente && !(ehComandoAfk && jid === msg.key.remoteJid)) {
+          await removerAfk(numeroRemetente)
+          afkMapa.delete(numeroRemetente) // não avisar que ele "está ausente" na mesma msg
+          const tempoFora = formatarDuracao(Date.now() - (docRemetente.desde || Date.now()))
+          await sock.sendMessage(jid, {
+            text:
+              `👋 Bem-vindo(a) de volta, @${numeroRemetente}! ` +
+              `Você estava ausente há *${tempoFora}*.`,
+            mentions: [msg.key.participant || jid].filter(Boolean)
+          }, { quoted: msg }).catch(() => {})
+        }
+
+        // ── 2) 💤 ALVOS (mencionados/respondidos) que estão AFK ──
+        // Em grupo: apenas os mencionados/respondidos. No privado: DECISÃO
+        // documentada acima — qualquer mensagem PARA um usuário AFK avisa.
+        const alvosParaAvisar = jid.endsWith('@g.us')
+          ? numerosAlvo
+          : [...numerosAlvo, numeroRemetente].filter((n) => n !== numeroRemetente)
+
+        const avisos = []
+        for (const numeroAlvo of alvosParaAvisar) {
+          const doc = afkMapa.get(numeroAlvo)
+          if (!doc) continue
+          const tempoAusente = formatarDuracao(Date.now() - (doc.desde || Date.now()))
+          avisos.push(
+            `💤 @${numeroAlvo} está ausente: ${doc.motivo || MOTIVO_PADRAO}\n` +
+            `_(ausente há ${tempoAusente})_`
+          )
+        }
+
+        if (avisos.length) {
+          await sock.sendMessage(jid, {
+            text: avisos.join('\n\n'),
+            mentions: alvosParaAvisar
+              .filter((n) => afkMapa.has(n))
+              .map((n) => `${n}@s.whatsapp.net`)
+          }, { quoted: msg }).catch(() => {})
+        }
+      } catch (erroAfk) {
+        // 🛡️ A checagem de AFK NUNCA derruba o listener nem o fluxo de comandos
+        console.error('⚠️ [afk] falha na checagem de AFK (fluxo segue normal):', erroAfk?.message || erroAfk)
+      }
+      // 💤━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
       // 🎮 TEXTO LIVRE PARA JOGOS — mensagens que NÃO são comandos podem ser
       // palpites de uma partida ativa no grupo (ex.: /gartic). O registro
       // compartilhado (dados/jogos-ativos.js) decide se há um ouvinte

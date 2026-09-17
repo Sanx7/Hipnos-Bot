@@ -17,7 +17,13 @@
 //      grande, avisamos o usuário.
 // ============================================
 
-const { downloadContentFromMessage } = require('@whiskeysockets/baileys')
+const {
+  downloadContentFromMessage,
+  // 🔓 normalizeMessageContent: desembrulho de containers de protocolo
+  // (viewOnceMessage/V2/Extension, ephemeralMessage, documentWithCaption,
+  // editedMessage) — mídia "ver uma vez" também vira figurinha.
+  normalizeMessageContent
+} = require('@whiskeysockets/baileys')
 const { Sticker, StickerTypes } = require('wa-sticker-formatter')
 const { rodarExecutavel } = require('./webp-animado')
 const fs = require('fs')
@@ -127,6 +133,11 @@ function inyectarMetadatosWebp(buffer) {
 
 module.exports = {
   nome: 's',
+  // 🏷️ ALIASES: o comando nasceu como /s, mas quem digita "/sticker" (o nome
+  // "oficial" do recurso), "/fig", "/figurinha" ou "/stiker" (erro de
+  // digitação comum) precisa ser atendido do mesmo jeito. O loader do bot.js
+  // registra estes apelidos sem sobrescrever nomes já existentes.
+  aliases: ['sticker', 'stiker', 'fig', 'figurinha'],
   descricao: 'Transforma imagens, GIFs ou vídeos (máx. 10 segundos) em figurinhas.',
 
   async executar(sock, jid, msg, texto) {
@@ -158,16 +169,44 @@ module.exports = {
         }
       }
 
-      // Verifica se a mensagem é imagem/GIF ou vídeo, direta ou respondida
-      const cotada = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage
-      const imagem = msg.message?.imageMessage || cotada?.imageMessage
-      const video = msg.message?.videoMessage || cotada?.videoMessage
+      // ─── 📎 CAPTURA DA MÍDIA (2 caminhos, nesta ORDEM de prioridade) ───
+      // O comando agora aceita as DUAS formas de envio:
+      //   a) 🖼️ MÍDIA + COMANDO NA LEGENDA (prioridade) — a imagem/GIF/vídeo
+      //      vem na PRÓPRIA mensagem que contém o "/s" (imageMessage/
+      //      videoMessage direto, com o comando em `.caption`). O bot.js
+      //      entrega esse texto no parâmetro `texto` (extração de texto no
+      //      messages.upsert lê conversation/text/caption);
+      //   b) 💬 REPLY/CITAÇÃO — "/s" numa mensagem de texto respondendo uma
+      //      mídia já enviada (extendedTextMessage.contextInfo.quotedMessage).
+      // 🔓 normalizeMessageContent desembrulha as embalagens de protocolo
+      // (viewOnceMessage/V2/Extension, ephemeralMessage, documentWithCaption,
+      // editedMessage) — mídia "ver uma vez" também vira figurinha.
+      // ⚠️ A ordem importa: se o usuário mandou uma mídia COM legenda "/s"
+      // respondendo outra mídia, vale a mídia da PRÓPRIA mensagem (é o que
+      // ele acabou de enviar) — a citada fica como fallback.
+      const conteudoMsg = normalizeMessageContent(msg.message) || {}
+      const contexto = conteudoMsg.extendedTextMessage?.contextInfo ||
+        conteudoMsg.imageMessage?.contextInfo || conteudoMsg.videoMessage?.contextInfo
+      const conteudoCotado = normalizeMessageContent(contexto?.quotedMessage) || {}
+      const veioNaLegenda = Boolean(conteudoMsg.imageMessage || conteudoMsg.videoMessage)
+      // Escolhe a mensagem inteira primeiro: mídia direta sempre vence,
+      // inclusive foto direta respondendo a vídeo (e vice-versa).
+      const origem = veioNaLegenda ? conteudoMsg : conteudoCotado
+      const imagem = origem.imageMessage
+      const video = origem.videoMessage
 
       if (!imagem && !video) {
         return await sock.sendMessage(jid, {
-          text: '❌ Para tecer uma figurinha, envia uma imagem, GIF ou vídeo (máx. 10s) com `/s` — ou responde a uma mídia existente.'
+          text:
+            '❌ *Ainda não vejo nenhuma mídia para tecer a figurinha.*\n\n' +
+            '*Como usar o /s:*\n' +
+            '🖼️ Envie a imagem/GIF/vídeo com `/s` na *legenda* — ou\n' +
+            '💬 Responda (cite) uma imagem/GIF/vídeo já enviada com `/s`\n\n' +
+            '🎬 Vídeos viram figurinha animada (máx. 10 segundos).'
         }, { quoted: msg })
       }
+
+      console.log(`[s] 📎 mídia capturada: ${video ? 'vídeo' : 'imagem'} ${veioNaLegenda ? 'direta (legenda com o comando)' : 'citada (reply)'}`)
 
       // Envia uma mensagem de carregamento
       await sock.sendMessage(jid, {
@@ -220,10 +259,11 @@ module.exports = {
         }
       } else {
         // ─── 🖼️ CAMINHO IMAGEM/GIF → figurinha (como sempre) ───
-        const mensagemParaBaixar = msg.message?.imageMessage ? msg.message : { message: cotada }
-
-        // Baixa a imagem do WhatsApp
-        const stream = await downloadContentFromMessage(mensagemParaBaixar.message.imageMessage, 'image')
+        // ⬇️ Baixa a imagem do WhatsApp — o nó JÁ vem normalizado pela
+        // captura acima (mídia direta com legenda OU citada no reply), então
+        // basta repassar o próprio imageMessage: downloadContentFromMessage
+        // lê mediaKey/url/directPath da mídia, não do wrapper da mensagem.
+        const stream = await downloadContentFromMessage(imagem, 'image')
 
         let buffer = Buffer.from([])
         for await (const parte of stream) {
