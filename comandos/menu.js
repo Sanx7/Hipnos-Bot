@@ -52,24 +52,6 @@ enfrentam o julgamento das sombras."
 
 🌤️ UTILITÁRIOS
 
-🌤️ /clima <cidade>
-➥ Consulta a carta do clima: temperatura, sensação térmica, condição e umidade (ex: /clima Campinas).
-
-🎵 /tomp3 (responda a um vídeo/áudio)
-➥ Extrai o som da mídia citada e envia de volta como MP3.
-
-📜 /transcrever (responda a um áudio/vídeo)
-➥ Transcreve o que é dito na mídia citada (áudio/vídeo) para texto.
-
-🔮 /horoscopo <signo>
-➥ Leitura do dia do Limbo para o seu signo — a mesma para todos no mesmo dia (ex: /horoscopo leao).
-
-🎤 /letra <artista> - <musica>
-➥ Busca a letra de uma música (ex: /letra Coldplay - Yellow).
-
-😂 /meme
-➥ Puxa um meme aleatório do Reddit com o título original (imagem, GIF ou vídeo).
-
 🧰 /menu-utilitario
 ➥ Abre o pergaminho das ferramentas do dia a dia.
 
@@ -77,26 +59,17 @@ enfrentam o julgamento das sombras."
 
 🔮 MENU STICKER (FIGURINHAS)
 
-🔮 /s
-➥ Transforma imagens em figurinhas.
+🔮 /menu-figurinhas (ou /menu-sticker)
+➥ Abre o ateliê das figurinhas: criação, texto animado e conversões.
+(também: /menu-fig).
 
-🎨 /attp <texto>
-➥ Gera uma figurinha ANIMADA com o texto que você enviar (ex: /attp Oi mundo).
+════════════════════
 
-🎨 /attp <texto>
-➥ Cria uma figurinha ANIMADA com o texto pulsando e girando (ex: /attp Oi mundo).
+🎭 EFEITOS DE IMAGEM
 
-🖼️ /toimg
-➥ Converte figurinha estática em imagem comum (Responda ao sticker).
-
-🏷️ /renomear [Pacote] | [Autor]
-➥ Altera os metadados de um sticker (Responda ao sticker).
-
-🎞️ /togif
-➥ Transforma figurinha animada em GIF em loop (Responda ao sticker).
-
-🎬 /tomp4
-➥ Transforma figurinha animada em vídeo MP4 comum (Responda ao sticker).
+🎭 /menu-efeitos (ou /efeitos)
+➥ Abre o grimório dos efeitos: beijos, ships, overlays e filtros para a foto de perfil.
+(também: /menu-efeito).
 
 ════════════════════
 
@@ -104,21 +77,6 @@ enfrentam o julgamento das sombras."
 
 🎲 /menu-brincadeiras (ou /brincadeira)
 ➥ Abre o pergaminho das brincadeiras, oráculos e ações animadas do sono.
-
-🎭 /tapa, /beijo, /abraço, /soco, /chute, /carinho, /mordida, /cutucada, /aconchego, /comer
-➥ Ações animadas com GIFs — responda a mensagem da pessoa (reply) ou mencione com @usuario.
-
-🔠 /anagrama [categoria]
-➥ Descubra a palavra secreta letra por letra (um jogo por grupo; ex: /anagrama animais).
-
-🎨 /gartic [categoria]
-➥ Adivinhe a palavra pela imagem (Pixabay) — 3 min por rodada, um jogo por grupo (ex: /gartic animais).
-
-🐱 /gatofato
-➥ Solta um fato aleatório sobre gatos, traduzido pro português.
-
-🔢 /curiosidadenumero [número]
-➥ Revela a curiosidade de um número — sem número, a sorte escolhe entre 1 e 1000 (ex: /curiosidadenumero 73).
 
 ════════════════════
 

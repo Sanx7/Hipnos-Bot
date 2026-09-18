@@ -118,6 +118,16 @@ module.exports = {
 
 ════════════════════
 
+🐱 FATOS & CURIOSIDADES
+
+🐱 /gatofato
+➥ Solta um fato aleatório sobre gatos, traduzido pro português.
+
+🔢 /curiosidadenumero [número]
+➥ Revela a curiosidade de um número — sem número, a sorte escolhe entre 1 e 1000 (ex: /curiosidadenumero 73).
+
+════════════════════
+
 💀 FRASES DE HIPNOS
 
 "O acaso é apenas o sono do destino."

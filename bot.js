@@ -73,7 +73,7 @@ const { welcomeHabilitado } = require('./configuracoes-grupo')
 // membro na moldura do banner (jimp — JS puro) + a legenda do grupo
 // (customizada via /legendabv ou a padrão). NUNCA lança: em qualquer falha
 // ele mesmo cai para uma saudação em TEXTO.
-const { enviarBoasVindas } = require('./boasvindas')
+const { enviarBoasVindas, registrarSocketBoasVindas } = require('./boasvindas')
 
 // ====================
 // CONFIGURAÇÃO DO EXPRESS (PARA O RENDER)
@@ -279,6 +279,8 @@ async function startBot() {
   })
 
   sockAtual = sock
+  // Permite que boas-vindas pendentes reenviem pelo socket recriado.
+  registrarSocketBoasVindas(sock)
 
   sock.ev.on('creds.update', saveCreds)
 

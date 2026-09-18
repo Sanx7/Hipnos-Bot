@@ -33,6 +33,9 @@ module.exports = {
 🗺️ /ddd <ddd ou número>
 ➥ Revela o estado e as cidades de um DDD (também: /estado-ddd e /cidades-ddd). Ex.: /ddd 11 ou /ddd 11999998888.
 
+🏠 /cep <cep>
+➥ Revela o endereço de um CEP: rua, bairro, cidade, estado e coordenadas (ex: /cep 01310-100).
+
 🎵 /tomp3 (responda a um vídeo/áudio)
 ➥ Extrai o som da mídia citada e envia de volta como MP3.
 
@@ -44,6 +47,9 @@ module.exports = {
 
 📜 /transcrever (responda a um áudio/vídeo)
 ➥ Escreve o que é dito na mídia citada — transcrição em texto (Groq Whisper).
+
+😂 /meme
+➥ Puxa um meme aleatório do Reddit com o título original (imagem, GIF ou vídeo).
 
 📊 /checkativo (@membro ou respondendo uma mensagem)
 ➥ Mostra quantas mensagens a pessoa ecoou no recinto (também: /mensagens, /msgs e /ativo).

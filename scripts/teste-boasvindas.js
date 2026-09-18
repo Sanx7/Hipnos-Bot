@@ -31,6 +31,11 @@ const { Jimp, JimpMime } = require('jimp')
 const boasvindas = require('../boasvindas')
 const { AREA_FOTO, LEGENDA_PADRAO, CAMINHOS_BANNER_PADRAO } = boasvindas
 
+// Isola também os comandos que consultam configurações diretamente.
+require('../configuracoes-grupo').__definirColecaoTeste({
+  findOne: async () => null
+})
+
 const JID_GRUPO = '120363000000000000@g.us'
 const JID_PRIVADO = '5555000000001@s.whatsapp.net'
 const JID_ADMIN = '5555000000002@s.whatsapp.net'
@@ -465,6 +470,131 @@ async function main() {
     await comandoLegenda.executar(sock, JID_GRUPO, criarMsgComando(), '/legendabv')
     const texto = textoUnico(enviadas)
     if (!texto || !/sono profundo/i.test(texto)) throw new Error(`status: ${texto}`)
+  })
+
+  // ───── Reconexão e reenvio (sem rede) ─────
+  const { EventEmitter } = require('events')
+  const criarSocketConexao = (aberto = false) => ({
+    ev: new EventEmitter(),
+    ws: { isOpen: aberto }
+  })
+
+  await testar('reconexão: socket já aberto resolve sem listener', async () => {
+    const sock = criarSocketConexao(true)
+    if (await boasvindas.aguardarConexaoAberta(sock, 0) !== true) {
+      throw new Error('não reconheceu conexão aberta')
+    }
+    if (sock.ev.listenerCount('connection.update') !== 0) throw new Error('listener vazou')
+  })
+
+  await testar('reconexão: espera open e remove somente seu listener', async () => {
+    const sock = criarSocketConexao()
+    const externo = () => {}
+    sock.ev.on('connection.update', externo)
+    let resolveu = false
+    const espera = boasvindas.aguardarConexaoAberta(sock, 1000).then(resultado => {
+      resolveu = true
+      return resultado
+    })
+    sock.ev.emit('connection.update', { connection: 'connecting' })
+    await Promise.resolve()
+    if (resolveu) throw new Error('resolveu antes de open')
+    sock.ws.isOpen = true
+    sock.ev.emit('connection.update', { connection: 'open' })
+    if (await espera !== true) throw new Error('não reconheceu reconexão')
+    if (sock.ev.listeners('connection.update').length !== 1 ||
+        sock.ev.listeners('connection.update')[0] !== externo) throw new Error('limpeza incorreta')
+  })
+
+  await testar('reconexão: timeout resolve false e remove listener', async () => {
+    const sock = criarSocketConexao()
+    const inicio = Date.now()
+    const espera = boasvindas.aguardarConexaoAberta(sock, 30)
+    if (sock.ev.listenerCount('connection.update') !== 1) throw new Error('não inscreveu listener')
+    if (await espera !== false) throw new Error('timeout deveria resolver false')
+    if (Date.now() - inicio < 25) throw new Error('resolveu antes do timeout')
+    if (sock.ev.listenerCount('connection.update') !== 0) throw new Error('listener vazou')
+    sock.ev.emit('connection.update', { connection: 'open' })
+  })
+
+  await testar('reenvio: boas-vindas pendente sai pelo NOVO socket após open', async () => {
+    const antigo = criarSocketConexao()
+    const novo = criarSocketConexao()
+    const enviadas = []
+    let tentativasAntigo = 0
+    let avisarFalha
+    const falhou = new Promise(resolve => { avisarFalha = resolve })
+    antigo.sendMessage = async () => {
+      tentativasAntigo++
+      avisarFalha()
+      throw new Error('Connection Closed')
+    }
+    novo.sendMessage = async (jid, conteudo) => {
+      if (!novo.ws.isOpen) throw new Error('tentou enviar antes da abertura')
+      enviadas.push({ jid, conteudo })
+    }
+    boasvindas.registrarSocketBoasVindas(antigo)
+    boasvindas.__definirDependenciasTeste({
+      obterLegenda: async () => 'Olá @numero',
+      obterBannerDoGrupo: async () => ({ buffer: Buffer.from('banner'), origem: 'teste' }),
+      obterFotoMembro: async () => ({ buffer: Buffer.from('foto'), origem: 'foto' }),
+      comporBanner: async () => ({ buffer: Buffer.from('imagem'), jpegThumbnail: Buffer.from('miniatura') })
+    })
+    try {
+      const envio = boasvindas.enviarBoasVindas(antigo, {
+        grupoId: JID_GRUPO, participanteId: JID_NOVO, nomeGrupo: 'Teste'
+      })
+      await falhou
+      // Deixa o catch do envio instalar a espera antes de recriar o socket.
+      await new Promise(resolve => setImmediate(resolve))
+      boasvindas.registrarSocketBoasVindas(novo)
+      novo.ev.emit('connection.update', { connection: 'connecting' })
+      await new Promise(resolve => setImmediate(resolve))
+      if (enviadas.length) throw new Error('reenviou antes da reconexão')
+      novo.ws.isOpen = true
+      novo.ev.emit('connection.update', { connection: 'open' })
+      if (await envio !== true) throw new Error('boas-vindas não saiu')
+      if (tentativasAntigo !== 1 || enviadas.length !== 1) throw new Error('socket incorreto ou envio duplicado')
+      const { jid, conteudo } = enviadas[0]
+      if (jid !== JID_GRUPO || conteudo.image.toString() !== 'imagem' ||
+          conteudo.caption !== boasvindas.garantirMencao(
+            boasvindas.montarLegenda('Olá @numero', { numero: NUMERO_NOVO }), NUMERO_NOVO
+          ) || conteudo.mentions[0] !== JID_NOVO) {
+        throw new Error('imagem, legenda ou menção alterada no reenvio')
+      }
+      if (antigo.ev.listenerCount('connection.update') !== 0) throw new Error('listener preso no socket antigo')
+    } finally {
+      boasvindas.__definirDependenciasTeste()
+    }
+  })
+
+  await testar('reenvio: três falhas na imagem preservam fallback e perda definitiva', async () => {
+    boasvindas.__definirDependenciasTeste({
+      obterLegenda: async () => 'Olá @numero',
+      obterBannerDoGrupo: async () => ({ buffer: Buffer.from('banner'), origem: 'teste' }),
+      obterFotoMembro: async () => ({ buffer: Buffer.from('foto'), origem: 'foto' }),
+      comporBanner: async () => ({ buffer: Buffer.from('imagem'), largura: 1, altura: 1 })
+    })
+    try {
+      for (const falharTexto of [false, true]) {
+        const sock = criarSocketConexao(true)
+        let imagens = 0
+        let textos = 0
+        sock.sendMessage = async (jid, conteudo) => {
+          if (conteudo.image) imagens++
+          else textos++
+          if (conteudo.image || falharTexto) throw new Error('Connection Closed')
+        }
+        const resultado = await boasvindas.enviarBoasVindas(sock, {
+          grupoId: JID_GRUPO, participanteId: JID_NOVO
+        })
+        if (resultado !== !falharTexto || imagens !== 3 || textos !== (falharTexto ? 3 : 1)) {
+          throw new Error('limite de tentativas ou fallback alterado')
+        }
+      }
+    } finally {
+      boasvindas.__definirDependenciasTeste()
+    }
   })
 
   console.log(reprovadas === 0 ? '\nTodos os testes passaram.' : `\n${reprovadas} teste(s) reprovado(s).`)

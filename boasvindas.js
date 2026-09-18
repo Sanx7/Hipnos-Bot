@@ -15,8 +15,8 @@
 //   4) 🎨 compõe a foto dentro da área reservada do banner (modo "cover",
 //      preenchendo sem distorcer) — ver AREA_FOTO;
 //   5) 📤 envia imagem + legenda com RETRY para quedas de conexão do
-//      Baileys (3 tentativas com delay para a reconexão — padrão do
-//      acoes.js), fallback para TEXTO puro (também com retry) se QUALQUER
+//      Baileys (3 tentativas aguardando o evento de reconexão),
+//      fallback para TEXTO puro (também com retry) se QUALQUER
 //      etapa falhar e fallback final silencioso (nunca lança).
 //
 // ️ REGRA DE OURO DO PROJETO — NUNCA usar lib nativa in-process
@@ -374,18 +374,68 @@ function garantirMencao(legenda, numero) {
 // Closed". O bot reconectava ~3s depois, mas a boas-vindas daquela
 // entrada específica se perdia.
 //
-// Solução: quando o erro é de CONEXÃO, esperamos DELAY_ENVIO_MS (tempo
-// para a reconexão automática do Baileys completar) e tentamos de novo.
+// Solução: quando o erro é de CONEXÃO, esperamos o evento de abertura
+// (até 20s, acompanhando a troca de socket) e tentamos de novo.
 // Outros erros (bad-request, media-upload, conteúdo inválido...) NÃO
 // ganham retry — falhariam igual em qualquer tentativa e sobem na hora
 // para o fallback (texto) ou para o log final.
 // -------------------------------------------------------------------
 const MAX_TENTATIVAS_ENVIO = 3   // 1 tentativa inicial + 2 retries
-const DELAY_ENVIO_MS = 2500      // 2,5s — tempo p/ a reconexão automática completar
+const TIMEOUT_CONEXAO_MS = 20000
+const { EventEmitter } = require('events')
 
-// ⏱️ Delay SEM bloquear o event loop (mesmo utilitário do acoes.js)
-function delay(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms))
+// O bot recria o socket ao reconectar. Este emissor sobrevive à troca e é
+// exclusivo dos reenvios de boas-vindas; os demais fluxos não são alterados.
+const eventosConexao = new EventEmitter()
+const socketsRegistrados = new WeakSet()
+let socketAtualBoasVindas = null
+
+function repassarAtualizacaoConexao(atualizacao) {
+  eventosConexao.emit('connection.update', atualizacao)
+}
+
+function registrarSocketBoasVindas(sock) {
+  if (socketAtualBoasVindas === sock) return
+  socketAtualBoasVindas?.ev.off('connection.update', repassarAtualizacaoConexao)
+  socketAtualBoasVindas = sock
+  socketsRegistrados.add(sock)
+  sock.ev.on('connection.update', repassarAtualizacaoConexao)
+}
+
+function obterSocketEnvio(sock) {
+  return socketsRegistrados.has(sock) ? socketAtualBoasVindas : sock
+}
+
+function conexaoEstaAberta(sock) {
+  // Baileys expõe ws.isOpen; readyState atende também WebSockets diretos.
+  return sock?.ws?.isOpen === true || sock?.ws?.readyState === 1
+}
+
+// Resolve true quando conectado, false no timeout. Não rejeitar preserva
+// as tentativas restantes e o fallback silencioso quando a rede não volta.
+function aguardarConexaoAberta(sock, timeoutMs = TIMEOUT_CONEXAO_MS) {
+  if (conexaoEstaAberta(obterSocketEnvio(sock))) return Promise.resolve(true)
+
+  const eventos = socketsRegistrados.has(sock) ? eventosConexao : sock?.ev
+  return new Promise(resolve => {
+    let concluida = false
+    let temporizador
+    const finalizar = (aberta) => {
+      if (concluida) return
+      concluida = true
+      clearTimeout(temporizador)
+      eventos?.off('connection.update', aoAtualizar)
+      resolve(aberta)
+    }
+    const aoAtualizar = ({ connection }) => {
+      if (connection === 'open') finalizar(true)
+    }
+
+    temporizador = setTimeout(() => finalizar(false), timeoutMs)
+    eventos?.on('connection.update', aoAtualizar)
+    // Reconfere após inscrever para não perder uma abertura nesse intervalo.
+    if (conexaoEstaAberta(obterSocketEnvio(sock))) finalizar(true)
+  })
 }
 
 // 📡 PADRÕES de erro de CONEXÃO (case-insensitive) — os únicos que valem
@@ -429,8 +479,8 @@ function ehErroDeConexao(err) {
 // 📤 enviarComRetry(sock, jid, conteudo): tenta sock.sendMessage até
 // MAX_TENTATIVAS_ENVIO vezes. O retry SÓ é acionado para erros de conexão
 // (socket fechado/queda — ex.: 408 "Connection was lost"); antes de cada
-// nova tentativa espera DELAY_ENVIO_MS para a reconexão automática do
-// Baileys completar (tentar imediatamente com o socket morto só reproduz
+// nova tentativa espera connection.update com connection === 'open', com
+// timeout de 20s (tentar imediatamente com o socket morto só reproduz
 // "Connection Closed"). NUNCA lança: devolve true se a mensagem saiu e
 // false se falhou de vez (o fallback/tratamento decide o próximo passo).
 // -------------------------------------------------------------------
@@ -440,7 +490,7 @@ async function enviarComRetry(sock, jid, conteudo) {
       if (tentativa > 1) {
         console.log(`[boasvindas] 🔄 reenviando — tentativa ${tentativa}/${MAX_TENTATIVAS_ENVIO}`)
       }
-      await sock.sendMessage(jid, conteudo)
+      await obterSocketEnvio(sock).sendMessage(jid, conteudo)
       if (tentativa > 1) {
         console.log(`[boasvindas] ✅ envio saiu na tentativa ${tentativa} (conexão reestabelecida)`)
       }
@@ -461,9 +511,12 @@ async function enviarComRetry(sock, jid, conteudo) {
       // ⏳ Queda de conexão: espera a reconexão automática do Baileys
       // completar ANTES da próxima tentativa (em vez de tentar na hora).
       console.log(
-        `[boasvindas] ⏳ queda de conexão detectada — aguardando ${DELAY_ENVIO_MS}ms para a reconexão automática completar antes da próxima tentativa...`
+        `[boasvindas] ⏳ queda de conexão detectada — aguardando conexão aberta (até ${TIMEOUT_CONEXAO_MS}ms) antes da próxima tentativa...`
       )
-      await delay(DELAY_ENVIO_MS)
+      const aberta = await aguardarConexaoAberta(sock)
+      if (!aberta) {
+        console.warn('[boasvindas] ⏱️ tempo limite de reconexão atingido — seguindo com a próxima tentativa')
+      }
     }
   }
   return false
@@ -651,6 +704,8 @@ async function enviarBoasVindas(sock, entrada = {}) {
 }
 
 module.exports = {
+  aguardarConexaoAberta,
+  registrarSocketBoasVindas,
   enviarBoasVindas,
   // 🧩 Peças reutilizadas pelos comandos /setbannerbv e /legendabv (preview)
   montarLegenda,
