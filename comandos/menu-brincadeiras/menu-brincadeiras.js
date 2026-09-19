@@ -126,6 +126,9 @@ module.exports = {
 🔢 /curiosidadenumero [número]
 ➥ Revela a curiosidade de um número — sem número, a sorte escolhe entre 1 e 1000 (ex: /curiosidadenumero 73).
 
+💭 /frase
+➥ Sopro motivacional do oráculo: pega uma frase aleatória e traduz pro português (ex: /frase).
+
 ════════════════════
 
 💀 FRASES DE HIPNOS

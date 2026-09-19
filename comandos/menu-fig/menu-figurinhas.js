@@ -2,7 +2,7 @@
 // 🔮 MENU-FIGURINHAS — Pergaminho das Figurinhas
 // ============================================
 // Lista TODOS os comandos de figurinhas do bot (comandos/menu-fig/ e
-// comandos/menu-principal/brat.js, ttp.js e fake-chat.js),
+// comandos/menu-fig/brat.js, ttp.js e fake-chat.js),
 // seguindo o mesmo estilo visual do /menu principal e dos demais submenus.
 // Consultar este menu é livre — igual ao /menu geral.
 //

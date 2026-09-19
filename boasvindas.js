@@ -15,9 +15,9 @@
 //   4) 🎨 compõe a foto dentro da área reservada do banner (modo "cover",
 //      preenchendo sem distorcer) — ver AREA_FOTO;
 //   5) 📤 envia imagem + legenda com RETRY para quedas de conexão do
-//      Baileys (3 tentativas aguardando o evento de reconexão),
-//      fallback para TEXTO puro (também com retry) se QUALQUER
-//      etapa falhar e fallback final silencioso (nunca lança).
+//      Baileys (espera 2s e tenta MAIS UMA vez — tentativa única extra,
+//      sem loop), fallback para TEXTO puro (também com retry) se
+//      QUALQUER etapa falhar e fallback final silencioso (nunca lança).
 //
 // ️ REGRA DE OURO DO PROJETO — NUNCA usar lib nativa in-process
 // (sharp / libvips / canvas nativo) para manipular imagem: já causou
@@ -365,82 +365,45 @@ function garantirMencao(legenda, numero) {
 }
 
 // -------------------------------------------------------------------
-// 🔄 RETRY NO ENVIO — quedas de conexão do Baileys (mesmo padrão de
-//    comandos/menu-brincadeiras/acoes.js: 3 tentativas, delay entre elas)
+// 🔄 RETRY NO ENVIO — quedas de conexão do Baileys
 //
 // Problema de produção: o banner era gerado, mas o sock.sendMessage podia
 // explodir com 408 "Connection was lost" — o socket já estava fechado e
 // TANTO a imagem quanto o fallback de texto falhavam com "Connection
-// Closed". O bot reconectava ~3s depois, mas a boas-vindas daquela
-// entrada específica se perdia.
+// Closed". A boas-vindas daquela entrada específica se perdia.
 //
-// Solução: quando o erro é de CONEXÃO, esperamos o evento de abertura
-// (até 20s, acompanhando a troca de socket) e tentamos de novo.
-// Outros erros (bad-request, media-upload, conteúdo inválido...) NÃO
-// ganham retry — falhariam igual em qualquer tentativa e sobem na hora
-// para o fallback (texto) ou para o log final.
+// Solução: quando o erro é de CONEXÃO, esperamos 2 segundos e tentamos
+// MAIS UMA vez (única tentativa extra — sem loop infinito). Se a segunda
+// tentativa também falhar, o envio desiste silenciosamente: loga o erro,
+// devolve false e NUNCA lança (a conexão do bot não é afetada) — o fluxo
+// então cai para o fallback de TEXTO puro. Outros erros (bad-request,
+// media-upload, conteúdo inválido...) NÃO ganham retry — falhariam igual
+// em qualquer tentativa e sobem na hora para o fallback ou para o log.
 // -------------------------------------------------------------------
-const MAX_TENTATIVAS_ENVIO = 3   // 1 tentativa inicial + 2 retries
-const TIMEOUT_CONEXAO_MS = 20000
-const { EventEmitter } = require('events')
+const MAX_TENTATIVAS_ENVIO = 2   // 1 tentativa inicial + 1 tentativa extra
+const ATRASO_RETRY_MS = 2000     // espera antes da tentativa extra
 
-// O bot recria o socket ao reconectar. Este emissor sobrevive à troca e é
-// exclusivo dos reenvios de boas-vindas; os demais fluxos não são alterados.
-const eventosConexao = new EventEmitter()
+// Pequena pausa (Promise) usada entre as tentativas de envio.
+const esperar = ms => new Promise(resolve => setTimeout(resolve, ms))
+
+// O bot recria o socket ao reconectar. Se a reconexão acontecer durante a
+// espera do retry, a tentativa extra já sai pelo socket novo.
 const socketsRegistrados = new WeakSet()
 let socketAtualBoasVindas = null
 
-function repassarAtualizacaoConexao(atualizacao) {
-  eventosConexao.emit('connection.update', atualizacao)
-}
-
 function registrarSocketBoasVindas(sock) {
   if (socketAtualBoasVindas === sock) return
-  socketAtualBoasVindas?.ev.off('connection.update', repassarAtualizacaoConexao)
   socketAtualBoasVindas = sock
   socketsRegistrados.add(sock)
-  sock.ev.on('connection.update', repassarAtualizacaoConexao)
 }
 
 function obterSocketEnvio(sock) {
   return socketsRegistrados.has(sock) ? socketAtualBoasVindas : sock
 }
 
-function conexaoEstaAberta(sock) {
-  // Baileys expõe ws.isOpen; readyState atende também WebSockets diretos.
-  return sock?.ws?.isOpen === true || sock?.ws?.readyState === 1
-}
-
-// Resolve true quando conectado, false no timeout. Não rejeitar preserva
-// as tentativas restantes e o fallback silencioso quando a rede não volta.
-function aguardarConexaoAberta(sock, timeoutMs = TIMEOUT_CONEXAO_MS) {
-  if (conexaoEstaAberta(obterSocketEnvio(sock))) return Promise.resolve(true)
-
-  const eventos = socketsRegistrados.has(sock) ? eventosConexao : sock?.ev
-  return new Promise(resolve => {
-    let concluida = false
-    let temporizador
-    const finalizar = (aberta) => {
-      if (concluida) return
-      concluida = true
-      clearTimeout(temporizador)
-      eventos?.off('connection.update', aoAtualizar)
-      resolve(aberta)
-    }
-    const aoAtualizar = ({ connection }) => {
-      if (connection === 'open') finalizar(true)
-    }
-
-    temporizador = setTimeout(() => finalizar(false), timeoutMs)
-    eventos?.on('connection.update', aoAtualizar)
-    // Reconfere após inscrever para não perder uma abertura nesse intervalo.
-    if (conexaoEstaAberta(obterSocketEnvio(sock))) finalizar(true)
-  })
-}
-
 // 📡 PADRÕES de erro de CONEXÃO (case-insensitive) — os únicos que valem
 // retry. "Connection Closed" (e similares) significa que o socket morreu
-// no meio do envio; com a reconexão automática, a próxima tentativa sai.
+// no meio do envio; após 2s de espera, a tentativa extra costuma sair.
 const PADROES_ERRO_CONEXAO = Object.freeze([
   'connection closed',
   'connection was lost',
@@ -476,13 +439,14 @@ function ehErroDeConexao(err) {
 }
 
 // -------------------------------------------------------------------
-// 📤 enviarComRetry(sock, jid, conteudo): tenta sock.sendMessage até
-// MAX_TENTATIVAS_ENVIO vezes. O retry SÓ é acionado para erros de conexão
-// (socket fechado/queda — ex.: 408 "Connection was lost"); antes de cada
-// nova tentativa espera connection.update com connection === 'open', com
-// timeout de 20s (tentar imediatamente com o socket morto só reproduz
-// "Connection Closed"). NUNCA lança: devolve true se a mensagem saiu e
-// false se falhou de vez (o fallback/tratamento decide o próximo passo).
+// 📤 enviarComRetry(sock, jid, conteudo): tenta sock.sendMessage no
+// máximo MAX_TENTATIVAS_ENVIO vezes. O retry SÓ é acionado para erros de
+// conexão (socket fechado/queda — ex.: "Connection Closed", 408 "timed
+// out"): espera ATRASO_RETRY_MS e faz UMA única tentativa extra. Se a
+// segunda tentativa também falhar, loga e desiste silenciosamente —
+// NUNCA lança (a conexão do bot segue intacta): devolve true se a
+// mensagem saiu e false se falhou de vez (o fallback de texto/tratamento
+// decide o próximo passo).
 // -------------------------------------------------------------------
 async function enviarComRetry(sock, jid, conteudo) {
   for (let tentativa = 1; tentativa <= MAX_TENTATIVAS_ENVIO; tentativa++) {
@@ -492,7 +456,7 @@ async function enviarComRetry(sock, jid, conteudo) {
       }
       await obterSocketEnvio(sock).sendMessage(jid, conteudo)
       if (tentativa > 1) {
-        console.log(`[boasvindas] ✅ envio saiu na tentativa ${tentativa} (conexão reestabelecida)`)
+        console.log(`[boasvindas] ✅ envio saiu na tentativa ${tentativa} (após queda de conexão)`)
       }
       return true
     } catch (err) {
@@ -501,22 +465,21 @@ async function enviarComRetry(sock, jid, conteudo) {
         err?.message || err
       )
 
-      // Erro que NÃO é de conexão (ou última tentativa): não adianta
-      // insistir — devolve false imediatamente para o fallback (texto)
-      // ou para o log de perda definitiva.
+      // Erro que NÃO é de conexão (ou fim das tentativas): não adianta
+      // insistir — desiste silenciosamente (sem lançar, para nunca
+      // derrubar o listener do Baileys) e devolve false para o fallback
+      // (texto) ou para o registro de perda definitiva.
       if (!ehErroDeConexao(err) || tentativa === MAX_TENTATIVAS_ENVIO) {
         return false
       }
 
-      // ⏳ Queda de conexão: espera a reconexão automática do Baileys
-      // completar ANTES da próxima tentativa (em vez de tentar na hora).
+      // ⏳ Queda de conexão: espera 2 segundos e tenta MAIS UMA vez
+      // (única tentativa extra — sem loop infinito). Se o bot recriou o
+      // socket nesse intervalo, o reenvio já sai pelo socket novo.
       console.log(
-        `[boasvindas] ⏳ queda de conexão detectada — aguardando conexão aberta (até ${TIMEOUT_CONEXAO_MS}ms) antes da próxima tentativa...`
+        `[boasvindas] ⏳ queda de conexão detectada — aguardando ${ATRASO_RETRY_MS}ms antes da tentativa extra...`
       )
-      const aberta = await aguardarConexaoAberta(sock)
-      if (!aberta) {
-        console.warn('[boasvindas] ⏱️ tempo limite de reconexão atingido — seguindo com a próxima tentativa')
-      }
+      await esperar(ATRASO_RETRY_MS)
     }
   }
   return false
@@ -704,7 +667,6 @@ async function enviarBoasVindas(sock, entrada = {}) {
 }
 
 module.exports = {
-  aguardarConexaoAberta,
   registrarSocketBoasVindas,
   enviarBoasVindas,
   // 🧩 Peças reutilizadas pelos comandos /setbannerbv e /legendabv (preview)

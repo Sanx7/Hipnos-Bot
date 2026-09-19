@@ -195,6 +195,49 @@ async function definirWelcome(grupoIdBruto, ativo) {
 }
 
 // -------------------------------------------------------------------
+// 🤖 IA INTERATIVA — mesmo padrão do welcome: 1/0 POR GRUPO, na MESMA
+// collection ("configuracoesGrupo"), campo `ia_interativa`.
+// -------------------------------------------------------------------
+async function definirIaInterativa(grupoIdBruto, ativo) {
+  const grupoId = String(grupoIdBruto || '').trim()
+  if (!grupoId) return null
+
+  const colecao = await obterColecaoConfiguracoes()
+  const documento = {
+    grupo_id: grupoId,
+    ia_interativa: Boolean(ativo),
+    atualizado_em: Date.now()
+  }
+
+  await colecao.updateOne(
+    { grupo_id: grupoId },
+    { $set: documento },
+    { upsert: true }
+  )
+
+  console.log(`🤖 [config-grupo] IA interativa ${ativo ? 'LIGADA' : 'DESLIGADA'} p/ ${grupoId}`)
+  return documento
+}
+
+// iaInterativaHabilitada(grupoId): devolve true/false (NUNCA lança —
+// falha de banco assume DESLIGADO, para a IA nunca falar sem permissão).
+async function iaInterativaHabilitada(grupoIdBruto) {
+  const grupoId = String(grupoIdBruto || '').trim()
+  if (!grupoId) return false
+
+  try {
+    const config = await obterConfiguracoes(grupoId)
+    return config?.ia_interativa === true
+  } catch (erro) {
+    console.error(
+      '⚠️ [config-grupo] falha ao consultar a IA interativa — assumindo DESLIGADO:',
+      erro?.message
+    )
+    return false
+  }
+}
+
+// -------------------------------------------------------------------
 // welcomeHabilitado(grupoId): ✅ FUNÇÃO PÚBLICA usada pelo handler de
 // entrada de novos membros (evento group-participants.update).
 //   true  = o /welcome está LIGADO neste grupo;
@@ -428,6 +471,9 @@ module.exports = {
   definirWelcome,
   welcomeHabilitado,
   configuracaoPadrao,
+  // 🤖 IA interativa por grupo (mesma collection do /welcome)
+  definirIaInterativa,
+  iaInterativaHabilitada,
   // 🖼️ Banner personalizado por grupo (/setbannerbv e handler de entrada)
   definirBanner,
   removerBanner,

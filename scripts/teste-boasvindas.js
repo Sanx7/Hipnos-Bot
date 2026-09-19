@@ -314,16 +314,18 @@ async function main() {
     if (!enviadas[0].conteudo.text) throw new Error('o fallback deveria ser TEXTO puro')
   })
 
-  await testar('enviarBoasVindas: ENVIO da imagem falha, tenta o TEXTO', async () => {
+  await testar('enviarBoasVindas: imagem falha 2x por CONEXÃO, tenta o TEXTO', async () => {
     const arte = boasvindas.carregarBannerPadrao()
     const foto = await criarFotoMagenta(300)
     boasvindas.__definirDependenciasTeste(dependenciasComBanner(arte, foto))
     const { enviadas, sock } = criarSock()
-    let chamadas = 0
+    let tentativasImagem = 0
     const original = sock.sendMessage
     sock.sendMessage = async (jid, conteudo, extra) => {
-      chamadas += 1
-      if (chamadas === 1) throw new Error('rede caiu na imagem (simulado)')
+      if (conteudo.image) {
+        tentativasImagem += 1
+        throw new Error('Connection Closed')
+      }
       return original(jid, conteudo, extra)
     }
     const ok = await boasvindas.enviarBoasVindas(sock, {
@@ -334,6 +336,11 @@ async function main() {
       totalMembros: 42
     })
     if (ok !== true) throw new Error('deveria devolver true (texto de reserva)')
+    // 1 tentativa inicial + 1 tentativa extra (única) na imagem...
+    if (tentativasImagem !== 2) {
+      throw new Error(`a imagem deveria ter 2 tentativas, houve ${tentativasImagem}`)
+    }
+    // ...e depois o fallback de TEXTO (1 envio bem-sucedido).
     if (enviadas.length !== 1) throw new Error(`esperava 1 texto, houve ${enviadas.length}`)
     if (!enviadas[0].conteudo.text?.includes('Yuri')) throw new Error('texto de reserva errado')
   })
@@ -472,61 +479,20 @@ async function main() {
     if (!texto || !/sono profundo/i.test(texto)) throw new Error(`status: ${texto}`)
   })
 
-  // ───── Reconexão e reenvio (sem rede) ─────
+  // ───── Reenvio por queda de conexão (sem rede) ─────
   const { EventEmitter } = require('events')
   const criarSocketConexao = (aberto = false) => ({
     ev: new EventEmitter(),
     ws: { isOpen: aberto }
   })
 
-  await testar('reconexão: socket já aberto resolve sem listener', async () => {
-    const sock = criarSocketConexao(true)
-    if (await boasvindas.aguardarConexaoAberta(sock, 0) !== true) {
-      throw new Error('não reconheceu conexão aberta')
-    }
-    if (sock.ev.listenerCount('connection.update') !== 0) throw new Error('listener vazou')
-  })
-
-  await testar('reconexão: espera open e remove somente seu listener', async () => {
-    const sock = criarSocketConexao()
-    const externo = () => {}
-    sock.ev.on('connection.update', externo)
-    let resolveu = false
-    const espera = boasvindas.aguardarConexaoAberta(sock, 1000).then(resultado => {
-      resolveu = true
-      return resultado
-    })
-    sock.ev.emit('connection.update', { connection: 'connecting' })
-    await Promise.resolve()
-    if (resolveu) throw new Error('resolveu antes de open')
-    sock.ws.isOpen = true
-    sock.ev.emit('connection.update', { connection: 'open' })
-    if (await espera !== true) throw new Error('não reconheceu reconexão')
-    if (sock.ev.listeners('connection.update').length !== 1 ||
-        sock.ev.listeners('connection.update')[0] !== externo) throw new Error('limpeza incorreta')
-  })
-
-  await testar('reconexão: timeout resolve false e remove listener', async () => {
-    const sock = criarSocketConexao()
-    const inicio = Date.now()
-    const espera = boasvindas.aguardarConexaoAberta(sock, 30)
-    if (sock.ev.listenerCount('connection.update') !== 1) throw new Error('não inscreveu listener')
-    if (await espera !== false) throw new Error('timeout deveria resolver false')
-    if (Date.now() - inicio < 25) throw new Error('resolveu antes do timeout')
-    if (sock.ev.listenerCount('connection.update') !== 0) throw new Error('listener vazou')
-    sock.ev.emit('connection.update', { connection: 'open' })
-  })
-
-  await testar('reenvio: boas-vindas pendente sai pelo NOVO socket após open', async () => {
+  await testar('reenvio: boas-vindas pendente sai pelo NOVO socket na tentativa extra', async () => {
     const antigo = criarSocketConexao()
     const novo = criarSocketConexao()
     const enviadas = []
     let tentativasAntigo = 0
-    let avisarFalha
-    const falhou = new Promise(resolve => { avisarFalha = resolve })
     antigo.sendMessage = async () => {
       tentativasAntigo++
-      avisarFalha()
       throw new Error('Connection Closed')
     }
     novo.sendMessage = async (jid, conteudo) => {
@@ -544,15 +510,12 @@ async function main() {
       const envio = boasvindas.enviarBoasVindas(antigo, {
         grupoId: JID_GRUPO, participanteId: JID_NOVO, nomeGrupo: 'Teste'
       })
-      await falhou
-      // Deixa o catch do envio instalar a espera antes de recriar o socket.
+      // 1ª tentativa falha na hora; o reenvio aguarda o atraso fixo (2s).
       await new Promise(resolve => setImmediate(resolve))
+      // O bot recria o socket durante a espera — a tentativa extra deve
+      // sair pelo socket novo (obterSocketEnvio), não pelo antigo morto.
       boasvindas.registrarSocketBoasVindas(novo)
-      novo.ev.emit('connection.update', { connection: 'connecting' })
-      await new Promise(resolve => setImmediate(resolve))
-      if (enviadas.length) throw new Error('reenviou antes da reconexão')
       novo.ws.isOpen = true
-      novo.ev.emit('connection.update', { connection: 'open' })
       if (await envio !== true) throw new Error('boas-vindas não saiu')
       if (tentativasAntigo !== 1 || enviadas.length !== 1) throw new Error('socket incorreto ou envio duplicado')
       const { jid, conteudo } = enviadas[0]
@@ -562,13 +525,12 @@ async function main() {
           ) || conteudo.mentions[0] !== JID_NOVO) {
         throw new Error('imagem, legenda ou menção alterada no reenvio')
       }
-      if (antigo.ev.listenerCount('connection.update') !== 0) throw new Error('listener preso no socket antigo')
     } finally {
       boasvindas.__definirDependenciasTeste()
     }
   })
 
-  await testar('reenvio: três falhas na imagem preservam fallback e perda definitiva', async () => {
+  await testar('reenvio: DUAS falhas por conexão esgotam tentativas e preservam fallback', async () => {
     boasvindas.__definirDependenciasTeste({
       obterLegenda: async () => 'Olá @numero',
       obterBannerDoGrupo: async () => ({ buffer: Buffer.from('banner'), origem: 'teste' }),
@@ -588,7 +550,9 @@ async function main() {
         const resultado = await boasvindas.enviarBoasVindas(sock, {
           grupoId: JID_GRUPO, participanteId: JID_NOVO
         })
-        if (resultado !== !falharTexto || imagens !== 3 || textos !== (falharTexto ? 3 : 1)) {
+        // 1 tentativa inicial + 1 extra na imagem; o texto de reserva só
+        // repete (2x) quando ele próprio também sofre queda de conexão.
+        if (resultado !== !falharTexto || imagens !== 2 || textos !== (falharTexto ? 2 : 1)) {
           throw new Error('limite de tentativas ou fallback alterado')
         }
       }

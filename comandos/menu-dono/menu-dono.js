@@ -17,7 +17,7 @@ const { RODAPE_MENU } = require('../../config')
 
 module.exports = {
   nome: 'menu-dono',
-  descricao: 'Abre o pergaminho dos soberanos: /dono, /seradm, /soadm e /redes.',
+  descricao: 'Abre o pergaminho dos soberanos: /dono, /seradm, /soadm, /ia-interativa e /redes.',
 
   async executar(sock, jid, msg) {
     try {
@@ -43,6 +43,12 @@ module.exports = {
 ⚙️ /soadm
 ➥ Alterna o modo somente admin deste grupo (/soadm 1 ativa, /soadm 0 desativa).
 ➥ Nota: também listado no /menu-admin (usável por admins de grupo).
+
+🤖 /ia-interativa (1/0)
+➥ Liga/desliga a IA conversacional DESTE grupo (só dono do bot).
+➥ Sem argumento, mostra o estado atual.
+➥ Ligada: Hipnos responde sozinho quando alguém menciona o bot ou responde a uma mensagem dele
+   (máximo 1 resposta a cada 30s por pessoa, sem histórico de conversa).
 
 ════════════════════
 

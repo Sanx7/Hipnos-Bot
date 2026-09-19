@@ -55,6 +55,9 @@ enfrentam o julgamento das sombras."
 🧰 /menu-utilitario
 ➥ Abre o pergaminho das ferramentas do dia a dia.
 
+🏠 /cep <cep>
+➥ Consulta o endereço de um CEP: rua, bairro, cidade, estado e coordenadas (ex: /cep 01310-100).
+
 ════════════════════
 
 🔮 MENU STICKER (FIGURINHAS)
@@ -78,6 +81,24 @@ enfrentam o julgamento das sombras."
 🎲 /menu-brincadeiras (ou /brincadeira)
 ➥ Abre o pergaminho das brincadeiras, oráculos e ações animadas do sono.
 
+🍀 /sorte
+➥ Revela seu nível de sorte de hoje (0-100%) — o mesmo veredito o dia inteiro.
+
+🏳️‍🌈 /gay (@pessoa)
+➥ Mede quantos % de gay alguém está hoje (sem menção, mede você mesmo).
+
+🧠 /qi (@pessoa)
+➥ Revela o QI (40-200) de alguém — zoeira, normalidade ou gênio.
+
+🪞 /parecido @pessoa
+➥ Mede a parecença (0-100%) entre você e a pessoa marcada.
+
+💘 /crush
+➥ Sorteia (1x por dia) qual membro do grupo é o seu crush secreto.
+
+💭 /frase
+➥ Sopro motivacional do oráculo: uma frase aleatória, traduzida pro português.
+
 ════════════════════
 
 👑 ADMINISTRAÇÃO
@@ -91,6 +112,9 @@ enfrentam o julgamento das sombras."
 
 👑 /menu-dono
 ➥ Abre o pergaminho dos soberanos: /dono, /seradm e /soadm.
+
+🤖 /ia-interativa (1/0)
+➥ Liga/desliga a IA conversacional deste grupo (só dono). Sem argumento, mostra o estado atual.
 
 ════════════════════
 

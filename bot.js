@@ -59,6 +59,11 @@ const {
   MOTIVO_PADRAO
 } = require('./afk')
 
+// 🤖 IA INTERATIVA (ia-interativa.js): respostas automáticas quando alguém
+// MENCIONA o bot ou RESPONDE a uma mensagem dele. O toggle por grupo
+// (/ia-interativa 1|0 — MongoDB) é checado ANTES de qualquer chamada de API.
+const { processarGatilhoIA } = require('./ia-interativa')
+
 // 🪪 Resolução LID→número real (lid.js) — usada pela anti-blacklist: a entrada
 // pode chegar como "@lid" (identificador novo do WhatsApp) enquanto o
 // blacklist.json guarda números REAIS.
@@ -650,6 +655,17 @@ async function startBot() {
           // 🛡️ Um ouvinte problemático nunca derruba o listener do Baileys
           console.error('❌ Erro ao processar palpite de jogo:', errPalpite)
         }
+
+        // 🤖 IA INTERATIVA (ia-interativa.js) — só responde se:
+        //   a) alguém mencionou o bot (@numero-do-bot), OU
+        //   b) alguém respondeu (reply) a uma mensagem enviada pelo bot;
+        //   e o /ia-interativa 1 estiver ligado NESTE grupo (MongoDB).
+        // ⚠️ Chamada SEM await DE PROPÓSITO: a API pode levar até 18s e o
+        // handler não pode ficar preso (o bot precisa seguir recebendo
+        // mensagens). A função nunca lança: qualquer falha é silenciosa.
+        processarGatilhoIA(sock, jid, msg, text).catch((errIA) => {
+          console.error('❌ Erro na IA interativa:', errIA)
+        })
         return
       }
 

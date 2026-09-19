@@ -4,7 +4,7 @@
 // Uso: node scripts/teste-brat.js
 // ============================================
 
-const comandos = require('../comandos/menu-principal/brat')
+const comandos = require('../comandos/menu-fig/brat')
 const brat = comandos.find(c => c.nome === 'brat')
 const bratvid = comandos.find(c => c.nome === 'bratvid')
 
