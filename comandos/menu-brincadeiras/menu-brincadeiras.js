@@ -44,6 +44,9 @@ module.exports = {
 🔮 /escolha opção1, opção2, ...
 ➥ O oráculo escolhe uma das opções separadas por vírgula (ex: /escolha café, chá, sonho).
 
+✨ /elogio (@pessoa)
+➥ Enche alguém de elogios absurdamente exagerados (sem menção, elogia você mesmo).
+
 ════════════════════
 
 🎭 AÇÕES (INTERAÇÃO ANIMADA)

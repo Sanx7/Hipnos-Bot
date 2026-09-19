@@ -96,6 +96,9 @@ enfrentam o julgamento das sombras."
 💘 /crush
 ➥ Sorteia (1x por dia) qual membro do grupo é o seu crush secreto.
 
+✨ /elogio (@pessoa)
+➥ Enche alguém de elogios absurdamente exagerados (sem menção, elogia você mesmo).
+
 💭 /frase
 ➥ Sopro motivacional do oráculo: uma frase aleatória, traduzida pro português.
 
