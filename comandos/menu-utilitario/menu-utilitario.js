@@ -91,6 +91,9 @@ module.exports = {
 🔮 /gemini <pergunta>
 ➥ Consulte o oráculo do Limbo (também: /googleia e /bard). Ex.: /gemini Crie um poema sobre o sono
 
+📝 /resumir <texto> (ou responda a uma mensagem de texto)
+➥ Condensa textos longos em um resumo objetivo, mantendo os pontos principais (também: /resumo e /sumarizar). Ex.: /resumir respondendo a um textão
+
 ════════════════════
 
 ${RODAPE_MENU}

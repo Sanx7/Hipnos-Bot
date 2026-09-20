@@ -12,7 +12,7 @@
 //     NÃO dispara (menção a terceiros, reply a terceiros, sem contexto);
 //   - gatilho em mensagem de mídia (contextInfo fora do extendedTextMessage);
 //   - toggle por grupo (desligado → NÃO gasta API), fora de grupo e sem gatilho;
-//   - cooldown de 30s POR USUÁRIO (e liberação após os 30s);
+//   - cooldown de 15s POR USUÁRIO (e liberação após os 15s);
 //   - falha silenciosa: IA devolve null / lança erro → nada é enviado;
 //   - banco fora → assume DESLIGADO (fail-safe), sem quebrar;
 //   - /ia-interativa: só dono, status sem argumento, 1/0 gravando no banco;
@@ -248,7 +248,7 @@ async function main () {
     if (!enviadas[0].opcoes?.quoted) throw new Error('a resposta não citou (quoted) a mensagem do gatilho')
   })
 
-  await testar('IA: cooldown de 30s POR USUÁRIO (2ª tentativa imediata é ignorada)', async () => {
+  await testar('IA: cooldown de 15s POR USUÁRIO (2ª tentativa imediata é ignorada)', async () => {
     await config.definirIaInterativa(JID_GRUPO, true)
     ia.__resetarCooldownsTeste()
     const chamadas = instalarIAMock()
@@ -265,7 +265,7 @@ async function main () {
     if (chamadas.length !== 2) throw new Error('o cooldown vazou para outro usuário')
   })
 
-  await testar('IA: após 30s o mesmo usuário é respondido de novo', async () => {
+  await testar('IA: após 15s o mesmo usuário é respondido de novo', async () => {
     await config.definirIaInterativa(JID_GRUPO, true)
     ia.__resetarCooldownsTeste()
     const chamadas = instalarIAMock()
@@ -275,13 +275,13 @@ async function main () {
     Date.now = () => agora
     try {
       await ia.processarGatilhoIA(sock, JID_GRUPO, criarMsgIA({ mencionados: [BOT_JID] }), 'a')
-      agora += 29000
+      agora += 14000
       await ia.processarGatilhoIA(sock, JID_GRUPO, criarMsgIA({ mencionados: [BOT_JID] }), 'b')
-      if (chamadas.length !== 1) throw new Error('respondeu ANTES dos 30s')
+      if (chamadas.length !== 1) throw new Error('respondeu ANTES dos 15s')
 
-      agora += 2000 // 31s no total
+      agora += 2000 // 16s no total
       await ia.processarGatilhoIA(sock, JID_GRUPO, criarMsgIA({ mencionados: [BOT_JID] }), 'c')
-      if (chamadas.length !== 2) throw new Error('não respondeu DEPOIS dos 30s')
+      if (chamadas.length !== 2) throw new Error('não respondeu DEPOIS dos 15s')
     } finally {
       Date.now = nowOriginal
     }

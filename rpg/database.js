@@ -3,16 +3,28 @@
 // ============================================================
 // Módulo de acesso a dados do RPG (Fase 0 = base do jogador; Fase 1 =
 // identidade; Fase 2 = economia — ver a nota 💰 no fim deste cabeçalho).
-// Segue EXATAMENTE o mesmo padrão de conexão já usado no resto do
-// projeto (sessao-mongo.js e database.js):
+//
+// 🏝️⚠️ CLUSTER MONGODB DEDICADO DO RPG — LEIA ANTES DE MEXER:
+// O RPG NÃO usa a MONGODB_URI do resto do bot. Ele conecta num cluster
+// Atlas SEPARADO, via rpg/conexao-mongo.js, com a variável MONGO_URI_RPG.
+// ❓ POR QUÊ: isolar o crescimento dos dados do RPG da quota de 512MB do
+//    cluster principal — lá vivem a sessão do WhatsApp (Baileys), ranking,
+//    VIPs, afk, advertências, lembretes e histórico de IA, e a sessão NÃO
+//    pode ficar sem espaço (sem ela o bot cai e precisa reescanear o QR).
+// Padrões mantidos (idênticos aos do database.js/sessao-mongo.js):
 //   - SINGLETON: um único MongoClient criado uma vez no processo
 //   - PING DE SAÚDE a cada uso + reconexão automática se a conexão
 //     anterior morreu
 //   - ERROS RUIDOSOS: falha de conexão/autenticação é logada com causa
 //     provável e RELANÇADA — o bot nunca fica travado em silêncio
 //
-// Collection dedicada: banco "whatsapp" (MONGODB_DB, mesmo do ranking),
-// collection "rpgPlayers" (sobrescrevível via MONGODB_COLLECTION_RPG).
+// Collection dos jogadores (no cluster do RPG): banco "whatsapp"
+// (MONGODB_DB_RPG → MONGODB_DB → "whatsapp") e collection "rpgPlayers"
+// (sobrescrevível via MONGODB_COLLECTION_RPG).
+//
+// 🧭 FASE 3 EM DIANTE (empregos, mercado, habitação, roubo...): TODA
+//    collection nova do RPG DEVE ser obtida por rpg/conexao-mongo.js
+//    (obterColecaoRpg(nome)) — NUNCA pela conexão principal do bot.
 //
 // 🪪 REGRA DE IDENTIDADE DOS JOGADORES (LID) — NÃO ESQUECER NAS PRÓXIMAS
 // FASES! O WhatsApp v7 às vezes entrega o remetente como "@lid"
@@ -45,17 +57,23 @@
 // Fase 7, casamento, empregos de patrão...) deve usar executarTransacao().
 // ============================================================
 
-const { MongoClient } = require('mongodb')
+// 🗄️ Conexão DEDICADA do RPG (cluster separado — veja a nota no cabeçalho).
+// Toda a lógica de conexão (URI MONGO_URI_RPG, ping, reconexão, índices)
+// vive lá; este módulo só consome.
+const conexao = require('./conexao-mongo')
 // 🪪 Resolução LID→número real REUTILIZADA do lid.js (nada de lógica nova
-// paralela — o mesmo módulo que conserta os VIPs).
+// paralela — o mesmo módulo que conserta os VIPs). O lid.js continua
+// consultando a SESSÃO do WhatsApp no cluster PRINCIPAL (metadados do
+// grupo / lid-mapping) — só os DADOS do RPG é que moram no cluster novo.
 const { resolverNumeroAlvo, resolverLidParaTelefone } = require('../lid')
 
-const NOME_BANCO = process.env.MONGODB_DB || 'whatsapp'
-const NOME_COLECAO = process.env.MONGODB_COLLECTION_RPG || 'rpgPlayers'
+// 🏷️ Nomes reutilizados do módulo de conexão (fonte única — os mesmos que
+// o migrador e o smoke test enxergam):
+const NOME_BANCO = conexao.NOME_BANCO
+const NOME_COLECAO = conexao.NOME_COLECAO_PADRAO
 
-// Singleton do processo: sobrevive a reconexões do startBot() e a
-// múltiplas chamadas de getPlayer/savePlayer
-let clienteMongo = null
+// Cache da collection — usado no MODO TESTE p/ guardar a fake injetada.
+// (Fora do teste, ping/reconexão/índices ficam em rpg/conexao-mongo.js.)
 let colecaoCacheada = null
 // 🧪 Modo teste (scripts/teste-rpg-fase1.js): usa a collection injetada
 // pelo gancho __definirColecaoTeste e NÃO conecta ao MongoDB real.
@@ -93,71 +111,21 @@ function criarJogadorPadrao(jid) {
 }
 
 // -------------------------------------------------------------------
-// Obtém a collection de jogadores do RPG, conectando se necessário.
-// Valida a conexão com ping antes de reusar e reconecta se morreu.
-// Erros são logados com causa provável e RELANÇADOS.
+// Obtém a collection de jogadores do RPG NO CLUSTER DEDICADO (delega a
+// conexão/ping/reconexão/índices ao rpg/conexao-mongo.js — MONGO_URI_RPG).
+// No modo teste, devolve a collection injetada SEM tocar em rede.
+// Erros de conexão são logados com causa provável (no módulo de conexão)
+// e RELANÇADOS.
 // -------------------------------------------------------------------
 async function obterColecaoRpg() {
   // 🧪 No modo teste, devolve a collection injetada SEM tocar em rede.
   if (modoTeste && colecaoCacheada) return colecaoCacheada
 
-  if (colecaoCacheada && clienteMongo) {
-    try {
-      await clienteMongo.db('admin').command({ ping: 1 })
-      return colecaoCacheada
-    } catch (erroPing) {
-      console.error(
-        '⚠️ [rpg] conexão anterior com o MongoDB morreu — reconectando:',
-        erroPing?.message
-      )
-      try { await clienteMongo.close() } catch (e) { /* já morta */ }
-      clienteMongo = null
-      colecaoCacheada = null
-    }
-  }
-
-  const uri = process.env.MONGODB_URI
-  if (!uri) {
-    console.error('════════════════════════════════════════════════════════')
-    console.error('💥 MONGODB_URI NÃO CONFIGURADA — o sistema de RPG ficará desativado!')
-    console.error('   Sem ela, os dados dos jogadores não persistem entre redeploys.')
-    console.error('   → No Render: Settings → Environment → variável MONGODB_URI')
-    console.error('   → Local: adicione MONGODB_URI no arquivo .env da raiz')
-    console.error('════════════════════════════════════════════════════════')
-    throw new Error('MONGODB_URI ausente — impossível conectar ao RPG')
-  }
-
-  try {
-    console.log(`🗄️ [rpg] conectando ao MongoDB (db: ${NOME_BANCO}, collection: ${NOME_COLECAO})...`)
-    clienteMongo = new MongoClient(uri, { serverSelectionTimeoutMS: 15000 })
-    await clienteMongo.connect()
-    await clienteMongo.db('admin').command({ ping: 1 })
-
-    const colecao = clienteMongo.db(NOME_BANCO).collection(NOME_COLECAO)
-
-    // Índice único por jid: 1 jogador por número (evita duplicados)
-    await colecao.createIndex(
-      { jid: 1 },
-      { unique: true, name: 'idx_rpg_jid' }
-    )
-
-    colecaoCacheada = colecao
-    console.log('✅ [rpg] MongoDB conectado — dados dos jogadores persistem entre redeploys.')
-    return colecaoCacheada
-  } catch (erro) {
-    console.error('════════════════════════════════════════════════════════')
-    console.error('💥 FALHA AO CONECTAR AO MONGODB (RPG):', erro?.message)
-    console.error('   Causas mais comuns:')
-    console.error('   → MONGODB_URI com usuário/senha/cluster errados')
-    console.error('   → IP não liberado no Atlas: Network Access → 0.0.0.0/0')
-    console.error('     (o Render free usa IPs de saída dinâmicos)')
-    console.error('   → Cluster pausado ou sem armazenamento no Atlas free tier')
-    console.error('════════════════════════════════════════════════════════')
-    try { await clienteMongo?.close() } catch (e) { /* nada a fechar */ }
-    clienteMongo = null
-    colecaoCacheada = null
-    throw erro
-  }
+  // 🏝️ Cluster DEDICADO do RPG (rpg/conexao-mongo.js): resolve URI
+  // MONGO_URI_RPG, faz ping, reconecta se morreu e garante o índice
+  // único idx_rpg_jid — o MESMO contrato que existia aqui antes.
+  colecaoCacheada = await conexao.obterColecaoRpg()
+  return colecaoCacheada
 }
 
 // -------------------------------------------------------------------
@@ -412,13 +380,15 @@ function transacaoNaoSuportada(err) {
 }
 
 async function executarTransacao(fn) {
-  // Modo teste (ou conexão ainda não aberta): sem cliente p/ sessão
-  if (!clienteMongo) {
+  // 🏝️ Cliente do CLUSTER DEDICADO do RPG (null no modo teste / conexão
+  // ainda não aberta → o chamador usa o fallback compensatório)
+  const cliente = conexao.clienteRpg()
+  if (!cliente) {
     const erro = new Error('Transação indisponível: sem cliente Mongo ativo (modo teste)')
     erro.codigo = 'TRANSACAO_INDISPONIVEL'
     throw erro
   }
-  const sessao = clienteMongo.startSession()
+  const sessao = cliente.startSession()
   try {
     let retorno
     await sessao.withTransaction(async () => {
@@ -438,16 +408,14 @@ async function executarTransacao(fn) {
 // 🧪 GANCHO DE TESTE (mesmo padrão dos demais módulos): injeta uma
 // collection fake e desativa a conexão real até o fim do processo.
 // Passando `null`, o modo teste é desligado e o módulo volta a exigir
-// MONGODB_URI (útil p/ provar que o erro sem URI é ruidoso).
+// MONGO_URI_RPG (útil p/ provar que o erro sem URI é ruidoso).
 // -------------------------------------------------------------------
 function __definirColecaoTeste(colecao) {
   if (colecao) {
     colecaoCacheada = colecao
-    clienteMongo = null
     modoTeste = true
   } else {
     colecaoCacheada = null
-    clienteMongo = null
     modoTeste = false
   }
 }

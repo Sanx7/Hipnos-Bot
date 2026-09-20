@@ -3,8 +3,9 @@
 // ============================================
 // scripts/teste-rpg-fase2.js roda 100% offline com collection fake — ótimo
 // para regressão rápida, mas NÃO prova o comportamento do motor do Mongo.
-// Este smoke test roda os 4 comandos contra o MongoDB REAL (a mesma URI do
-// bot) usando uma COLLECTION DESCARTÁVEL ("rpgPlayers_fase2_smoke"), então
+// Este smoke test roda os 4 comandos contra o MongoDB REAL do CLUSTER
+// DEDICADO do RPG (MONGO_URI_RPG — via rpg/conexao-mongo.js), usando uma
+// COLLECTION DESCARTÁVEL ("rpgPlayers_fase2_smoke"), então
 // valida:
 //   - $inc duplo (carteira ↔ banco) e filtro condicional $gte no motor real;
 //   - upsert de jogador novo (alvo que nunca usou o RPG);
@@ -56,8 +57,9 @@ function checar(rotulo, condicao) {
 
 async function main() {
   console.log(`🗄️ Destino: db "${rpg.NOME_BANCO}", collection "${rpg.NOME_COLECAO}" (descartável)`)
-  if (!process.env.MONGODB_URI) {
-    console.error('❌ MONGODB_URI não configurada — defina no .env (local).')
+  if (!process.env.MONGO_URI_RPG) {
+    console.error('❌ MONGO_URI_RPG não configurada — o smoke test do RPG roda contra o CLUSTER DEDICADO.')
+    console.error('   Defina a connection string do cluster do RPG no .env (MONGO_URI_RPG).')
     process.exit(1)
   }
 

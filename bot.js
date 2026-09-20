@@ -64,6 +64,12 @@ const {
 // (/ia-interativa 1|0 — MongoDB) é checado ANTES de qualquer chamada de API.
 const { processarGatilhoIA } = require('./ia-interativa')
 
+// ⏰ AGENDADOR DE LEMBRETES (lembretes.js): verifica o Mongo a cada 30s e
+// entrega os vencidos. O socket ativo é registrado a cada (re)conexão
+// (iniciarAgendadorLembretes) para o disparo sobreviver a reconexões; se o
+// Mongo falhar, ele apenas loga e tenta de novo no próximo ciclo.
+const { iniciarAgendadorLembretes } = require('./lembretes')
+
 // 🪪 Resolução LID→número real (lid.js) — usada pela anti-blacklist: a entrada
 // pode chegar como "@lid" (identificador novo do WhatsApp) enquanto o
 // blacklist.json guarda números REAIS.
@@ -286,6 +292,14 @@ async function startBot() {
   sockAtual = sock
   // Permite que boas-vindas pendentes reenviem pelo socket recriado.
   registrarSocketBoasVindas(sock)
+
+  // ⏰ LEMBRETES: registra o socket novo + roda a checagem inicial (catch-up
+  // do que venceu com o bot offline) e arma o timer de 30s (idempotente).
+  // A checagem inicial é FIRE-AND-FORGET DE PROPÓSITO: startBot não pode
+  // travar a conexão do Baileys esperando o Mongo responder.
+  iniciarAgendadorLembretes(sock).catch((errLembretes) => {
+    console.error('⚠️ [lembretes] falha na checagem inicial (o agendador segue):', errLembretes?.message || errLembretes)
+  })
 
   sock.ev.on('creds.update', saveCreds)
 
@@ -758,6 +772,12 @@ async function startBot() {
       reconexaoAgendada = false
       console.log('🌙 Hipnos Bot connected successfully!')
       linkDoQrCode = ''; // Limpa o QR Code quando conectar
+
+      // ⏰ LEMBRETES: o socket pode ter sido recriado — registra o novo para
+      // o agendador disparar por ele (idempotente, não duplica o timer).
+      iniciarAgendadorLembretes(sock).catch((errLembretes) => {
+        console.error('⚠️ [lembretes] falha na verificação pós-reconexão:', errLembretes?.message || errLembretes)
+      })
     }
 
     if (connection === 'close') {

@@ -12,8 +12,10 @@
 //     (critério "o mais completo ganha" — ver mesclarJogadores em
 //     rpg/database.js) e apaga o registro-LID.
 // É IDEMPOTENTE: pode ser rodado quantas vezes quiser.
-// ⚠️ Precisa de MONGODB_URI (a mesma do bot). O config.js carrega o .env
-// da raiz automaticamente, então localmente basta ter o .env preenchido.
+// ⚠️ Precisa de MONGO_URI_RPG (o cluster DEDICADO do RPG — os dados dos
+// jogadores agora vivem lá, não mais no cluster principal). O config.js
+// carrega o .env da raiz automaticamente, então localmente basta ter o
+// .env preenchido.
 //
 // Uso (na raiz do projeto):
 //   node scripts/migrar-rpg-lid.js
@@ -25,10 +27,11 @@ require('../config')
 const rpg = require('../rpg/database')
 
 async function main() {
-  console.log(`🗄️ Destino: db "${rpg.NOME_BANCO}", collection "${rpg.NOME_COLECAO}"`)
+  console.log(`🗄️ Destino: db "${rpg.NOME_BANCO}", collection "${rpg.NOME_COLECAO}" (cluster dedicado do RPG)`)
 
-  if (!process.env.MONGODB_URI) {
-    console.error('❌ MONGODB_URI não configurada — defina no .env (local) ou no painel do Render.')
+  if (!process.env.MONGO_URI_RPG) {
+    console.error('❌ MONGO_URI_RPG não configurada — defina no .env (local) ou no painel do Render.')
+    console.error('   Os dados do RPG agora vivem no cluster DEDICADO (MONGO_URI_RPG), não no principal.')
     process.exit(1)
   }
 

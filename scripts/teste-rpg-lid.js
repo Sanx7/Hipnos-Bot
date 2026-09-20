@@ -43,7 +43,7 @@ function checar(rotulo, condicao) {
 }
 
 ;(async () => {
-  checar('exports de NOME_BANCO/NOME_COLECAO p/ o migrador', NOME_BANCO === 'whatsapp' && NOME_COLECAO === 'rpgPlayers')
+  checar('exports de NOME_BANCO/NOME_COLECAO p/ o migrador (banco pode vir do path da MONGO_URI_RPG)', NOME_COLECAO === (process.env.MONGODB_COLLECTION_RPG || 'rpgPlayers') && typeof NOME_BANCO === 'string' && NOME_BANCO.length > 0)
 
   // 1) getPlayer com @lid → resolve via mapeamento e cria o doc com o NÚMERO REAL
   const jogador = await getPlayer(`${LID_RESOLVIVEL}@lid`)

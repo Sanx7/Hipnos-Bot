@@ -16,7 +16,7 @@
 //    grupo_id. Toda a lógica de banco vive em configuracoes-grupo.js
 //    (definirIaInterativa / iaInterativaHabilitada).
 //
-// O COMPORTAMENTO da IA (gatilho por menção/reply, cooldown de 30s por
+// O COMPORTAMENTO da IA (gatilho por menção/reply, cooldown de 15s por
 // usuário, personalidade fixa, falha silenciosa) vive em ia-interativa.js —
 // este arquivo é só o interruptor.
 // ============================================
@@ -93,7 +93,7 @@ module.exports = {
       // 6) ✅ Confirma o novo estado
       if (novoEstado) {
         return await sock.sendMessage(jid, {
-          text: '🤖 *HIPNOS DESPERTOU*\n\n✅ *IA interativa ATIVADA* neste grupo.\n🌙 Agora, quem mencionar o bot ou responder a uma mensagem dele receberá uma resposta — no máximo uma a cada 30 segundos por pessoa.'
+          text: '🤖 *HIPNOS DESPERTOU*\n\n✅ *IA interativa ATIVADA* neste grupo.\n🌙 Agora, quem mencionar o bot ou responder a uma mensagem dele receberá uma resposta — no máximo uma a cada 15 segundos por pessoa.'
         }, { quoted: msg })
       }
 
