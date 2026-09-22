@@ -34,7 +34,12 @@ module.exports = {
 ✂️ CRIAR
 
 🔮 /s
-➥ Transforma imagens em figurinhas.
+➥ Transforma imagens em figurinhas (corta a mídia para preencher o quadrado).
+(também: /sticker, /stiker e /sticker2).
+
+🖼️ /figurinha
+➥ A mesma figurinha, mas SEM CORTES: a imagem inteira entra no quadrado e o que sobra vira fundo TRANSPARENTE (ex: /figurinha com a foto na legenda ou respondendo uma foto).
+(também: /fig).
 
 🎨 /attp <texto>
 ➥ Gera uma figurinha ANIMADA com o texto que você enviar (ex: /attp Oi mundo).

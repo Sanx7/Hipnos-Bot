@@ -101,6 +101,13 @@ async function testar(rotulo, conteudo, esperado, tipo) {
   const video = { caption: '/sticker', seconds: 3 }
   const reply = (quotedMessage) => ({ extendedTextMessage: { text: '/sticker', contextInfo: { quotedMessage } } })
   checar('Alias /sticker registrado', sticker.aliases.includes('sticker'))
+  // 🔀 Aliases do /s (modo CROP) — depois da reorganização, /fig e /figurinha
+  // pertencem ao /figurinha (modo ENCAIXE). Ver scripts/teste-figurinha.js.
+  checar('Aliases do /s são exatamente ["sticker", "stiker", "sticker2"]',
+    JSON.stringify(sticker.aliases) === JSON.stringify(['sticker', 'stiker', 'sticker2']),
+    JSON.stringify(sticker.aliases))
+  checar('O /s NÃO anuncia mais /fig nem /figurinha',
+    !sticker.aliases.includes('fig') && !sticker.aliases.includes('figurinha'))
   await testar('Foto com legenda', { imageMessage: foto }, foto, 'image')
   await testar('Foto citada', reply({ imageMessage: foto }), foto, 'image')
   await testar('Vídeo com legenda', { videoMessage: video }, video, 'video')

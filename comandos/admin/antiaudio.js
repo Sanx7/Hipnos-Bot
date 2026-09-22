@@ -1,3 +1,5 @@
+const { ehAdminDoGrupo, ehDonoDoBot } = require("../../config");
+const { resolverNumeroAlvo } = require("../../lid");
 const fs = require('fs');
 const path = require('path');
 
@@ -43,14 +45,39 @@ module.exports = {
         }, { quoted: msg });
       }
 
-      // Validação do Dono (O Soberano)
-      const sender = msg.key.participant || msg.key.remoteJid;
-      const numeroDoSender = sender.split('@')[0].split(':')[0].replace(/\D/g, '');
-      const SEU_LID = '177060848861240';
+      // 1) Metadados PRIMEIRO (padrão do /hidetag): participants necessários
+      //    p/ resolver o remetente via lid.js e checar admin/dono.
+      let metadados;
+      try {
+        metadados = await sock.groupMetadata(jid);
+      } catch (erroMeta) {
+        console.error('Erro no comando antiaudio (metadados):', erroMeta);
+        return await sock.sendMessage(jid, {
+          text: '⚠️ Não consegui ler os membros deste grupo agora. Tente de novo em instantes.'
+        }, { quoted: msg });
+      }
+      const participantes = metadados.participants || [];
 
-      if (numeroDoSender !== SEU_LID) {
-        return await sock.sendMessage(jid, { 
-          text: '🌑 Hipnos recusa sua invocação... você não possui domínio sobre as frequências do silêncio.' 
+      // 2) 🪪 Resolve o remetente (PROOF-LID — pode vir "@lid")
+      const sender = msg.key.participant || msg.key.remoteJid;
+      const resolucao = await resolverNumeroAlvo(participantes, sender);
+
+      // Candidatos: sender CRU (bate com id LID/número do participant) E o
+      // número REAL resolvido (bate com phoneNumber/id) — cobre os DOIS
+      // formatos que o groupMetadata pode devolver.
+      const candidatos = [sender];
+      if (resolucao.via !== null && resolucao.numero) {
+        candidatos.push(`${resolucao.numero}@s.whatsapp.net`);
+      }
+
+      // 3) 🔐 ADMIN do grupo OU DONO do bot (mesmo critério do /hidetag)
+      const ehAutorizado = candidatos.some(
+        (c) => ehAdminDoGrupo(participantes, c) || ehDonoDoBot(participantes, c)
+      );
+
+      if (!ehAutorizado) {
+        return await sock.sendMessage(jid, {
+          text: '🌑 Hipnos recusa sua invocação... você não possui domínio sobre as frequências do silêncio.'
         }, { quoted: msg });
       }
 

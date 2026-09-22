@@ -21,6 +21,7 @@ const { resolverNumeroAlvo } = require('../../lid')
 const {
   interpretarTempo,
   formatarDataHora,
+  formatarDuracaoCurta,
   agendarLembrete,
   obterNumeroRemetente,
   MAX_LEMBRETES_ATIVOS,
@@ -54,7 +55,7 @@ module.exports = {
   async executar(sock, jid, msg, text) {
     try {
       // 1) Parse: "/lembrete <tempo> <texto...>"
-      const partes = String(text || '').trim().split(/\\s+/)
+      const partes = String(text || '').trim().split(/\s+/)
       const expressao = partes[1] || ''
       const textoLembrete = partes.slice(2).join(' ').trim()
 
@@ -78,8 +79,10 @@ module.exports = {
 
       // 2) Interpreta o tempo (validação pura — sem banco ainda)
       const interp = interpretarTempo(expressao)
-      if (!interp.ok) {
-        return await sock.sendMessage(jid, { text: textoDeUso(interp.motivo) }, { quoted: msg })
+      // interpretarQuando devolve { erro } (mensagem de uso JÁ formatada
+      // em pt-BR) ou { timestamp, tipo, duracaoMs } em caso de sucesso.
+      if (interp.erro) {
+        return await sock.sendMessage(jid, { text: interp.erro }, { quoted: msg })
       }
 
       // 3) 🪪 Número REAL do remetente (PROOF-LID, padrão /darvip):
@@ -102,7 +105,7 @@ module.exports = {
           numero,
           grupoId: ehGrupo ? jid : null,
           texto: textoLembrete,
-          dispararEm: interp.dispararEm
+          dispararEm: interp.timestamp
         })
       } catch (errBanco) {
         if (errBanco?.code === 'LIMITE_ATINGIDO') {
@@ -122,7 +125,7 @@ module.exports = {
         text:
           '⏰ *Lembrete agendado!*\n\n' +
           `📝 ${doc.texto}\n` +
-          `📅 Vai tocar em *${formatarDataHora(doc.disparar_em)}* (daqui a ${interp.rotulo})\n` +
+          `📅 Vai tocar em *${formatarDataHora(doc.disparar_em)}* (daqui a ${formatarDuracaoCurta(interp.duracaoMs)})\n` +
           `📍 ${onde}, te marcando.\n\n` +
           'Ver seus pendentes: */meuslembretes*'
       }, { quoted: msg })

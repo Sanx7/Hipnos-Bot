@@ -68,6 +68,9 @@ module.exports = {
 📚 /wiki <termo>
 ➥ Busca o resumo de um artigo da Wikipédia em português (também: /wikipedia, /wikipredia e /pesquisar). Ex.: /wiki Buraco Negro
 
+🌐 /traduzir <idioma> <texto>
+➥ Traduz entre idiomas com detecção automática da origem (também: /traducao, /tradutor e /translate). Ex.: /traduzir en Bom dia — ou /traduzir es respondendo a um texto.
+
 📖 /dicionario <palavra>
 ➥ Exibe a classe gramatical e os significados de uma palavra (também: /significado, /dicio e /definicao). Ex.: /dicionario efêmero
 
@@ -80,6 +83,19 @@ module.exports = {
 
 🎤 /letra <artista> - <musica>
 ➥ Busca a letra de uma música (Lyrics.ovh) e envia em partes se for longa. Ex.: /letra Coldplay - Yellow
+
+════════════════════
+
+⏰ LEMBRETES
+
+⏰ /lembrete <10m|2h|1d|20:30> <texto>
+➥ Agenda um aviso futuro que toca aqui no chat ou no seu PV (também: /lembrar e /remindme). Ex.: /lembrete 2h Beber água
+
+📜 /meuslembretes
+➥ Lista seus lembretes pendentes numeradinhos, do mais próximo para o distante (também: /lembretes e /listalembretes).
+
+❌ /cancelarlembrete <número>
+➥ Cancela um lembrete pelo número exibido na listagem do /meuslembretes (também: /cancelalembrete). Ex.: /cancelarlembrete 2
 
 ════════════════════
 

@@ -134,10 +134,16 @@ function inyectarMetadatosWebp(buffer) {
 module.exports = {
   nome: 's',
   // 🏷️ ALIASES: o comando nasceu como /s, mas quem digita "/sticker" (o nome
-  // "oficial" do recurso), "/fig", "/figurinha" ou "/stiker" (erro de
-  // digitação comum) precisa ser atendido do mesmo jeito. O loader do bot.js
-  // registra estes apelidos sem sobrescrever nomes já existentes.
-  aliases: ['sticker', 'stiker', 'fig', 'figurinha'],
+  // "oficial" do recurso), "/stiker" (erro de digitação comum) ou "/sticker2"
+  // precisa ser atendido do mesmo jeito. O loader do bot.js registra estes
+  // apelidos sem sobrescrever nomes já existentes.
+  //
+  // 🔀 DIVISÃO COM O /figurinha (comandos/menu-fig/figurinha.js) — os apelidos
+  // foram separados por SEMÂNTICA: aqui a mídia é CORTADA no quadrado 512×512
+  // (StickerTypes.CROPPED), então "/fig" e "/figurinha" NÃO pertencem mais a
+  // este comando; eles ficam com o modo ENCAIXE (imagem inteira + fundo
+  // transparente), que é exatamente o que o nome "figurinha" descreve.
+  aliases: ['sticker', 'stiker', 'sticker2'],
   descricao: 'Transforma imagens, GIFs ou vídeos (máx. 10 segundos) em figurinhas.',
 
   async executar(sock, jid, msg, texto) {

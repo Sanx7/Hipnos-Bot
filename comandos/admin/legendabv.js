@@ -82,7 +82,7 @@ function placeholdersDesconhecidos(legenda) {
 // numa entrada real (usando o nome do autor do comando como exemplo).
 // -------------------------------------------------------------------
 function previewLegenda(modelo, metadados, sender) {
-  const numero = limparNumero(sender) || '5511999999999'
+  const numero = limparNumero(sender) || '000000000000'
   return montarLegenda(modelo, {
     nome: 'Alma Nova',
     numero,

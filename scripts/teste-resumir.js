@@ -143,6 +143,9 @@ async function main () {
       throw new Error('o endpoint deveria ser o da OpenRouter: ' + i.URL_OPENROUTER_CHAT)
     }
     if (!/:free$/.test(i.MODELO_PADRAO)) throw new Error('o modelo padrão deveria ser gratuito (:free)')
+    if (i.MODELO_PADRAO !== 'nvidia/nemotron-3-super-120b-a12b:free') {
+      throw new Error('o modelo padrão deveria ser nvidia/nemotron-3-super-120b-a12b:free: ' + i.MODELO_PADRAO)
+    }
     if (i.APP_TITLE_PADRAO !== 'Hipnos Bot') throw new Error('o X-Title padrão deveria ser "Hipnos Bot"')
     if (typeof i.modeloResumir !== 'function' || typeof i.urlDoApp !== 'function' || typeof i.tituloDoApp !== 'function') {
       throw new Error('helpers de configuração ausentes nos __internos')
@@ -329,6 +332,10 @@ async function main () {
     const body = JSON.parse(chamadas[0].opcoes.body)
     if (!body.model) throw new Error('faltou o model')
     if (!/:free$/.test(body.model)) throw new Error('o modelo padrão deveria ser gratuito: ' + body.model)
+    if (body.model !== resumir.__internos.MODELO_PADRAO) {
+      throw new Error('sem RESUMIR_MODEL o body deveria usar o MODELO_PADRAO (' +
+        resumir.__internos.MODELO_PADRAO + '), veio: ' + body.model)
+    }
     if (body.temperature !== 0.3) throw new Error('a temperatura deveria ser 0.3')
     if (body.max_tokens !== 2000) throw new Error('o max_tokens deveria ser 2000')
     if (body.messages[0].role !== 'system') throw new Error('1ª mensagem deveria ser o system')

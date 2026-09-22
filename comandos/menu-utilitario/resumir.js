@@ -31,7 +31,7 @@
 //
 // ⚙️ Config (todas opcionais, exceto a chave):
 //   OPENROUTER_API_KEY   — chave da OpenRouter (obrigatória p/ este comando);
-//   RESUMIR_MODEL        — modelo OpenRouter (padrão: qwen/qwen3.8-27b:free).
+//   RESUMIR_MODEL        — modelo OpenRouter (padrão: nvidia/nemotron-3-super-120b-a12b:free).
 //                          Obs.: o nome antigo GROQ_MODEL_RESUMIR (da versão
 //                          Groq deste comando) ainda é aceito como fallback;
 //   OPENROUTER_SITE_URL  — sobrescreve o HTTP-Referer (padrão: RENDER_EXTERNAL_URL);
@@ -48,8 +48,9 @@ const URL_OPENROUTER_CHAT = 'https://openrouter.ai/api/v1/chat/completions'
 
 // 🆓 Modelo GRATUITO da OpenRouter (sufixo ":free" — custo zero).
 //    Catálogo vigente em https://openrouter.ai/models (confira antes de trocar):
-//    se este modelo sair do ar, defina RESUMIR_MODEL no ambiente.
-const MODELO_PADRAO = 'qwen/qwen3.8-27b:free'
+//    se este modelo sair do ar ou começar a responder 429 (rate limit),
+//    defina RESUMIR_MODEL no ambiente (ex.: google/gemma-4-31b-it:free).
+const MODELO_PADRAO = 'nvidia/nemotron-3-super-120b-a12b:free'
 const APP_TITLE_PADRAO = 'Hipnos Bot'
 const SITE_URL_PADRAO = 'https://hipnos-bot.onrender.com'
 

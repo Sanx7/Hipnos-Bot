@@ -48,6 +48,8 @@ const { MongoClient } = require('mongodb')
 // afk.js / vip.js / configuracoes-grupo.js) — garante que MONGODB_URI
 // exista mesmo se este módulo for importado antes do bot.js.
 const { limparNumero } = require('./config')
+// 🪪 resolução LID→número real (PROOF-LID) usada por obterNumeroRemetente
+const { resolverNumeroAlvo } = require('./lid')
 
 const NOME_BANCO = process.env.MONGODB_DB || 'whatsapp'
 const NOME_COLECAO = process.env.MONGODB_COLLECTION_LEMBRETE || 'lembretes'
@@ -296,6 +298,40 @@ function formatarDuracaoCurta(ms) {
 }
 
 // -------------------------------------------------------------------
+// 🪪 IDENTIDADE — número REAL do remetente da mensagem (PROOF-LID).
+// Mesmo padrão do /registrar: em grupo o remetente autêntico é
+// msg.key.participant; no privado, o próprio chat. Se vier "@lid"
+// (WhatsApp v7), resolve via lid.js (metadados do grupo → mapeamento
+// da sessão). Devolve { numero: '5511...' } ou { numero: '' } quando
+// não dá para resolver — o chamador avisa e pede retry (NUNCA gravamos
+// LID cru como número, igual ao /darvip).
+// -------------------------------------------------------------------
+async function obterNumeroRemetente(sock, jid, msg) {
+  const sender = msg?.key?.participant || msg?.key?.remoteJid || jid
+
+  if (String(sender).endsWith('@lid')) {
+    let participantes = null
+    if (String(jid).endsWith('@g.us') && typeof sock?.groupMetadata === 'function') {
+      try {
+        participantes = (await sock.groupMetadata(jid)).participants
+      } catch (err) {
+        console.error('[lembretes] sem metadados do grupo p/ resolver @lid:', err?.message || err)
+      }
+    }
+    const resolucao = await resolverNumeroAlvo(participantes, sender)
+    if (resolucao.numero && resolucao.via !== null) {
+      console.log(`[lembretes] 🪪 remetente resolvido de @lid p/ o número real ${resolucao.numero} via ${resolucao.via}`)
+      return { numero: resolucao.numero, via: resolucao.via }
+    }
+    console.warn('[lembretes] 🪪 @lid do remetente não resolvível')
+    return { numero: '', via: null }
+  }
+
+  const numero = String(sender).split('@')[0].split(':')[0].replace(/\D/g, '')
+  return { numero, via: numero ? 'direto' : null }
+}
+
+// -------------------------------------------------------------------
 // 💾 CRUD — todas as operações usam a collection "lembretes". Falhas de
 // banco são RELANÇADAS (os comandos tratam com mensagem amigável e o
 // agendador apenas loga — o bot nunca cai por causa de um lembrete).
@@ -307,6 +343,17 @@ async function criarLembrete({ numero, grupoId = null, texto, dispararEm, agora 
   if (!numeroLimpo) throw new Error('criarLembrete: numero inválido')
   const quando = Number(dispararEm)
   if (!Number.isFinite(quando)) throw new Error('criarLembrete: disparar_em inválido')
+
+  // 🚫 LIMITE anti-spam: só MAX_POR_USUARIO lembretes ATIVOS por número.
+  //    O /lembrete traduz o code LIMITE_ATINGIDO no aviso "📋 Você já
+  //    tem N lembretes ativos..." (o cancelamento de um existente é a
+  //    saída — /meuslembretes mostra os números p/ /cancelarlembrete).
+  const ativos = await contarLembretesAtivos(numeroLimpo)
+  if (ativos >= MAX_POR_USUARIO) {
+    const erroLimite = new Error(`limite de ${MAX_POR_USUARIO} lembretes ativos atingido`)
+    erroLimite.code = 'LIMITE_ATINGIDO'
+    throw erroLimite
+  }
 
   const documento = {
     numero: numeroLimpo,
@@ -343,6 +390,37 @@ async function listarLembretesAtivos(numeroBruto, limite = MAX_POR_USUARIO) {
     .sort({ disparar_em: 1 })
     .limit(limite)
     .toArray()
+}
+
+// ❌ CANCELAR — apaga um lembrete PENDENTE pelo MESMO índice exibido no
+// /meuslembretes (1-based, ordem: disparo mais próximo primeiro). Usa a
+// MESMA consulta (find+sort por disparar_em) da listagem, então o número
+// que o usuário vê é exatamente o que ele cancela. A remoção é amarrada
+// ao DONO e ao estado pendente ({ _id, numero, enviado: false }): só o
+// próprio autor cancela e lembretes já entregues nunca são afetados.
+// Devolve um resultado discriminated (padrão interpretarQuando):
+//   { status: 'ok', cancelado, restantes }
+//   { status: 'sem_numero' }            → remetente sem número resolvível
+//   { status: 'sem_lembretes' }         → não há pendentes
+//   { status: 'indice_invalido' }       → não é inteiro >= 1
+//   { status: 'fora_da_faixa', total }  → índice além do último da lista
+// Falha de banco é RELANÇADA (o comando avisa amigavelmente).
+async function cancelarLembrete(numeroBruto, indice) {
+  const numero = limparNumero(numeroBruto)
+  if (!numero) return { status: 'sem_numero' }
+
+  const posicao = Number(indice)
+  if (!Number.isInteger(posicao) || posicao < 1) return { status: 'indice_invalido' }
+
+  const pendentes = await listarLembretesAtivos(numero)
+  if (!pendentes.length) return { status: 'sem_lembretes' }
+
+  const alvo = pendentes[posicao - 1]
+  if (!alvo) return { status: 'fora_da_faixa', total: pendentes.length }
+
+  const colecao = await obterColecaoLembretes()
+  await colecao.deleteOne({ _id: alvo._id, numero, enviado: false })
+  return { status: 'ok', cancelado: alvo, restantes: pendentes.length - 1 }
 }
 
 // ⏳ lembretes VENCIDOS e ainda não enviados (a consulta do agendador)
@@ -628,14 +706,16 @@ module.exports = {
   formatarDataHora,
   formatarDuracaoCurta,
 
-  // 💾 persistência
+  // 💾 persistência + cancelamento por índice
   criarLembrete,
+  cancelarLembrete,
   contarLembretesAtivos,
   listarLembretesAtivos,
   buscarLembretesVencidos,
   marcarEnviado,
   registrarFalhaEnvio,
   limparAntigos,
+  obterNumeroRemetente,
 
   // 📤 disparo/agendador
   destinoDoLembrete,

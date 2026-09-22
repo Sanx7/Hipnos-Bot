@@ -11,7 +11,7 @@
 // local — sobrevive a redeploys do Render.
 // ============================================
 
-const { listarLembretesPendentes, formatarDataHora, agoraAtual, MAX_ATIVOS } = require('../lembretes')
+const { listarPendentes, formatarDataHora, MAX_LEMBRETES_ATIVOS } = require('../lembretes')
 const { formatarDuracao } = require('../afk')
 const { resolverNumeroAlvo } = require('../lid')
 
@@ -50,7 +50,7 @@ module.exports = {
       const numero = String(sender).split('@')[0].split(':')[0].replace(/\D/g, '')
       if (!numero) return
 
-      const pendentes = await listarLembretesPendentes(numero)
+      const pendentes = await listarPendentes(numero)
 
       if (!pendentes.length) {
         return await sock.sendMessage(jid, {
@@ -61,7 +61,7 @@ module.exports = {
         }, { quoted: msg })
       }
 
-      const agora = agoraAtual()
+      const agora = Date.now()
       const linhas = pendentes.map((doc, i) => {
         const falta = doc.disparar_em - agora
         const origem = !doc.grupo_id
@@ -75,7 +75,7 @@ module.exports = {
 
       await sock.sendMessage(jid, {
         text:
-          `📜 *SEUS LEMBRETES PENDENTES* (${pendentes.length}/${MAX_ATIVOS})\n\n` +
+          `📜 *SEUS LEMBRETES PENDENTES* (${pendentes.length}/${MAX_LEMBRETES_ATIVOS})\n\n` +
           linhas.join('\n\n') +
           '\n\n💤 Quando a hora chegar, eu te chamo.'
       }, { quoted: msg })

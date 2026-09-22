@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 
 // Configuração global do bot (helper de dono — PROOF-LID)
-const { ehDonoDoBot } = require('../../config');
+const { ehDonoDoBot, limparNumero } = require('../../config');
 
 // Caminho da lista negra (comandos/dados/blacklist.json)
 const BANCO_BLACKLIST = path.join(__dirname, '..', 'dados', 'blacklist.json');
@@ -63,15 +63,13 @@ module.exports = {
         return await sock.sendMessage(jid, { text: '⛔ Não é possível executar essa ação contra o dono do bot.' }, { quoted: msg });
       }
 
-      // IDs Fixos de Segurança (Mestre e Bot)
-      const SEU_NUMERO_WHATSAPP = '14382246600@s.whatsapp.net';
-      const meuJidCompleto = sock.user?.id || '';
-
-      if (alvo.includes(SEU_NUMERO_WHATSAPP)) {
-        return await sock.sendMessage(jid, { text: 'Eu jamais ousaria expulsar o meu Soberano do recinto. 🪐' }, { quoted: msg });
-      }
-
-      if (meuJidCompleto.includes(alvo.split('@')[0])) {
+      // 🛡️ PROTEÇÃO DO PRÓPRIO BOT (JID dinâmico do socket — NADA fixo no código).
+      //    A proteção do DONO do bot já acontece acima via ehDonoDoBot; esta aqui
+      //    impede que o bot se auto-expulse (ex.: admin responde a uma mensagem
+      //    do bot e o alvo vira o próprio número dele). Comparação por dígitos
+      //    normalizados (igualdade), não por substring.
+      const meuNumero = limparNumero(sock.user?.id);
+      if (meuNumero && meuNumero === limparNumero(alvo)) {
         return await sock.sendMessage(jid, { text: 'Tentar me banir usando meu próprio comando? Volte a dormir... 💤' }, { quoted: msg });
       }
 
