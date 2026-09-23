@@ -106,6 +106,9 @@ module.exports = {
 🎨 /gartic [categoria]
 ➥ Adivinhe a palavra pela imagem (Pixabay) — quem acertar primeiro vence (um jogo por grupo, 3 min por rodada; ex: /gartic animais).
 
+🧠 /quiz [categoria]
+➥ Perguntas de múltipla escolha: responda com a letra (A-D) ou o número (1-4) — 5 perguntas por rodada, quem acertar mais vence (um jogo por grupo; ex: /quiz geografia). Com rodada ativa: /quiz parar encerra.
+
 ❌ /jogar [1-9]
 ➥ Marca uma posição no tabuleiro da partida em curso (ex: /jogar 5, teclado numérico). Só joga quem é a vez.
 
@@ -131,6 +134,9 @@ module.exports = {
 
 💭 /frase
 ➥ Sopro motivacional do oráculo: pega uma frase aleatória e traduz pro português (ex: /frase).
+
+ 🍻 /eununca
+ ➥ Sorteia uma frase "Eu nunca..." pra brincadeira de grupo (também: /nuncaeu).
 
 ════════════════════
 

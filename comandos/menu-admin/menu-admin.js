@@ -33,6 +33,15 @@ module.exports = {
 ☠️ /ban @membro
 ➥ Punição máxima: Expulsa e joga na blacklist.
 
+⚠️ /adv @membro motivo
+➥ Adverte um mortal com justificativa. Na 3ª advertência ativa ele é expulso e jogado na blacklist automaticamente. (Também: /advertir e /warn.)
+
+📜 /advs @membro
+➥ Mostra as advertências ativas do mortal neste grupo: motivo, quem aplicou e quando. (Também: /advertencias.)
+
+🕊️ /remadv @membro
+➥ Perdoa a advertência mais recente do mortal neste grupo. (Também: /removeradv.)
+
 👑 /promover @membro
 ➥ Eleva um mortal à administração.
 

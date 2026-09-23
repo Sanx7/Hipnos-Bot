@@ -74,6 +74,14 @@ module.exports = {
 📖 /dicionario <palavra>
 ➥ Exibe a classe gramatical e os significados de uma palavra (também: /significado, /dicio e /definicao). Ex.: /dicionario efêmero
 
+
+
+ 🔄 /conversor <valor> <origem> em <destino>
+ ➥ Converte unidades sem internet: distância, peso, temperatura, volume e velocidade (também: /converter). Ex.: /conversor 10 km em milhas.
+
+ ⏱️ /tempo-resposta
+ ➥ Mede o tempo de resposta do bot em ms, com tempo online e latência do banco (também: /latencia).
+
 ════════════════════
 
 🔮 HORÓSCOPO

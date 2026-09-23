@@ -27,6 +27,9 @@ enfrentam o julgamento das sombras."
 ℹ️ /info
 ➥ Mostra a identidade do bot: versão, comandos disponíveis, tempo online e grupos.
 
+ 🌙 /novidades [tudo|número]
+ ➥ Mostra o que mudou recentemente no bot (também: /changelog e /atualizacoes). Ex.: /novidades 5.
+
 📖 /menu
 ➥ Exibe este pergaminho.
 

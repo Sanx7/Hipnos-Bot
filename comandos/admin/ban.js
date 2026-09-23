@@ -12,6 +12,7 @@ function isAdmin(p) {
 }
 
 // Adiciona o número na lista negra antes de expulsar
+// (exportada: o /adv REUSA esta gravação no ban automático das 3 advertências).
 function adicionarNaBlacklist(numero) {
   try {
     let lista = [];
@@ -29,8 +30,36 @@ function adicionarNaBlacklist(numero) {
   }
 }
 
+// 🧪 GANCHO DE TESTE (usado por scripts/teste-adv.js): troca a gravação em
+// disco por uma função espiã, para que o ban automático das advertências
+// NUNCA escreva no blacklist.json real durante os testes offline.
+// Sem argumento (ou com algo que não é função), volta ao comportamento normal.
+let gravarNaBlacklist = adicionarNaBlacklist;
+function __definirGravacaoBlacklistTeste(fn) {
+  gravarNaBlacklist = typeof fn === 'function' ? fn : adicionarNaBlacklist;
+}
+
+// ☠️ PUNIÇÃO MÁXIMA reutilizável: grava na blacklist e expulsa do grupo.
+// Extraída do executar() para que o /adv aplique EXATAMENTE a mesma punição
+// no ban automático das 3 advertências (nada de lógica duplicada).
+// `numeroParaBlacklist` (opcional) permite gravar na lista negra o NÚMERO
+// REAL resolvido (lid.js) quando o alvo veio como "@lid" — sem isso, o /adv
+// gravaria o LID cru, contrariando a correção já aplicada em VIP/RPG.
+// Lança se o WhatsApp recusar a remoção (ex.: bot não é admin).
+async function banirDoGrupo(sock, jid, alvoJid, numeroParaBlacklist) {
+  const alvoLimpo = limparNumero(numeroParaBlacklist || alvoJid);
+  gravarNaBlacklist(alvoLimpo);
+  await sock.groupParticipantsUpdate(jid, [alvoJid], 'remove');
+  return alvoLimpo;
+}
+
 module.exports = {
   nome: 'ban',
+  // ♻️ Helpers exportados: o /adv reusa `banirDoGrupo` no ban automático
+  // das 3 advertências (o loader ignora propriedades extras).
+  banirDoGrupo,
+  adicionarNaBlacklist,
+  __definirGravacaoBlacklistTeste,
   async executar(sock, jid, msg, text) {
     try {
       const ehGrupo = jid.endsWith('@g.us');
@@ -73,13 +102,10 @@ module.exports = {
         return await sock.sendMessage(jid, { text: 'Tentar me banir usando meu próprio comando? Volte a dormir... 💤' }, { quoted: msg });
       }
 
-      // Adiciona o alvo à blacklist antes de expulsar
-      const alvoLimpo = alvo.split('@')[0].split(':')[0].replace(/\D/g, '');
-      adicionarNaBlacklist(alvoLimpo);
-
-      // Execução do banimento
+      // Adiciona o alvo à blacklist antes de expulsar + execução do banimento
+      // (mesma função usada pelo /adv no ban automático das 3 advertências)
       try {
-        await sock.groupParticipantsUpdate(jid, [alvo], 'remove');
+        await banirDoGrupo(sock, jid, alvo);
         return await sock.sendMessage(jid, { text: 'Pronto. Mais um insolente removido do recinto e lançado na blacklist. 🥱' });
       } catch (wsError) {
         // Se falhar, significa que o bot não é admin no grupo real
