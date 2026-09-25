@@ -47,6 +47,9 @@ module.exports = {
 ✨ /elogio (@pessoa)
 ➥ Enche alguém de elogios absurdamente exagerados (sem menção, elogia você mesmo).
 
+🎭 /verdadeouconsequencia [verdade|desafio] (@pessoa)
+➥ Sorteia uma verdade ou um desafio pro sorteado (sem categoria, o destino é aleatório; sem menção, cai em quem chamou). Também: /vouc, /verdadeconsequencia.
+
 ════════════════════
 
 🎭 AÇÕES (INTERAÇÃO ANIMADA)
@@ -109,6 +112,9 @@ module.exports = {
 🧠 /quiz [categoria]
 ➥ Perguntas de múltipla escolha: responda com a letra (A-D) ou o número (1-4) — 5 perguntas por rodada, quem acertar mais vence (um jogo por grupo; ex: /quiz geografia). Com rodada ativa: /quiz parar encerra.
 
+🪢 /forca [categoria]
+➥ Descubra a palavra letra por letra antes que o boneco se complete — chute a letra ou a palavra direto no chat (um jogo por grupo; ex: /forca animais).
+
 ❌ /jogar [1-9]
 ➥ Marca uma posição no tabuleiro da partida em curso (ex: /jogar 5, teclado numérico). Só joga quem é a vez.
 
@@ -137,6 +143,12 @@ module.exports = {
 
  🍻 /eununca
  ➥ Sorteia uma frase "Eu nunca..." pra brincadeira de grupo (também: /nuncaeu).
+
+ 🎤 /rimas
+ ➥ Sorteia uma palavra e desafia o grupo a completar uma rima com ela (também: /rima).
+
+ 🏷️ /gerar-nome <tema>
+ ➥ A IA inventa 5 nomes criativos pra qualquer tema descrito em texto livre (também: /gerarnome). Ex.: /gerar-nome rpg fantasia, /gerar-nome banda de rock, /gerar-nome nome engraçado pra grupo do whatsapp.
 
 ════════════════════
 

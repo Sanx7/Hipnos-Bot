@@ -12,8 +12,7 @@
 // comando de ativação/atualização.
 // ============================================
 
-const { definirAfk, MOTIVO_PADRAO } = require('../afk')
-const { limparNumero } = require('../config')
+const { definirAfk, resolverJidAfk, MOTIVO_PADRAO } = require('../afk')
 
 module.exports = {
   nome: 'afk',
@@ -22,8 +21,26 @@ module.exports = {
   async executar(sock, jid, msg, text) {
     try {
       const sender = msg.key.participant || msg.key.remoteJid
-      const numero = limparNumero(sender)
+
+      // 🪪 CAMINHO INVERSO (ativação): o remetente também pode chegar como
+      // "@lid" no WhatsApp v7 — resolve para o NÚMERO REAL antes de gravar,
+      // senão a base guardaria o LID cru e a comparação na hora da menção
+      // (que resolve para o número real) nunca bateria. Mesmo padrão de
+      // VIP/RPG//ban//adv (lid.js, via resolverJidAfk do afk.js).
+      let participantes = null
+      if (String(sender || '').endsWith('@lid') && String(jid || '').endsWith('@g.us')) {
+        try {
+          participantes = (await sock.groupMetadata(jid))?.participants || null
+        } catch (errMeta) {
+          console.error('[afk] sem metadados do grupo p/ resolver @lid do remetente:', errMeta?.message || errMeta)
+        }
+      }
+      const { numero, via } = await resolverJidAfk(participantes, sender)
       if (!numero) return
+      if (String(sender || '').endsWith('@lid')) {
+        if (via) console.log(`[afk] 🪪 remetente resolvido de @lid p/ o número real ${numero} via ${via}`)
+        else console.warn('[afk] 🪪 @lid do remetente não resolvível — gravando o LID cru (best-effort)')
+      }
 
       // Motivo: tudo depois de "/afk " (o texto chega cru ao comando).
       // Extrai o 1º token (o nome do comando) e junta o resto.

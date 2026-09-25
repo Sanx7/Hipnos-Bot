@@ -30,14 +30,16 @@ const TIPOS = {
   VELHA: 'velha',
   ANAGRAMA: 'anagrama',
   GARTIC: 'gartic',
-  QUIZ: 'quiz'
+  QUIZ: 'quiz',
+  FORCA: 'forca'
 }
 
 const ROTULOS = {
   velha: 'jogo da velha',
   anagrama: 'anagrama',
   gartic: 'gartic',
-  quiz: 'quiz'
+  quiz: 'quiz',
+  forca: 'forca'
 }
 
 // jid do grupo → { tipo, dados, desde }

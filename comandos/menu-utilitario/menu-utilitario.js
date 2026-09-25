@@ -118,6 +118,12 @@ module.exports = {
 📝 /resumir <texto> (ou responda a uma mensagem de texto)
 ➥ Condensa textos longos em um resumo objetivo, mantendo os pontos principais (também: /resumo e /sumarizar). Ex.: /resumir respondendo a um textão
 
+✍️ /reescrever <tom> <texto> (ou responda a uma mensagem)
+➥ Reescreve o texto em outro tom com a IA: formal, informal, engraçado, poético, educado, profissional, agressivo ou zoeira (também: /reescreve). Ex.: /reescrever formal Aí mano, bora lá hoje?
+
+😂 /explicarmeme (com a imagem na legenda ou respondendo a ela)
+➥ A IA com visão explica o humor, o contexto e a referência do meme (também: /explicameme). Ex.: manda a imagem e digite /explicarmeme na legenda
+
 ════════════════════
 
 ${RODAPE_MENU}

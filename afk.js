@@ -188,6 +188,33 @@ async function buscarVariosAfk(numeros) {
 }
 
 // -------------------------------------------------------------------
+// 🪪 resolverJidAfk(participants, jidBruto): resolve QUALQUER JID (número
+// real "@s.whatsapp.net" ou LID "@lid") para o NÚMERO REAL indexado na
+// base de AFKs — mesmo padrão de VIP/RPG//ban//adv (lid.js).
+// Ordem (igual ao resolverNumeroAlvo): direto → metadados → mapeamento.
+// Se o LID não for resolvível agora, devolve { numero: <lid cru>,
+// via: null } para o chamador decidir (o bloco do bot.js usa o cru
+// como best-effort, igual ao comportamento anterior — só que agora
+// TENTA os metadados antes, que era o que faltava).
+// Nunca lança: em falha devolve o cru com via: null.
+// -------------------------------------------------------------------
+function obterResolverNumeroAlvo() {
+  return require('./lid').resolverNumeroAlvo
+}
+
+async function resolverJidAfk(participants, jidBruto) {
+  try {
+    const resolver = obterResolverNumeroAlvo()
+    const { numero, via } = await resolver(participants, jidBruto)
+    if (numero) return { numero, via }
+  } catch (err) {
+    console.error('[afk] ⚠️ falha ao resolver JID via lid.js:', err?.message || err)
+  }
+  const cru = String(jidBruto || '').split('@')[0].split(':')[0].replace(/\D/g, '')
+  return { numero: cru, via: null }
+}
+
+// -------------------------------------------------------------------
 // ⏳ formatarDuracao(ms): converte uma duração em milissegundos para
 // texto legível. Exemplos: "5 minutos", "2 horas e 10 minutos",
 // "1 dia e 3 horas", "menos de 1 minuto".
@@ -235,6 +262,7 @@ module.exports = {
   removerAfk,
   buscarAfk,
   buscarVariosAfk,
+  resolverJidAfk,
   formatarDuracao,
   MOTIVO_PADRAO,
   NOME_BANCO,

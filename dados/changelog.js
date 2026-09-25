@@ -18,6 +18,36 @@
 
 module.exports = [
   {
+    data: '2026-09-25',
+    titulo: '/verdadeouconsequencia — verdade ou desafio no grupo',
+    detalhes: 'Sorteia uma verdade ou um desafio: /verdadeouconsequencia (o destino é sorteado), /verdadeouconsequencia verdade, /verdadeouconsequencia desafio, ou marque alguém com @ pra jogar no lugar dela. Também: /vouc, /verdadeconsequencia.'
+  },
+  {
+    data: '2026-09-25',
+    titulo: '/explicarmeme — a IA explica a zoeira do meme',
+    detalhes: 'Mande a imagem com o comando na legenda ou responda a ela que a IA explica o humor, o contexto e a referência do meme (também: /explicameme).'
+  },
+  {
+    data: '2026-09-25',
+    titulo: '/gerar-nome — a IA cria 5 nomes pra qualquer tema',
+    detalhes: 'Descreva o tema em texto livre que a IA sugere 5 nomes criativos e bem diferentes entre si. Ex.: /gerar-nome rpg fantasia, /gerar-nome banda de rock (também: /gerarnome).'
+  },
+  {
+    data: '2026-09-25',
+    titulo: '/reescrever — reescreve qualquer texto em outro tom',
+    detalhes: 'Mande o tom e o texto (ou responda a uma mensagem): /reescrever formal Aí mano, bora hoje? Tons: formal, informal, engraçado, poético, educado, profissional, agressivo e zoeira.'
+  },
+  {
+    data: '2026-09-25',
+    titulo: '/forca — jogo da forca no grupo',
+    detalhes: 'Descubra a palavra letra por letra antes que o boneco se complete. Ex.: /forca (chute a letra ou a palavra direto no chat).'
+  },
+  {
+    data: '2026-09-25',
+    titulo: '/rimas — desafio da rima no grupo',
+    detalhes: 'Sorteie uma palavra e desafie o grupo a rimar com ela. Ex.: /rimas (também: /rima).'
+  },
+  {
     data: '2026-09-23',
     titulo: '/adv — advertências com ban automático na 3ª',
     detalhes: 'Admins advertem com motivo: /adv @membro motivo. Na 3ª ativa o bot expulsa e joga na blacklist. Veja com /advs e perdoe com /remadv.'

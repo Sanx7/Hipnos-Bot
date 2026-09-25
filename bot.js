@@ -55,6 +55,7 @@ const {
   definirAfk,
   removerAfk,
   buscarVariosAfk,
+  resolverJidAfk,
   formatarDuracao,
   MOTIVO_PADRAO
 } = require('./afk')
@@ -568,9 +569,11 @@ async function startBot() {
       //
       // ⚡ EFICIÊNCIA: remetente + todos os alvos (mencionados/respondidos)
       // são resolvidos e consultados com UMA ÚNICA busca $in (buscarVariosAfk).
-      // 🪪 LID: menções podem chegar como "@lid" — resolvemos para o número
-      // real (lid.js, com cache) antes de consultar, já que a base guarda
-      // números reais (mesmo padrão do /darvip).
+      // 🪪 LID: menções e remetente podem chegar como "@lid" — resolvemos
+      // para o número real via afk.js→lid.js (metadados + mapeamento, com
+      // cache) antes de consultar, já que a base guarda números reais
+      // (mesmo padrão de VIP/RPG//ban//adv). Sem os metadados, o @lid cru
+      // nunca bateria com o número salvo e o aviso não era enviado.
       // 🛡️ Nada aqui lança: falha de banco/rede é logada e o fluxo segue.
       try {
         // 📋 Candidatos: remetente + jids vindos de menções/reply
@@ -587,20 +590,34 @@ async function startBot() {
             : [])
         ].filter(Boolean)
 
-        // 🪪 Resolve LID → número real (best-effort; sem mapeamento, usa o cru)
-        const numerosAlvo = []
-        for (const jidAlvo of jidsAlvoBrutos) {
-          const bruto = String(jidAlvo).split('@')[0].replace(/\D/g, '')
-          if (!bruto) continue
-          if (String(jidAlvo).endsWith('@lid')) {
-            const numeroReal = await resolverLidParaTelefone(bruto)
-            numerosAlvo.push(numeroReal || bruto)
-          } else {
-            numerosAlvo.push(bruto)
+        // 🪪 Metadados UMA vez só (para resolver @lid via phoneNumber, igual
+        // ao /darvip e ao ehDonoDoBot) — só buscamos se houver algum @lid
+        // entre remetente e alvos, para não custar 1 API call por mensagem.
+        const precisaResolverLid =
+          String(sender || '').endsWith('@lid') ||
+          jidsAlvoBrutos.some((j) => String(j || '').endsWith('@lid'))
+        let participantesAfk = null
+        if (precisaResolverLid && String(jid || '').endsWith('@g.us')) {
+          try {
+            participantesAfk = (await sock.groupMetadata(jid))?.participants || null
+          } catch (errMetaAfk) {
+            console.error('[afk] sem metadados do grupo p/ resolver @lid:', errMetaAfk?.message || errMetaAfk)
           }
         }
 
-        const numeroRemetente = limparNumero(sender)
+        // 🪪 Resolve LID → número real (best-effort; sem mapeamento, usa o cru)
+        const numerosAlvo = []
+        for (const jidAlvo of jidsAlvoBrutos) {
+          const { numero, via } = await resolverJidAfk(participantesAfk, jidAlvo)
+          if (!numero) continue
+          if (String(jidAlvo).endsWith('@lid')) {
+            if (via) console.log(`[afk] 🪪 menção resolvida de @lid p/ o número real ${numero} via ${via}`)
+            else console.warn('[afk] 🪪 menção @lid não resolvível — comparando o LID cru (best-effort)')
+          }
+          numerosAlvo.push(numero)
+        }
+
+        const { numero: numeroRemetente } = await resolverJidAfk(participantesAfk, sender)
         // Só é "o próprio /afk" se for exatamente o comando (não /afkxyz etc.)
         const ehComandoAfk = /^\/afk(\s|$)/i.test(text.trim())
 
