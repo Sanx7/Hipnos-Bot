@@ -132,6 +132,10 @@ module.exports = {
 👁️‍🗨️ /revelar
 ➥ Revela fotos/vídeos de visualização única (Responda à mídia).
 
+🎙️ /revelaraudio
+➥ Revela áudios de visualização única (Responda ao áudio view-once; também: /revelarpv e /audiorevelado).
+➥ 🔒 Restrito a VIP 💠, admin do grupo ou dono do bot.
+
 ════════════════════
 
 💀 FRASES DE HIPNOS

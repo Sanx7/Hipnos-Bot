@@ -54,6 +54,9 @@ module.exports = {
 📊 /checkativo (@membro ou respondendo uma mensagem)
 ➥ Mostra quantas mensagens a pessoa ecoou no recinto (também: /mensagens, /msgs e /ativo).
 
+😜 /emojimix 😂😭
+➥ Mistura dois emojis numa imagem só, igual ao Gboard (também: /mixemoji e /emoji-mix). Ex.: /emojimix 😂😭 — /emojimix fig 😂😭 manda como figurinha.
+
 ════════════════════
 
 🌌 ASTRONOMIA

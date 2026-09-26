@@ -19,6 +19,15 @@
 // Uso (na raiz do projeto):  node scripts/teste-figurinha.js
 // ============================================
 
+// 🔌 AMBIENTE OFFLINE (precisa vir ANTES de qualquer require do projeto):
+// zerar o MONGODB_URI impede o config.js de puxar o .env da raiz. Sem isso a
+// consulta de assinatura VIP do /figurinha (campo `assinatura` do documento de
+// VIP, para a marca d'água) abriria conexão com o Atlas de verdade; aqui ela
+// devolve null na hora e o cenário segue SEM marca d'água — que é exatamente o
+// comportamento de "usuário sem assinatura" que este teste cobre.
+process.env.MONGODB_URI = ''
+process.env.MONGO_URI_RPG = ''
+
 const { execFile } = require('child_process')
 const fs = require('fs')
 const os = require('os')

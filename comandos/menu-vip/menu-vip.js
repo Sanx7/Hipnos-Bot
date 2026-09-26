@@ -1,7 +1,9 @@
 // ============================================
 // 💠 MENU-VIP — Pergaminho dos Privilegiados
 // ============================================
-// Lista SOMENTE os comandos do sistema de VIP (hoje: /darvip e /listavip),
+// Lista SOMENTE os comandos do sistema de VIP (hoje: /darvip, /listavip,
+// /nomecustom, /corvip e /assinatura — os três últimos são os únicos que os
+// próprios VIPs usam; os outros dois são dos donos do bot),
 // seguindo o mesmo estilo visual do /menu principal.
 // Os comandos em si são exclusivos dos DONOS do bot (OWNER_NUMBERS),
 // mas consultar este menu é livre — igual ao /menu geral.
@@ -33,6 +35,33 @@ module.exports = {
 📜 /listavip
 ➥ Lista os VIPs ativos e suas expirações, da mais próxima para a mais distante.
 ➥ VIPs vencidos são varridos do livro automaticamente.
+
+════════════════════
+
+💠 VANTAGENS DE SER VIP
+
+🏷️ /nomecustom <nome>
+➥ Escolhe o nome que o bot exibe por você no /perfil e no /ranking.
+➥ De 2 a 20 caracteres, sem quebra de linha.
+➥ Sem argumento mostra o nome atual; /nomecustom remover volta ao nome do WhatsApp.
+➥ Exclusivo de VIP (também: /nomevip).
+
+🎨 /corvip <emoji>
+➥ Escolhe o emoji que aparece antes do seu nome no /ranking (ex.: /corvip 🔥).
+➥ Só UM emoji por vez; /corvip lista mostra as sugestões e a sua cor atual.
+➥ /corvip remover volta ao padrão (também: /corcustom, /corvip reset).
+
+✍️ /assinatura <texto>
+➥ Marca as figurinhas que você cria com /s e /figurinha (canto inferior direito).
+➥ Até 15 caracteres, sem emoji; /assinatura remover desliga (também: /assinaturavip).
+
+🎨 /temavip <tema>
+➥ Escolhe o esquema de cor (fundo, texto e destaque) dos seus cards: o do /perfil e os de /ship e /kiss.
+➥ /temavip lista mostra os temas com as cores; /temavip neon aplica; /temavip remover volta ao padrão (também: /temacustom).
+
+🎙️ /revelaraudio
+➥ Revela áudios de visualização única (responda ao 🎙️ com 👁️).
+➥ Também liberado para admins do grupo e donos do bot.
 
 ════════════════════
 

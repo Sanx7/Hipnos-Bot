@@ -23,10 +23,22 @@ function criarSock() {
   }
 }
 
-function textoUnico(enviadas) {
-  const textos = enviadas.map(function (e) { return e.conteudo && e.conteudo.text }).filter(function (t) { return typeof t === 'string' })
-  if (textos.length !== 1) throw new Error('esperava 1 mensagem, veio ' + textos.length)
-  return textos[0]
+function pollUnico(enviadas) {
+  if (enviadas.length !== 1) throw new Error('esperava 1 mensagem, veio ' + enviadas.length)
+  const conteudo = enviadas[0].conteudo
+  if (!conteudo || !conteudo.poll) throw new Error('esperava enquete (poll), veio ' + JSON.stringify(conteudo))
+  return conteudo.poll
+}
+
+function conferirEnquete(poll) {
+  if (typeof poll.name !== 'string' || !/^Eu nunca/i.test(poll.name.trim())) throw new Error('poll.name fora do padrão: ' + poll.name)
+  const temFrase = eununca.FRASES.some(function (f) { return poll.name === f })
+  if (!temFrase) throw new Error('poll.name não é frase do banco: ' + poll.name)
+  if (!Array.isArray(poll.values) || poll.values.length !== 2 || poll.values[0] !== 'Eu nunca' || poll.values[1] !== 'Eu já') {
+    throw new Error('poll.values errado: ' + JSON.stringify(poll.values))
+  }
+  if (poll.selectableCount !== 1) throw new Error('selectableCount deveria ser 1, veio ' + poll.selectableCount)
+  return poll.name
 }
 
 let reprovadas = 0
@@ -57,13 +69,11 @@ async function main() {
     }
   })
 
-  await testar('sorteio simples envia uma frase', async function () {
+  await testar('sorteio simples envia enquete com a frase', async function () {
     const s = criarSock()
     await eununca.executar(s.sock, JID, MSG, '/eununca')
-    const texto = textoUnico(s.enviadas)
-    if (!/EU NUNCA/i.test(texto)) throw new Error('sem cabeçalho: ' + texto)
-    const temFrase = eununca.FRASES.some(function (f) { return texto.includes(f) })
-    if (!temFrase) throw new Error('a mensagem não contém frase do banco')
+    const poll = pollUnico(s.enviadas)
+    conferirEnquete(poll)
   })
 
   await testar('não repete a última consecutiva (50 sorteios)', async function () {
@@ -72,8 +82,7 @@ async function main() {
     for (let i = 0; i < 50; i++) {
       s.enviadas.length = 0
       await eununca.executar(s.sock, JID, MSG, '/eununca')
-      const texto = textoUnico(s.enviadas)
-      const frase = eununca.FRASES.find(function (f) { return texto.includes(f) })
+      const frase = conferirEnquete(pollUnico(s.enviadas))
       if (!frase) throw new Error('sorteio ' + i + ' não trouxe frase do banco')
       if (anterior !== null && frase === anterior) throw new Error('repetiu consecutiva: ' + frase)
       anterior = frase
@@ -84,10 +93,30 @@ async function main() {
     eununca._limparMemoria()
     const s = criarSock()
     await eununca.executar(s.sock, JID, MSG, '/eununca')
-    const primeira = textoUnico(s.enviadas)
+    const poll = pollUnico(s.enviadas)
+    conferirEnquete(poll)
     if (eununca._ultimaPorGrupo.get(JID) === undefined) throw new Error('não guardou a última do grupo')
     if (eununca._ultimaPorGrupo.get('outro@g.us') !== undefined) throw new Error('vazou memória entre grupos')
-    if (!primeira) throw new Error('sem texto')
+    if (!poll.name) throw new Error('sem pergunta na enquete')
+  })
+
+  await testar('fallback: se o poll falhar, envia texto simples', async function () {
+    eununca._limparMemoria()
+    const enviadas = []
+    const sockPollQuebrado = {
+      sendMessage: async function (jid, conteudo, opcoes) {
+        if (conteudo && conteudo.poll) throw new Error('poll não suportado')
+        enviadas.push({ jid: jid, conteudo: conteudo, opcoes: opcoes })
+        return { key: { id: 'fake-fallback' } }
+      }
+    }
+    await eununca.executar(sockPollQuebrado, JID, MSG, '/eununca')
+    if (enviadas.length !== 1) throw new Error('esperava 1 mensagem de fallback, veio ' + enviadas.length)
+    const conteudo = enviadas[0].conteudo
+    if (!conteudo || typeof conteudo.text !== 'string') throw new Error('fallback deveria ser texto, veio ' + JSON.stringify(conteudo))
+    if (!/EU NUNCA/i.test(conteudo.text)) throw new Error('fallback sem cabeçalho: ' + conteudo.text)
+    const temFrase = eununca.FRASES.some(function (f) { return conteudo.text.includes(f) })
+    if (!temFrase) throw new Error('o fallback não contém frase do banco')
   })
 
   await testar('executor nunca lança com sock quebrado', async function () {

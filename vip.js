@@ -23,6 +23,28 @@
 //      LID no lugar do número real (usada pelo /listavip e pelo script
 //      scripts/migrar-vip-lid.js);
 //   5. limparExpirados() — remove do banco os VIPs vencidos.
+//   6. limparNomeCustom/validarNomeCustom(nome) — sanitização e validação do
+//      nome customizado do campo `nomeCustom` (2-20 caracteres, sem
+//      quebra de linha nem caracteres invisíveis);
+//   7. definirNomeCustom/removerNomeCustom(numero, nome) — gravam/apagam o
+//      `nomeCustom` no documento do VIP ativo (usados pelo /nomecustom);
+//   8. obterNomeCustom(numero) — nome custom do VIP ativo (ou null), usado
+//      pelo /perfil; obterNomesCustom(numeros) — mapa numero→nome dos VIPs
+//      ativos numa única consulta, usado pelo /ranking.
+//   9. validarCorVip/definirCorVip/removerCorVip — campo `corVip` do MESMO
+//      documento: o VIP escolhe UM emoji (validado com a lib `emoji-regex`,
+//      já no projeto via emoji-mixer) que aparece ao lado do nome no
+//      /ranking. SUGESTOES_COR_VIP alimenta o `/corvip lista`;
+//      obterCorVip/obterCoresVip/obterEstilosVip leem o campo sem nunca lançar
+//      (obterEstilosVip devolve nome E cor numa consulta só — é o do /ranking).
+//  10. validarAssinatura/definirAssinatura/removerAssinatura — campo
+//      `assinatura`: marca d'água de até ASSINATURA_MAX (15) caracteres, sem
+//      emoji, que o /s e o /figurinha gravam na figurinha via ffmpeg;
+//      obterAssinatura(numero) devolve null (sem lançar) quando não há.
+//  11. validarTemaVip/definirTemaVip/removerTemaVip — campo `temaVip`: nome
+//      do esquema de cor (padrao/neon/pastel/escuro/dourado, catálogo no
+//      temas-vip.js) que o /temavip aplica nos cards (fundo/texto/destaque);
+//      obterTemaVip(numero) devolve null (sem lançar) quando não há tema.
 //
 // NÃO existe VIP vitalício: todo registro tem `expira_em` obrigatório
 // (sempre uma data futura calculada a partir dos dias concedidos).
@@ -31,7 +53,15 @@
 //   {
 //     numero:       "5511999999999",   // apenas dígitos (único)
 //     adicionado_em: 1700000000000,    // 1ª outorga (ms)
-//     expira_em:     1700864000000     // quando o VIP acaba (ms)
+//     expira_em:     1700864000000,    // quando o VIP acaba (ms)
+//     nomeCustom:    "MeuNomeVip"      // OPCIONAL (/nomecustom) — nome que o
+//                                      // bot exibe no /perfil e no /ranking
+//     corVip:        "🔥"              // OPCIONAL (/corvip) — 1 emoji que
+//                                      // aparece antes do nome no /ranking
+//     assinatura:    "@joaovip"         // OPCIONAL (/assinatura) — marca
+//                                      // d'água nas figurinhas do /s
+//     temaVip:       "neon"            // OPCIONAL (/temavip) — esquema de
+//                                      // cor dos cards (catálogo temas-vip)
 //   }
 // ============================================
 
@@ -41,6 +71,10 @@ const { limparNumero } = require('./config')
 // usada pelo isVip (checagem "é VIP?" robusta p/ remetentes que chegam
 // como "@lid") e pela correção pontual corrigirVipsComLid().
 const { resolverLidParaTelefone } = require('./lid')
+// 🎨 Catálogo dos esquemas de cor dos cards (/temavip): puro dados + helpers
+// de hex, sem dependências — ESTE módulo requer o catálogo (nunca o inverso,
+// então não há ciclo). Usado pela validação do campo `temaVip`.
+const temasVip = require('./temas-vip')
 
 const DIA_EM_MS = 24 * 60 * 60 * 1000
 // Teto de segurança p/ os dias concedidos (10 anos): evita gravar valores absurdos.
@@ -247,9 +281,19 @@ async function corrigirVipsComLid() {
 // sem isso, comandos restritos a VIP (ex.: o futuro /s) falhariam para
 // quem chega como "@lid" em grupos com LID habilitado.
 // -------------------------------------------------------------------
-async function isVip(numeroBruto) {
+// -------------------------------------------------------------------
+// 🔎 buscarRegistroVipAtivo(numeroBruto): procura o registro de VIP ATIVO
+// do número e devolve { colecao, registro } (ou null). É a FONTE ÚNICA das
+// leituras do sistema — usada pelo isVip e por toda a API do nome custom:
+//   - aceita JID cru, "@lid" ou só dígitos (limparNumero);
+//   - 🪪 caminho LID: sem registro pelo LID cru, resolve o número real pelo
+//     mapeamento da sessão (lid-mapping) e reconsulta;
+//   - 🧹 VIP vencido é APAGADO do banco na hora (auto-limpeza) e conta
+//     como inexistente.
+// -------------------------------------------------------------------
+async function buscarRegistroVipAtivo(numeroBruto) {
   const numero = limparNumero(numeroBruto)
-  if (!numero) return false
+  if (!numero) return null
 
   const colecao = await obterColecaoVips()
   let registro = await colecao.findOne({ numero })
@@ -262,15 +306,498 @@ async function isVip(numeroBruto) {
     }
   }
 
-  if (!registro) return false
+  if (!registro) return null
 
   if (registro.expira_em <= Date.now()) {
     // 🧹 VIP vencido deixa de ocupar lugar no banco
     await colecao.deleteOne({ numero: registro.numero })
-    return false
+    return null
   }
 
-  return true
+  return { colecao, registro }
+}
+
+// -------------------------------------------------------------------
+// ✅ isVip(numero): true SOMENTE quando existe registro e a expiração não
+// passou. Toda a mecânica (LID + auto-limpeza) está em buscarRegistroVipAtivo.
+// -------------------------------------------------------------------
+async function isVip(numeroBruto) {
+  return Boolean(await buscarRegistroVipAtivo(numeroBruto))
+}
+
+// -------------------------------------------------------------------
+// 🏷️ NOME CUSTOMIZADO (campo `nomeCustom` do documento do VIP)
+// -------------------------------------------------------------------
+// O /nomecustom (comandos/menu-vip/nomecustom.js — EXCLUSIVO VIP) deixa a
+// pessoa escolher o nome que o bot exibe nas respostas dela. O nome mora no
+// MESMO documento de VIP deste módulo (collection "vips"), no campo
+// `nomeCustom`, gravado com o LID já resolvido p/ o número real (mesma
+// resolução do /darvip). Sem VIP ativo não existe nome custom: o registro
+// vencido é apagado pelo buscarRegistroVipAtivo (auto-limpeza) e o nome vai
+// embora junto.
+//
+// Onde o bot usa hoje: /perfil (nome do card) e /ranking (nome da lista).
+// As LEITURAS (obterNomeCustom/obterNomesCustom) NUNCA lançam e devolvem
+// null/vazio sem MONGODB_URI — assim os comandos públicos caem no nome
+// padrão em vez de estourar (o isVip continua RUIDOSO, como sempre foi).
+// -------------------------------------------------------------------
+const NOME_CUSTOM_MIN = 2
+const NOME_CUSTOM_MAX = 20
+
+// 🧼 Invisíveis que quebram a formatação das mensagens: controles C0/C1
+// (inclui \n, \r e \t — é o "sem quebra de linha" do /nomecustom), espaços
+// e marcas zero-width, marcas bidirecionais e o hífen suave. O ZWJ (\u200D)
+// fica DE FORA de propósito: ele faz parte de emojis compostos (🧑‍🚀).
+const CARACTERES_INVISIVEIS =
+  /[\u0000-\u001F\u007F-\u009F\u00AD\u200B\u200E\u200F\u2028\u2029\u202A-\u202E\u2060-\u2064\u206A-\u206F\uFEFF]/g
+
+// 🧼 limparNomeCustom(nome): tira os invisíveis, transforma espaços repetidos
+// em um só e apara as pontas. NÃO julga tamanho (quem julga é a validação).
+function limparNomeCustom(nomeBruto) {
+  return String(nomeBruto ?? '')
+    .normalize('NFC')
+    .replace(CARACTERES_INVISIVEIS, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+// ✅ validarNomeCustom(nome): { ok: true, nome, tamanho } ou
+//    { ok: false, motivo: 'vazio' | 'curto' | 'longo', nome, tamanho? }
+// O tamanho é contado em PONTOS DE CÓDIGO ([...nome].length), então um emoji
+// conta como ele mesmo (e não como os 2+ caracteres que o compõem).
+function validarNomeCustom(nomeBruto) {
+  const nome = limparNomeCustom(nomeBruto)
+  if (!nome) return { ok: false, motivo: 'vazio', nome: '' }
+  const tamanho = [...nome].length
+  if (tamanho < NOME_CUSTOM_MIN) return { ok: false, motivo: 'curto', nome, tamanho }
+  if (tamanho > NOME_CUSTOM_MAX) return { ok: false, motivo: 'longo', nome, tamanho }
+  return { ok: true, nome, tamanho }
+}
+
+// -------------------------------------------------------------------
+// ✍️ definirCampoDeVipAtivo(numeroBruto, campo, valor): $set de um campo do
+// documento do VIP ATIVO (com o LID já resolvido p/ o número real). É a base
+// compartilhada pelo nome custom e pela cor VIP.
+// Devolve { ok: true, numero, valor } ou { ok: false, motivo }:
+//   'sem-vip' → não é VIP ativo (expirado/inexistente) | 'infra' → desligado
+//   'falha'   → erro inesperado do banco (logado).
+// -------------------------------------------------------------------
+async function definirCampoDeVipAtivo(numeroBruto, campo, valor) {
+  if (!modoTeste && !process.env.MONGODB_URI) return { ok: false, motivo: 'infra' }
+
+  try {
+    const alvo = await buscarRegistroVipAtivo(numeroBruto)
+    if (!alvo) return { ok: false, motivo: 'sem-vip' }
+
+    await alvo.colecao.updateOne(
+      { numero: alvo.registro.numero },
+      { $set: { [campo]: valor } }
+    )
+    return { ok: true, numero: alvo.registro.numero, valor }
+  } catch (err) {
+    console.error(`⚠️ [vip] falha ao gravar o campo ${campo}:`, err?.message || err)
+    return { ok: false, motivo: 'falha' }
+  }
+}
+
+// -------------------------------------------------------------------
+// 🧹 removerCampoDeVipAtivo(numeroBruto, campo, normalizar): $unset de um
+// campo do VIP ativo (a pessoa volta ao padrão). `normalizar` decide se o
+// valor gravado contava como "definido" (o nome custom usa a própria limpeza;
+// a cor usa um trim simples).
+// Devolve { ok: true, tinha, numero } ou { ok: false, motivo }.
+// -------------------------------------------------------------------
+async function removerCampoDeVipAtivo(numeroBruto, campo, normalizar = (valor) => Boolean(valor)) {
+  if (!modoTeste && !process.env.MONGODB_URI) return { ok: false, motivo: 'infra' }
+
+  try {
+    const alvo = await buscarRegistroVipAtivo(numeroBruto)
+    if (!alvo) return { ok: false, motivo: 'sem-vip' }
+
+    const tinha = Boolean(normalizar(alvo.registro[campo]))
+    await alvo.colecao.updateOne(
+      { numero: alvo.registro.numero },
+      { $unset: { [campo]: '' } }
+    )
+    return { ok: true, tinha, numero: alvo.registro.numero }
+  } catch (err) {
+    console.error(`⚠️ [vip] falha ao remover o campo ${campo}:`, err?.message || err)
+    return { ok: false, motivo: 'falha' }
+  }
+}
+
+// -------------------------------------------------------------------
+// 🏷️ definirNomeCustom(numeroBruto, nome): grava o `nomeCustom` no documento
+// do VIP ATIVO (LID resolvido p/ o número real antes de gravar).
+// Devolve { ok: true, nome } ou { ok: false, motivo } com motivo:
+//   'vazio' | 'curto' | 'longo' → nome inválido (nada foi gravado);
+//   'sem-vip'                   → não é VIP ativo (expirado/inexistente);
+//   'infra'                     → sistema de VIP desligado (sem MONGODB_URI);
+//   'falha'                     → erro inesperado do banco (logado).
+// -------------------------------------------------------------------
+async function definirNomeCustom(numeroBruto, nomeBruto) {
+  const validacao = validarNomeCustom(nomeBruto)
+  if (!validacao.ok) return validacao
+
+  const resultado = await definirCampoDeVipAtivo(numeroBruto, 'nomeCustom', validacao.nome)
+  if (!resultado.ok) return resultado
+  console.log(`[vip] 🏷️ nome custom definido p/ ${resultado.numero}: "${validacao.nome}"`)
+  return { ok: true, nome: validacao.nome }
+}
+
+// -------------------------------------------------------------------
+// 🎨 COR VIP (campo `corVip` do MESMO documento de VIP) — comando /corvip
+// -------------------------------------------------------------------
+// O VIP escolhe UM emoji que o bot mostra ao lado do nome dela no /ranking.
+// A validação usa a lib `emoji-regex` (ESM, já no projeto como dependência
+// do emoji-mixer — mesmo carregamento sob demanda e em cache do /emojimix).
+// O regex conta uma SEQUÊNCIA como um emoji só: 🧑‍🚀, 🇧🇷, 1️⃣ e 👨‍👩‍👧
+// valem 1 (e não 3, 2 ou 4).
+//
+// Motivos de recusa: 'vazio' (só espaços) | 'sem-emoji' (texto comum),
+// 'varios' (2+ emojis) | 'mistura' (emoji + texto) | 'infra' (lib fora).
+// -------------------------------------------------------------------
+let regexEmojiCache = null
+async function criarRegexEmoji() {
+  if (!regexEmojiCache) {
+    const modulo = await import('emoji-regex')
+    const criar = modulo.default || modulo
+    regexEmojiCache = criar()
+  }
+  return regexEmojiCache
+}
+
+// 🎨 Normalizador do campo `corVip` (o emoji já veio validado na escrita;
+// aqui só apara espaços, para uma leitura defensiva).
+function normalizarCorVip(valor) {
+  return typeof valor === 'string' ? valor.trim() : ''
+}
+
+// 📋 Sugestões mostradas pelo `/corvip lista` (curtas e temáticas do recinto)
+const SUGESTOES_COR_VIP = ['🔥', '💎', '👑', '🌙', '⚡', '🦋', '🐺', '👻', '🌹', '🍀']
+
+// ✅ validarCorVip(texto): { ok: true, emoji } | { ok: false, motivo }
+async function validarCorVip(textoBruto) {
+  const texto = String(textoBruto ?? '').trim()
+  if (!texto) return { ok: false, motivo: 'vazio' }
+
+  let regex
+  try {
+    regex = await criarRegexEmoji()
+  } catch (err) {
+    console.error('⚠️ [vip] falha ao carregar o emoji-regex:', err?.message || err)
+    return { ok: false, motivo: 'infra' }
+  }
+
+  const encontrados = texto.match(regex) || []
+  if (encontrados.length === 0) return { ok: false, motivo: 'sem-emoji' }
+  if (encontrados.length > 1) return { ok: false, motivo: 'varios', quantidade: encontrados.length }
+
+  // Sobrou algo além do emoji? (ex.: "🔥 Fulano") → mistura é recusada.
+  const resto = texto.split(encontrados[0]).join('').trim()
+  if (resto) return { ok: false, motivo: 'mistura' }
+
+  return { ok: true, emoji: encontrados[0] }
+}
+
+// ✍️ definirCorVip(numeroBruto, texto): grava o `corVip` (1 emoji) no documento
+// do VIP ATIVO. Motivos: os da validação + 'sem-vip' | 'infra' | 'falha'.
+async function definirCorVip(numeroBruto, textoBruto) {
+  const validacao = await validarCorVip(textoBruto)
+  if (!validacao.ok) return validacao
+
+  const resultado = await definirCampoDeVipAtivo(numeroBruto, 'corVip', validacao.emoji)
+  if (!resultado.ok) return resultado
+  console.log(`[vip] 🎨 cor VIP definida p/ ${resultado.numero}: ${validacao.emoji}`)
+  return { ok: true, emoji: validacao.emoji }
+}
+
+// 🧹 removerCorVip(numeroBruto): apaga a cor — a pessoa volta ao emoji padrão
+// (o nome no /ranking segue como está). Devolve { ok: true, tinha } ou
+// { ok: false, motivo: 'sem-vip' | 'infra' | 'falha' }.
+async function removerCorVip(numeroBruto) {
+  const resultado = await removerCampoDeVipAtivo(numeroBruto, 'corVip', normalizarCorVip)
+  if (resultado.ok) console.log(`[vip] 🧹 cor VIP removida de ${resultado.numero}`)
+  return resultado
+}
+
+// -------------------------------------------------------------------
+// ✍️ ASSINATURA (campo `assinatura` do MESMO documento de VIP) — /assinatura
+// -------------------------------------------------------------------
+// Marca d'água curta que o VIP manda gravar nas figurinhas que cria com o
+// /s e o /figurinha (canto inferior direito, fonte pequena com contorno).
+// Onde vive: campo `assinatura` do documento de VIP — nada de collection nova.
+//
+// Regras (o /assinatura traduz cada motivo em mensagem):
+//   - até ASSINATURA_MAX (15) caracteres: a figurinha é 512×512 e não sobra
+//     espaço visual para mais que isso;
+//   - sem quebra de linha nem caracteres de controle/zero-width (o mesmo
+//     saneamento do nome custom);
+//   - SEM EMOJI: o drawtext do ffmpeg escreve com uma fonte TTF comum e um
+//     emoji sai como quadradinho/bolha vazia (verificado no ffmpeg embutido).
+// Motivos de recusa: 'vazio' | 'longo' | 'emoji' (e, na gravação, os mesmos
+// 'sem-vip' | 'infra' | 'falha' dos outros campos).
+// -------------------------------------------------------------------
+const ASSINATURA_MAX = 15
+
+// 🧼 Normalizador do campo `assinatura`: sem controle/invisível, sem espaço
+// duplicado, sem pontas. Não julga tamanho (quem julga é validarAssinatura).
+function normalizarAssinatura(textoBruto) {
+  return String(textoBruto ?? '')
+    .normalize('NFC')
+    .replace(CARACTERES_INVISIVEIS, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+// ✅ validarAssinatura(texto): { ok: true, assinatura } | { ok: false, motivo }
+async function validarAssinatura(textoBruto) {
+  const assinatura = normalizarAssinatura(textoBruto)
+  if (!assinatura) return { ok: false, motivo: 'vazio' }
+
+  const tamanho = [...assinatura].length
+  if (tamanho > ASSINATURA_MAX) {
+    return { ok: false, motivo: 'longo', assinatura, tamanho }
+  }
+
+  // 🚫 Emoji não renderiza na fonte do drawtext (fica tofu/bolha vazia)
+  try {
+    const regex = await criarRegexEmoji()
+    if ((assinatura.match(regex) || []).length > 0) {
+      return { ok: false, motivo: 'emoji', assinatura, tamanho }
+    }
+  } catch (err) {
+    // Falha da lib NÃO bloqueia: a validação de tamanho já passou e o
+    // drawtext ignora o que não souber desenhar.
+    console.error('⚠️ [vip] falha ao checar emoji na assinatura:', err?.message || err)
+  }
+
+  return { ok: true, assinatura, tamanho }
+}
+
+// ✍️ definirAssinatura(numeroBruto, texto): grava `assinatura` no documento do
+// VIP ATIVO (LID resolvido p/ o número real, como os outros campos).
+async function definirAssinatura(numeroBruto, textoBruto) {
+  const validacao = await validarAssinatura(textoBruto)
+  if (!validacao.ok) return validacao
+
+  const resultado = await definirCampoDeVipAtivo(numeroBruto, 'assinatura', validacao.assinatura)
+  if (!resultado.ok) return resultado
+  console.log(`[vip] ✍️ assinatura definida p/ ${resultado.numero}: "${validacao.assinatura}"`)
+  return { ok: true, assinatura: validacao.assinatura }
+}
+
+// 🧹 removerAssinatura(numeroBruto): apaga a assinatura (a figurinha volta a
+// sair sem marca d'água). { ok: true, tinha } | { ok: false, motivo }.
+async function removerAssinatura(numeroBruto) {
+  const resultado = await removerCampoDeVipAtivo(numeroBruto, 'assinatura', normalizarAssinatura)
+  if (resultado.ok) console.log(`[vip] 🧹 assinatura removida de ${resultado.numero}`)
+  return resultado
+}
+
+// -------------------------------------------------------------------
+// 🎨 TEMA VIP (campo `temaVip` do MESMO documento de VIP) — /temavip
+// -------------------------------------------------------------------
+// Nome do esquema de cor que os geradores de card aplicam nas cores de
+// fundo/texto/destaque (/perfil e os cards de par do /ship e /kiss).
+// O catálogo de temas e as paletas moram no temas-vip.js (puro dados);
+// aqui só validamos o NOME e gravamos/lemos o campo no documento.
+//
+// Regras (o /temavip traduz cada motivo em mensagem):
+//   - o nome precisa existir no catálogo (sem tema a lista é curta e fixa:
+//     padrao, neon, pastel, escuro, dourado);
+//   - "padrao" é um tema como outro qualquer (o card sai com as cores de
+//     sempre); o tema DE VERDADE sai de campo com `/temavip remover`.
+// Motivos de recusa: 'vazio' | 'desconhecido' (e, na gravação, os mesmos
+// 'sem-vip' | 'infra' | 'falha' dos outros campos).
+// -------------------------------------------------------------------
+
+// 🧼 Normalizador do campo `temaVip`: minúsculas e sem acento, para que
+// "Neon", "NEON" e "neón" caiam no mesmo tema do catálogo.
+function normalizarTemaVip(textoBruto) {
+  return temasVip.normalizarNomeTema(textoBruto)
+}
+
+// ✅ validarTemaVip(texto): { ok: true, tema } | { ok: false, motivo, opcoes? }
+// Síncrona de propósito (catálogo em memória — igual ao validarNomeCustom).
+function validarTemaVip(textoBruto) {
+  const tema = normalizarTemaVip(textoBruto)
+  if (!tema) return { ok: false, motivo: 'vazio' }
+  if (!temasVip.temaExiste(tema)) {
+    return { ok: false, motivo: 'desconhecido', tema, opcoes: temasVip.listarNomes() }
+  }
+  return { ok: true, tema }
+}
+
+// 🎨 definirTemaVip(numeroBruto, texto): grava `temaVip` no documento do
+// VIP ATIVO (LID resolvido p/ o número real, como os outros campos).
+async function definirTemaVip(numeroBruto, textoBruto) {
+  const validacao = validarTemaVip(textoBruto)
+  if (!validacao.ok) return validacao
+
+  const resultado = await definirCampoDeVipAtivo(numeroBruto, 'temaVip', validacao.tema)
+  if (!resultado.ok) return resultado
+  console.log(`[vip] 🎨 tema VIP definido p/ ${resultado.numero}: ${validacao.tema}`)
+  return { ok: true, tema: validacao.tema }
+}
+
+// 🧹 removerTemaVip(numeroBruto): apaga o tema (os cards voltam às cores
+// fixas de hoje). { ok: true, tinha } | { ok: false, motivo }.
+async function removerTemaVip(numeroBruto) {
+  const resultado = await removerCampoDeVipAtivo(numeroBruto, 'temaVip', normalizarTemaVip)
+  if (resultado.ok) console.log(`[vip] 🧹 tema VIP removido de ${resultado.numero}`)
+  return resultado
+}
+
+// 🎨 obterTemaVip(numeroBruto): tema do VIP ATIVO (ou null). NUNCA lança —
+// é usada pelo /perfil e pelos cards de par, que NUNCA podem quebrar por
+// causa de um tema (sem banco, VIP sem tema ou registro vencido = null,
+// e o card sai exatamente como hoje).
+async function obterTemaVip(numeroBruto) {
+  try {
+    const lido = await lerCamposDeVipAtivo(numeroBruto, { temaVip: normalizarTemaVip })
+    return lido?.temaVip || null
+  } catch (err) {
+    console.error('⚠️ [vip] falha ao ler o tema VIP:', err?.message || err)
+    return null
+  }
+}
+
+// -------------------------------------------------------------------
+// 📖 Leitura dos campos de "estilo" do VIP ATIVO (nome/cor/assinatura).
+// NUNCA lança: devolve null/mapa vazio quando o banco está fora, para os
+// comandos públicos (/perfil, /ranking, /s, /figurinha) caírem no padrão
+// em vez de estourar.
+// -------------------------------------------------------------------
+// lerCamposDeVipAtivo(numero, normalizadores) → { numero, campo… } do VIP
+// ativo (cada campo já normalizado; o que não existir fica null) ou null.
+async function lerCamposDeVipAtivo(numeroBruto, normalizadores) {
+  if (!modoTeste && !process.env.MONGODB_URI) return null
+
+  const alvo = await buscarRegistroVipAtivo(numeroBruto)
+  if (!alvo) return null
+
+  const saida = { numero: alvo.registro.numero }
+  for (const [campo, normalizar] of Object.entries(normalizadores)) {
+    saida[campo] = normalizar(alvo.registro[campo]) || null
+  }
+  return saida
+}
+
+// lerCamposDeVipsAtivos(numeros, normalizadores) → Map numero → { campo… }
+// numa ÚNICA consulta ($in). VIPs vencidos são ignorados (o registro já
+// foi limpo pelo buscarRegistroVipAtivo em outras leituras; aqui só filtramos).
+async function lerCamposDeVipsAtivos(numeros, normalizadores) {
+  const mapa = new Map()
+  const lista = [...new Set((numeros || []).map(limparNumero).filter(Boolean))]
+  if (!lista.length) return mapa
+  if (!modoTeste && !process.env.MONGODB_URI) return mapa
+
+  try {
+    const colecao = await obterColecaoVips()
+    const documentos = await colecao.find({ numero: { $in: lista } }).toArray()
+    const agora = Date.now()
+    for (const documento of documentos) {
+      if (!documento || Number(documento.expira_em) <= agora) continue
+      const saida = { numero: limparNumero(documento.numero) }
+      let temAlgo = false
+      for (const [campo, normalizar] of Object.entries(normalizadores)) {
+        const valor = normalizar(documento[campo]) || null
+        saida[campo] = valor
+        if (valor) temAlgo = true
+      }
+      if (temAlgo) mapa.set(saida.numero, saida)
+    }
+  } catch (err) {
+    console.error('⚠️ [vip] falha ao ler os campos de estilo dos VIPs:', err?.message || err)
+  }
+  return mapa
+}
+
+// 🏷️ obterNomeCustom(numeroBruto): nome custom do VIP ATIVO (ou null quando
+// não é VIP / não definiu). NUNCA lança — o /perfil é comando público.
+// -------------------------------------------------------------------
+async function obterNomeCustom(numeroBruto) {
+  try {
+    const lido = await lerCamposDeVipAtivo(numeroBruto, { nomeCustom: limparNomeCustom })
+    return lido?.nomeCustom || null
+  } catch (err) {
+    console.error('⚠️ [vip] falha ao ler o nome custom:', err?.message || err)
+    return null
+  }
+}
+
+// 🎨 obterCorVip(numeroBruto): cor/emoji do VIP ATIVO (ou null). NUNCA lança.
+async function obterCorVip(numeroBruto) {
+  try {
+    const lido = await lerCamposDeVipAtivo(numeroBruto, { corVip: normalizarCorVip })
+    return lido?.corVip || null
+  } catch (err) {
+    console.error('⚠️ [vip] falha ao ler a cor VIP:', err?.message || err)
+    return null
+  }
+}
+
+// ✍️ obterAssinatura(numeroBruto): assinatura do VIP ATIVO (ou null). NUNCA
+// lança — é usada pelo /s e pelo /figurinha, que NUNCA podem quebrar por causa
+// de uma assinatura (sem banco, VIP sem assinatura ou registro vencido = null,
+// e a figurinha sai exatamente como hoje).
+async function obterAssinatura(numeroBruto) {
+  try {
+    const lido = await lerCamposDeVipAtivo(numeroBruto, { assinatura: normalizarAssinatura })
+    return lido?.assinatura || null
+  } catch (err) {
+    console.error('⚠️ [vip] falha ao ler a assinatura:', err?.message || err)
+    return null
+  }
+}
+
+// 🏷️ obterNomesCustom(numeros): mapa numero → nomeCustom dos VIPs ATIVOS
+// entre `numeros`, numa ÚNICA consulta. NUNCA lança.
+// -------------------------------------------------------------------
+async function obterNomesCustom(numeros) {
+  const mapa = new Map()
+  for (const [numero, item] of await lerCamposDeVipsAtivos(numeros, { nomeCustom: limparNomeCustom })) {
+    if (item.nomeCustom) mapa.set(numero, item.nomeCustom)
+  }
+  return mapa
+}
+
+// 🎨 obterCoresVip(numeros): mapa numero → cor dos VIPs ATIVOS. NUNCA lança.
+async function obterCoresVip(numeros) {
+  const mapa = new Map()
+  for (const [numero, item] of await lerCamposDeVipsAtivos(numeros, { corVip: normalizarCorVip })) {
+    if (item.corVip) mapa.set(numero, item.corVip)
+  }
+  return mapa
+}
+
+// ✨ obterEstilosVip(numeros): mapa numero → { nome, cor } numa consulta SÓ
+// (é o que o /ranking usa: nome custom + cor juntos, sem 2 idas ao banco).
+async function obterEstilosVip(numeros) {
+  const mapa = new Map()
+  const lidos = await lerCamposDeVipsAtivos(numeros, {
+    nomeCustom: limparNomeCustom,
+    corVip: normalizarCorVip
+  })
+  for (const [numero, item] of lidos) {
+    mapa.set(numero, { nome: item.nomeCustom, cor: item.corVip })
+  }
+  return mapa
+}
+
+// -------------------------------------------------------------------
+// 🏷️ removerNomeCustom(numeroBruto): apaga o `nomeCustom` do documento do VIP
+// ativo — a pessoa volta a aparecer com o nome padrão do WhatsApp.
+// Devolve { ok: true, tinhaNome } ou { ok: false, motivo: 'sem-vip' | 'infra' | 'falha' }.
+// -------------------------------------------------------------------
+async function removerNomeCustom(numeroBruto) {
+  // `limparNomeCustom` no normalizador: um nome só com invisíveis não conta
+  // como definido (mesma semântica de quando o /nomecustom grava).
+  const resultado = await removerCampoDeVipAtivo(numeroBruto, 'nomeCustom', limparNomeCustom)
+  if (!resultado.ok) return resultado
+  console.log(`[vip] 🧹 nome custom removido de ${resultado.numero}`)
+  return { ok: true, tinhaNome: resultado.tinha }
 }
 
 // -------------------------------------------------------------------
@@ -308,6 +835,30 @@ module.exports = {
   adicionarVip,
   listarVipsAtivos,
   isVip,
+  limparNomeCustom,
+  validarNomeCustom,
+  definirNomeCustom,
+  obterNomeCustom,
+  obterNomesCustom,
+  removerNomeCustom,
+  validarCorVip,
+  definirCorVip,
+  obterCorVip,
+  obterCoresVip,
+  obterEstilosVip,
+  removerCorVip,
+  validarAssinatura,
+  definirAssinatura,
+  obterAssinatura,
+  removerAssinatura,
+  validarTemaVip,
+  definirTemaVip,
+  obterTemaVip,
+  removerTemaVip,
+  ASSINATURA_MAX,
+  SUGESTOES_COR_VIP,
+  NOME_CUSTOM_MIN,
+  NOME_CUSTOM_MAX,
   corrigirVipsComLid,
   limparExpirados,
   formatarData,

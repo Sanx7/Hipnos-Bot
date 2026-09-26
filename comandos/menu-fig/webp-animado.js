@@ -80,10 +80,149 @@ function webpEhAnimado(buffer) {
   }
 }
 
+// ============================================================
+// ✍️ ASSINATURA VIP — marca d'água da figurinha (drawtext do ffmpeg)
+// ============================================================
+// O VIP pode pedir (via /assinatura, campo `assinatura` do doc de VIP) que o
+// texto saia estampado no canto da figurinha criada pelo /s e pelo /figurinha.
+// Aqui mora TODO o desenho da marca d'água, para os dois comandos
+// compartilharem exatamente a mesma peça:
+//   - 🔤 resolverFonteAssinatura(): acha uma fonte TTF no sistema;
+//   - ✍️ criarArquivoAssinatura(): grava o texto num .txt temporário;
+//   - 🎨 filtroDrawtextAssinatura(): monta o fragmento de filtro;
+//   - 🔗 comAssinatura(): encosta esse fragmento no filtro que já existia.
+//
+// ⚙️ POR QUE `textfile=` E NÃO `text=` (medido no ffmpeg embutido 4.2):
+//   Escapar o texto dentro do -vf funciona para quase tudo (`: , % ; = ] |`),
+//   mas o APOSTROFO não sai igual por NENHUM modo — comparando byte a byte com
+//   o `textfile=` (que não depende de escaping), as três variantes de escaping
+//   inline renderizam um caractere diferente. Então o texto vai num arquivo e o
+//   filtro só carrega o caminho: o que o usuário digitou é exatamente o que
+//   aparece na figurinha, sem trocar nenhum caractere em silêncio.
+//
+// 🛡️ Sem assinatura (ou sem fonte no sistema) o filtro volta IDÊNTICO ao de
+//    hoje: nenhuma marca d'água, nenhum arquivo extra, nenhum comportamento
+//    novo — é o que garante "sem assinatura, o /s e o /figurinha não mudam".
+// ============================================================
+
+// 📐 Aparência da marca d'água (canto inferior direito da figurinha 512×512)
+const ASSINATURA_FONTE_PX = 22        // fonte pequena (a figurinha é 512×512)
+const ASSINATURA_MARGEM_PX = 10       // respiro até a borda
+const ASSINATURA_CONTORNE = 2         // leve contorno preto (legibilidade)
+const ASSINATURA_OPACIDADE_CONTORNE = 0.6
+
+// 🔤 Fontes candidatas, na ordem de preferência: Windows (dev local), Linux
+// (Render) e, por último, a fonte que JÁ viaja versionada no repo — assim a
+// marca d'água funciona em qualquer máquina, mesmo sem fonte do sistema.
+const CANDIDATAS_FONTE_ASSINATURA = [
+  'C:/Windows/Fonts/segoeuib.ttf',
+  'C:/Windows/Fonts/arialbd.ttf',
+  'C:/Windows/Fonts/arial.ttf',
+  'C:/Windows/Fonts/tahoma.ttf',
+  'C:/Windows/Fonts/verdana.ttf',
+  '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
+  '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+  '/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf',
+  '/usr/share/fonts/TTF/DejaVuSans.ttf',
+  '/usr/share/fonts/noto/NotoSans-Bold.ttf',
+  path.join(__dirname, '..', '..', 'assets', 'fonts', 'LuckiestGuy-Regular.ttf')
+];
+
+let fonteAssinaturaCache = null; // null = ainda não tentou | string | false (sem fonte)
+
+// 🔤 resolverFonteAssinatura(): caminho de uma fonte existente, ou null.
+// O resultado é cacheado (inclusive o "não tem fonte") p/ não varrer o disco a
+// cada figurinha; a marca d'água é opcional, então falta de fonte NÃO é erro —
+// só significa que a figurinha sai sem a marca.
+function resolverFonteAssinatura() {
+  if (fonteAssinaturaCache !== null) {
+    return fonteAssinaturaCache === false ? null : fonteAssinaturaCache;
+  }
+
+  for (const candidata of CANDIDATAS_FONTE_ASSINATURA) {
+    try {
+      if (fs.existsSync(candidata)) {
+        fonteAssinaturaCache = candidata;
+        console.log(`[webp-animado] 🔤 fonte da assinatura: ${candidata}`);
+        return candidata;
+      }
+    } catch (err) {
+      // fs.existsSync raramente lança; se lançar, segue para a próxima
+    }
+  }
+
+  fonteAssinaturaCache = false;
+  console.error('[webp-animado] ⚠️ nenhuma fonte TTF encontrada — a assinatura NÃO será aplicada');
+  return null;
+}
+
+// 🧹 Escapar caminho p/ a sintaxe de filtro do ffmpeg: barras normais (o
+// ffmpeg prefere "/" mesmo no Windows) e dois-pontos escapados (drive letter).
+// Validado no ffmpeg embutido: `textfile='C\:/Users/.../x.txt'` carrega certo.
+function escaparCaminhoParaFiltro(caminho) {
+  return String(caminho).replace(/\\/g, '/').replace(/:/g, '\\:');
+}
+
+// ✍️ prepararAssinatura(texto, idUnico): transforma o texto numa peça de
+// marca d'água — { texto, caminhoTexto } — ou devolve null quando não dá para
+// aplicar (sem texto, sem fonte no sistema ou sem gravar o .txt). Só nesse
+// último caso (assinatura de verdade) o chamador cria um arquivo temporário,
+// que precisa ser apagado no finally.
+function prepararAssinatura(texto, idUnico) {
+  const limpo = String(texto || '').trim();
+  if (!limpo) return null;
+  if (!resolverFonteAssinatura()) return null;
+
+  const caminho = path.join(require('os').tmpdir(), `assinatura-${idUnico || Date.now()}.txt`);
+  try {
+    fs.writeFileSync(caminho, limpo, 'utf8');
+    return { texto: limpo, caminhoTexto: caminho };
+  } catch (err) {
+    console.error('[webp-animado] ⚠️ não foi possível gravar a assinatura:', err?.message || err);
+    return null;
+  }
+}
+
+// 🎨 filtroDrawtextAssinatura(assinatura): fragmento de filtro com o drawtext,
+// ou '' quando não há assinatura. Recebe a peça de prepararAssinatura().
+// Canto inferior direito (x=w-tw-M, y=h-th-M), texto branco com contorno preto
+// leve — legível tanto em foto clara quanto escura.
+function filtroDrawtextAssinatura(assinatura) {
+  if (!assinatura || !assinatura.texto || !assinatura.caminhoTexto) return '';
+  if (!resolverFonteAssinatura()) return '';
+
+  return (
+    'drawtext=' +
+    `fontfile='${escaparCaminhoParaFiltro(resolverFonteAssinatura())}':` +
+    `textfile='${escaparCaminhoParaFiltro(assinatura.caminhoTexto)}':` +
+    'fontcolor=white:' +
+    `fontsize=${ASSINATURA_FONTE_PX}:` +
+    `borderw=${ASSINATURA_CONTORNE}:` +
+    `bordercolor=black@${ASSINATURA_OPACIDADE_CONTORNE}:` +
+    `x=w-tw-${ASSINATURA_MARGEM_PX}:` +
+    `y=h-th-${ASSINATURA_MARGEM_PX}`
+  );
+}
+
+// 🔗 comAssinatura(filtroBase, assinatura): devolve o filtro ORIGINAL quando não
+// há assinatura (comportamento de hoje intacto) e o mesmo filtro com o drawtext
+// encostado no FIM quando há (aí as coordenadas w/h já são as do quadrado
+// 512×512 final, que é onde a marca d'água deve cair).
+function comAssinatura(filtroBase, assinatura) {
+  const drawtext = filtroDrawtextAssinatura(assinatura);
+  if (!drawtext) return filtroBase;
+  return filtroBase ? `${filtroBase},${drawtext}` : drawtext;
+}
+
 module.exports = {
   webpEhAnimado,
   rodarExecutavel,
-  caminhoBinarioWebp
+  caminhoBinarioWebp,
+  resolverFonteAssinatura,
+  prepararAssinatura,
+  filtroDrawtextAssinatura,
+  comAssinatura,
+  ASSINATURA_FONTE_PX
 };
 
 // ─── 🧯 THUMBNAIL SEGURO (lição do /revelar, agora p/ QUALQUER envio de imagem) ───

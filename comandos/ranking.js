@@ -7,6 +7,9 @@
 // ============================================
 
 const { buscarRanking, normalizarId } = require('../database')
+// 💠 Estilo dos VIPs no ranking (/nomecustom e /corvip — campos `nomeCustom`
+// e `corVip` do documento VIP): nome escolhido e o emoji da cor.
+const vip = require('../vip')
 
 // Formatação legível dos números (fonte única: ../config — usada também pelo /dono)
 const { formatarNumero } = require('../config')
@@ -70,11 +73,26 @@ module.exports = {
         console.error('Erro ao buscar metadados para o ranking:', err)
       }
 
-      // 5) Monta a lista numerada com nome/número + total de mensagens
+      // 5) 🏷️🎨 Nome e cor custom dos VIPs (/nomecustom e /corvip — campos
+      //    `nomeCustom` e `corVip` do documento VIP): UMA consulta só para os
+      //    10 da lista. Quem definiu nome aparece com ele; quem definiu cor
+      //    vê o emoji ANTES do nome ("🔥 João"). Os demais seguem no padrão
+      //    (pushName do banco ou número). Falha do banco de VIPs não derruba
+      //    o ranking — obterEstilosVip nunca lança e devolve mapa vazio.
+      let estilos = new Map()
+      try {
+        estilos = await vip.obterEstilosVip(top.map((i) => i.usuario_id))
+      } catch (errEstilo) {
+        console.error('[ranking] ⚠️ falha ao ler nomes/cores dos VIPs:', errEstilo?.message || errEstilo)
+      }
+
+      // 6) Monta a lista numerada com nome/número + total de mensagens
       const linhas = top.map((item, indice) => {
         const posicao = MEDALHAS[indice] || `${indice + 1}º`
-        const nome =
-          item.nome || formatarNumero(item.usuario_id)
+        const estilo = estilos.get(normalizarId(item.usuario_id)) || {}
+        const nome = estilo.nome || item.nome || formatarNumero(item.usuario_id)
+        // 🎨 A cor do VIP entra antes do nome; sem cor, o nome fica como sempre.
+        const nomeComCor = estilo.cor ? `${estilo.cor} ${nome}` : nome
         const total = item.total
 
         // Avisa se o usuário já não faz mais parte do grupo
@@ -86,7 +104,7 @@ module.exports = {
         // Plural correto de "mensagem" em português: mensagem -> mensagens
         const palavra = item.total > 1 ? 'mensagens' : 'mensagem'
 
-        return `${posicao} *${nome}* — *${total}* ${palavra}${aviso}`
+        return `${posicao} *${nomeComCor}* — *${total}* ${palavra}${aviso}`
       })
 
       const resposta =

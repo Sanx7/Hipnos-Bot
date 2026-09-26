@@ -29,6 +29,17 @@ const fs = require('fs')
 const path = require('path')
 const { formatarNumero, acharParticipante, RODAPE_MENU } = require('../config')
 const { buscarEstatisticasUsuario, normalizarId } = require('../database')
+// 💠 Nome custom dos VIPs (campo `nomeCustom` do documento VIP — /nomecustom):
+// quando existe, ele SUBSTITUI o pushName/nome do banco no card.
+const vip = require('../vip')
+// 🎨 Tema VIP (/temavip — campo `temaVip`): paleta de fundo/texto/destaque
+// escolhida pelo VIP; catálogo puro (sem rede/banco) em temas-vip.js.
+const temasVip = require('../temas-vip')
+// 🖼️ Composição do card temático com JIMP (JS puro) — REGRA DE OURO do
+// projeto: nada de sharp/libvips/canvas nativo in-process; é a mesma lib
+// com que o boasvindas compõe banner + foto.
+const { Jimp, JimpMime, loadFont, measureText } = require('jimp')
+const { SANS_32_WHITE } = require('jimp/fonts')
 
 // Usa o binário de FFmpeg instalado no projeto, com fallback para o PATH
 const binarioFfmpeg = (() => {
@@ -70,14 +81,26 @@ function cargarAvatarPadrao() {
 async function descargarFoto(url, limiteBytes = 8 * 1024 * 1024, timeoutMs = 20000) {
   if (typeof url !== 'string' || !url.startsWith('https://')) return null
   if (typeof globalThis.fetch !== 'function') return null
+  // ⏱️ Handle do timer do timeout — limpo assim que o download termina.
+  // ⚠️ BUG REAL (corrigido): o setTimeout do Promise.race NUNCA era cancelado
+  // quando o fetch resolvia/falhava primeiro. Ele seguia ARMADO (ref'd) por até
+  // 20s segurando o event loop do processo — o harness de testes ficava
+  // pendurado depois do "🏁 Fim dos testes" e cada /perfil com foto deixava um
+  // timer + closures vivos à toa. O .finally abaixo garante o clearTimeout nos
+  // DOIS caminhos (sucesso e erro), sem mudar nenhum comportamento visível.
+  let temporizadorTimeout = null
   try {
     const conTimeout = await Promise.race([
       globalThis.fetch(url, {
         redirect: 'follow',
         headers: { 'User-Agent': 'WhatsApp/2.24.6.77' }
       }),
-      new Promise((_, rej) => setTimeout(() => rej(new Error('timeout ao baixar a foto')), timeoutMs))
-    ])
+      new Promise((_, rej) => {
+        temporizadorTimeout = setTimeout(() => rej(new Error('timeout ao baixar a foto')), timeoutMs)
+      })
+    ]).finally(() => {
+      if (temporizadorTimeout) clearTimeout(temporizadorTimeout)
+    })
     if (!conTimeout.ok) return null
     const bytes = new Uint8Array(await conTimeout.arrayBuffer())
     if (bytes.length === 0 || bytes.length > limiteBytes) return null
@@ -213,6 +236,112 @@ async function obtenerRecado(sock, jidRecado) {
     return null
   }
 }
+
+// -------------------------------------------------------------------
+// 🎨 CARD TEMÁTICO (/temavip) — a foto do usuário sobre as cores escolhidas
+// -------------------------------------------------------------------
+// Quando a pessoa DO CARD (a cujo perfil você está olhando) tem `temaVip`,
+// o /perfil deixa de mandar a foto crua e manda ESTE card:
+//   fundo do tema → foto quadrada com moldura na cor DESTAQUE → faixa
+//   inferior (destaque) com o nome impresso na cor de TEXTO do tema.
+// Sem tema (mortal, VIP sem escolha, falha aqui ou no banco) o /perfil
+// segue 100% como hoje: foto crua + legenda de texto.
+// Jimp (JS puro) — mesma lib do boasvindas; envio continua com
+// jpegThumbnail pronta via ffmpeg (regra de ouro: nada de sharp in-process).
+// -------------------------------------------------------------------
+const CARD_LADO = 720                              // lado do card
+const CARD_FAIXA = 90                              // altura da faixa (destaque)
+const CARD_BORDA = 14                              // espessura da moldura (destaque)
+const CARD_FOTO = 500                              // lado da foto (cover, sem distorcer)
+const CARD_X_FOTO = (CARD_LADO - CARD_FOTO) / 2                    // 110
+const CARD_Y_FOTO = (CARD_LADO - CARD_FAIXA - CARD_FOTO) / 2       // 65
+
+// Cache da fonte bitmap (loadFont é async; carrega uma vez por processo) —
+// mesmo padrão do /ttp e do /fake-chat.
+const CACHE_FONTE_CARD = new Map()
+async function fonteDoCard() {
+  if (!CACHE_FONTE_CARD.has(SANS_32_WHITE)) {
+    CACHE_FONTE_CARD.set(SANS_32_WHITE, await loadFont(SANS_32_WHITE))
+  }
+  return CACHE_FONTE_CARD.get(SANS_32_WHITE)
+}
+
+// 🟧 Retângulo sólido no bitmap (helper idêntico ao do /fake-chat.js).
+function pintarReto(imagem, x, y, w, h, cor) {
+  const { width, height } = imagem.bitmap
+  const x0 = Math.max(0, x)
+  const y0 = Math.max(0, y)
+  const x1 = Math.min(width, x + w)
+  const y1 = Math.min(height, y + h)
+  for (let py = y0; py < y1; py += 1) {
+    for (let px = x0; px < x1; px += 1) imagem.setPixelColor(cor, px, py)
+  }
+}
+
+// 🖌️ Recolora na cor do tema os pixels BRANCOS de uma região (é o que a
+// fonte bitmap imprime). A faixa é preenchida com o DESTAQUE e nenhuma
+// paleta usa branco puro como destaque (regra do temas-vip.js) — então
+// apenas o texto é tocado aqui.
+function recolorirBrancos(imagem, x, y, w, h, cor) {
+  const { width, height } = imagem.bitmap
+  const x1 = Math.min(width, x + w)
+  const y1 = Math.min(height, y + h)
+  for (let py = Math.max(0, y); py < y1; py += 1) {
+    for (let px = Math.max(0, x); px < x1; px += 1) {
+      if (imagem.getPixelColor(px, py) === 0xffffffff) imagem.setPixelColor(cor, px, py)
+    }
+  }
+}
+
+// 🎨 comporCardPerfil(bufferFoto, paleta, nomeExibicao) → PNG Buffer.
+// `paleta` é o objeto { fundo, texto, destaque } do temas-vip.js.
+async function comporCardPerfil(bufferFoto, paleta, nomeExibicao) {
+  const corFundo = temasVip.hexParaJimp(paleta.fundo)
+  const corDestaque = temasVip.hexParaJimp(paleta.destaque)
+  const corTexto = temasVip.hexParaJimp(paleta.texto)
+
+  const imagem = new Jimp({ width: CARD_LADO, height: CARD_LADO, color: corFundo })
+
+  // 1) Moldura (retângulo DESTAQUE ao redor da área da foto)
+  pintarReto(
+    imagem,
+    CARD_X_FOTO - CARD_BORDA,
+    CARD_Y_FOTO - CARD_BORDA,
+    CARD_FOTO + CARD_BORDA * 2,
+    CARD_FOTO + CARD_BORDA * 2,
+    corDestaque
+  )
+
+  // 2) Foto (cover 500×500: preenche sem distorcer, corta o excedente)
+  const foto = await Jimp.read(bufferFoto)
+  foto.cover({ w: CARD_FOTO, h: CARD_FOTO })
+  imagem.composite(foto, CARD_X_FOTO, CARD_Y_FOTO)
+
+  // 3) Faixa inferior (DESTAQUE) com o nome do perfil impresso
+  const yFaixa = CARD_LADO - CARD_FAIXA
+  pintarReto(imagem, 0, yFaixa, CARD_LADO, CARD_FAIXA, corDestaque)
+
+  const font = await fonteDoCard()
+  const alturaLinha = font.common?.lineHeight || 32
+  let texto = String(nomeExibicao || '').trim() || 'Sem nome'
+  const larguraUtil = CARD_LADO - 60
+  if (measureText(font, texto) > larguraUtil) {
+    while (texto.length > 1 && measureText(font, texto + '...') > larguraUtil) {
+      texto = texto.slice(0, -1)
+    }
+    texto += '...'
+  }
+  imagem.print({
+    font,
+    x: Math.round((CARD_LADO - measureText(font, texto)) / 2),
+    y: yFaixa + Math.round((CARD_FAIXA - alturaLinha) / 2),
+    text: texto
+  })
+  // Nome impresso em branco → recolorido na cor de TEXTO do tema
+  recolorirBrancos(imagem, 0, yFaixa, CARD_LADO, CARD_FAIXA, corTexto)
+
+  return imagem.getBuffer(JimpMime.png)
+}
 module.exports = {
   nome: 'perfil',
   descricao: 'Mostra o perfil do autor (ou de um @mencionado): foto, nome, número, recado, %% e frase filosófica.',
@@ -221,6 +350,7 @@ module.exports = {
     // Caminhos temporários (limpeza no finally)
     let caminhoInput = null
     let caminhoThumbTemp = null
+    let caminhoCardTema = null
 
     try {
       const emGrupo = jid.endsWith('@g.us')
@@ -272,8 +402,17 @@ module.exports = {
         }
       }
 
-      // 6) Nome: pushName do autor; para mencionados o nome do banco; se não, o número
+      // 6) Nome: 🏷️ nome custom do VIP (/nomecustom) > pushName do autor >
+      //    nome do banco (mencionados) > número formatado. Só VIP ativo tem
+      //    nome custom, e a leitura nunca lança: falha de infra cai no padrão.
+      let nomeCustom = null
+      try {
+        nomeCustom = await vip.obterNomeCustom(participante?.phoneNumber || participante?.id || alvoJid)
+      } catch (errNome) {
+        console.error('[perfil] ⚠️ falha ao ler o nome custom do VIP:', errNome?.message || errNome)
+      }
       const nombreExhibicion =
+        nomeCustom ||
         (ehAutor && msg.pushName) ||
         estatisticas?.nome ||
         formatarNumero(digitosExibicion)
@@ -335,6 +474,42 @@ module.exports = {
         console.log(`[perfil] 🎭 usando avatar padrão (${bufferImagen.length} bytes) como foto de perfil`)
       }
       console.log('[perfil] 🖼️ foto pronta — montando card...')
+
+      // 10.5) 🎨 Tema VIP (/temavip): se a pessoa DO CARD escolheu um tema,
+      //       a foto vira um card com fundo/moldura/faixa nas cores dele.
+      //       A leitura NUNCA lança; qualquer falha → foto crua (sempre).
+      let paletaTema = null
+      try {
+        const temaDoCard = await vip.obterTemaVip(
+          participante?.phoneNumber || participante?.id || alvoJid
+        )
+        if (temaDoCard) paletaTema = temasVip.obterPaleta(temaDoCard)
+      } catch (errTema) {
+        console.error('[perfil] ⚠️ falha ao ler o tema VIP:', errTema?.message || errTema)
+      }
+
+      if (paletaTema) {
+        try {
+          const bufferCard = await comporCardPerfil(bufferImagen, paletaTema, nombreExhibicion)
+          caminhoCardTema = path.join(pastaTemp, `perfil-card_${idUnico}.png`)
+          fs.writeFileSync(caminhoCardTema, bufferCard)
+          // Thumbnail do NOVO card (a da foto não representa mais o envio);
+          // o caminho é o mesmo `thumb_${idUnico}.jpg` → sobrescreve com -y
+          // e o finally continua apagando um arquivo só.
+          const thumbCard = await gerarThumbnailJpeg(caminhoCardTema, pastaTemp, idUnico)
+          if (thumbCard) {
+            jpegThumbnail = thumbCard.base64
+            caminhoThumbTemp = thumbCard.caminho
+          } else {
+            console.error('[perfil] ⚠️ thumbnail do card falhou — mantendo a da foto')
+          }
+          bufferImagen = bufferCard
+          console.log(`[perfil] 🎨 card com tema VIP (${paletaTema.fundo} / ${paletaTema.destaque})`)
+        } catch (errCard) {
+          console.error('[perfil] ⚠️ falha ao compor o card temático (seguirá a foto crua):', errCard?.message || errCard)
+          paletaTema = null
+        }
+      }
 
       // 11) Porcentagens aleatórias (independentes por chamada)
       const bonito = porcentajeAleatorio()
@@ -413,9 +588,21 @@ module.exports = {
       }, { quoted: msg }).catch(() => {})
     } finally {
       // 🧹 Limpeza tolerante de temporários (nunca lança)
-      for (const caminho of [caminhoInput, caminhoThumbTemp]) {
+      for (const caminho of [caminhoInput, caminhoThumbTemp, caminhoCardTema]) {
         if (caminho && fs.existsSync(caminho)) await apagarComRetry(caminho)
       }
     }
   }
 }
+
+// 🧪 Exporta utilidades p/ os testes offline (mesmo padrão do /ttp, do
+// /fake-chat e do /s): o card temático é testado pixel a pixel sem sock.
+Object.assign(module.exports, {
+  comporCardPerfil,
+  CARD_LADO,
+  CARD_FAIXA,
+  CARD_BORDA,
+  CARD_FOTO,
+  CARD_X_FOTO,
+  CARD_Y_FOTO
+})

@@ -37,6 +37,12 @@ const path = require('path')
 const { Jimp, JimpMime } = require('jimp')
 const { createCanvas, loadImage } = require('canvas')
 const { caminhoFfmpeg, apagarComRetry } = require('../menu-utilitario/audio-extrator')
+// 🎨 Tema VIP (/temavip — campo `temaVip` no documento do VIP): paleta de
+// fundo/texto/destaque escolhida por QUEM INVOCOU o comando de par. Sem tema
+// (mortal, VIP sem escolha ou banco fora) os cards seguem com as cores fixas
+// de sempre — a leitura nunca lança (mesmo padrão do /s com a assinatura).
+const vip = require('../../vip')
+const temasVip = require('../../temas-vip')
 
 const BASE_SRA = 'https://api.some-random-api.com/canvas'
 const TIMEOUT_API_MS = 10000
@@ -158,14 +164,29 @@ async function enviarImagem(sock, jid, msg, buffer, caption, mentions) {
 // Duas fotos redondas lado a lado; no kiss, um coração no meio; no ship,
 // uma barra de compatibilidade com % SORTEADA localmente (a API que
 // gerava esse número saiu do ar). Devolve PNG Buffer.
-async function comporPar(fotoA, fotoB, modo, percentual) {
+//
+// 🎨 `paleta` (opcional): tema VIP do autor (/temavip) com as cores de
+// FUNDO, TEXTO e DESTAQUE do card. Sem paleta (ou tema padrão aplicado
+// sobre as cores atuais) o desenho usa as cores fixas de SEMPRE:
+//   fundo #0b141a · anel roxo (ship) / rosa (kiss) · texto branco ·
+//   trilho #1f2c34 · progresso verde/laranja conforme o %.
+// Com paleta, fundo/anéis/coração/barra/texto vêm todas do tema.
+async function comporPar(fotoA, fotoB, modo, percentual, paleta = null) {
   const imagemA = await loadImage(fotoA)
   const imagemB = await loadImage(fotoB)
   const LADO = 400
   const RAIO = 130
   const canvas = createCanvas(LADO * 2, LADO + 90)
   const ctx = canvas.getContext('2d')
-  ctx.fillStyle = '#0b141a'
+
+  // 🎨 Cores: tema VIP quando há; senão, as fixas de hoje (byte a byte).
+  const corFundo = paleta ? temasVip.hexParaCanvas(paleta.fundo) : '#0b141a'
+  const corTexto = paleta ? temasVip.hexParaCanvas(paleta.texto) : '#ffffff'
+  const corAnel = paleta
+    ? temasVip.hexParaCanvas(paleta.destaque)
+    : (modo === 'ship' ? '#7c3aed' : '#f43f5e')
+
+  ctx.fillStyle = corFundo
   ctx.fillRect(0, 0, canvas.width, canvas.height)
 
   const desenharFoto = (img, cx) => {
@@ -181,7 +202,7 @@ async function comporPar(fotoA, fotoB, modo, percentual) {
     ctx.restore()
     ctx.beginPath()
     ctx.arc(cx, 230, RAIO, 0, Math.PI * 2)
-    ctx.strokeStyle = modo === 'ship' ? '#7c3aed' : '#f43f5e'
+    ctx.strokeStyle = corAnel
     ctx.lineWidth = 6
     ctx.stroke()
   }
@@ -190,17 +211,30 @@ async function comporPar(fotoA, fotoB, modo, percentual) {
 
   if (modo === 'ship') {
     // 📊 Barra de compatibilidade
-    ctx.fillStyle = '#1f2c34'
-    ctx.fillRect(120, 400, 560, 34)
-    ctx.fillStyle = percentual >= 50 ? '#22c55e' : '#f59e0b'
-    ctx.fillRect(120, 400, Math.round(560 * (percentual / 100)), 34)
-    ctx.fillStyle = '#ffffff'
+    if (paleta) {
+      // Tema: trilho = destaque esmaecido (mistura com o fundo), preenchimento
+      // = destaque sólido — as duas cores do tema garantem contraste em QUALQUER
+      // combinação (a semântica verde/laranja só vale SEM tema, como hoje).
+      ctx.save()
+      ctx.globalAlpha = 0.3
+      ctx.fillStyle = corAnel
+      ctx.fillRect(120, 400, 560, 34)
+      ctx.restore()
+      ctx.fillStyle = corAnel
+      ctx.fillRect(120, 400, Math.round(560 * (percentual / 100)), 34)
+    } else {
+      ctx.fillStyle = '#1f2c34'
+      ctx.fillRect(120, 400, 560, 34)
+      ctx.fillStyle = percentual >= 50 ? '#22c55e' : '#f59e0b'
+      ctx.fillRect(120, 400, Math.round(560 * (percentual / 100)), 34)
+    }
+    ctx.fillStyle = corTexto
     ctx.font = 'bold 30px Sans'
     ctx.textAlign = 'center'
     ctx.fillText(`${percentual}%`, 400, 480)
   } else {
     // ❤️ Coração entre as duas fotos
-    ctx.fillStyle = '#f43f5e'
+    ctx.fillStyle = corAnel
     ctx.beginPath()
     const cx = 400
     const cy = 230
@@ -329,9 +363,20 @@ function comandoPar({ nome, aliases, descricao, modo, par }) {
             : resolverAlvo(msg, sender)
         const percentual = 1 + Math.floor(Math.random() * 100)
         console.log(`[efeitos] ${nome} → par local (${sender} + ${alvo}) ${percentual}%`)
+
+        // 🎨 Tema VIP (/temavip) de QUEM INVOCOU: paleta das cores do card.
+        // Nunca lança — banco fora ou sem tema → cores fixas de sempre.
+        let paleta = null
+        try {
+          const tema = await vip.obterTemaVip(sender)
+          if (tema) paleta = temasVip.obterPaleta(tema)
+        } catch (errTema) {
+          console.error('[efeitos] ⚠️ falha ao ler o tema VIP:', errTema?.message || errTema)
+        }
+
         const fotoA = await fotoDePerfil(sock, sender)
         const fotoB = alvo === sender ? fotoA : await fotoDePerfil(sock, alvo)
-        const buffer = await comporPar(fotoA.buffer, fotoB.buffer, modo, percentual)
+        const buffer = await comporPar(fotoA.buffer, fotoB.buffer, modo, percentual, paleta)
         const caption = modo === 'ship'
           ? `💘 *As almas foram medidas...* ${percentual}% de compatibilidade!`
           : '💋 *Um beijo atravessou o limbo...*'
@@ -394,3 +439,7 @@ module.exports._injetar = (overrides = {}) => {
   if (typeof overrides.fotoDePerfil === 'function') fotoDePerfil = overrides.fotoDePerfil
   if (typeof overrides.parceiroAleatorio === 'function') parceiroAleatorio = overrides.parceiroAleatorio
 }
+
+// 🧪 O card de par, p/ os testes (pixel a pixel, com e sem paleta do tema).
+// Propriedade do ARRAY (o loader só registra itens com nome/executar).
+module.exports.comporPar = comporPar

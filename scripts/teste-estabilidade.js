@@ -12,12 +12,39 @@
 // funções de NORMALIZAÇÃO (normalizeMessageContent, getContentType) são as
 // REAIS da lib; apenas o DOWNLOAD é simulado (stream de bytes de verdade,
 // JPEG/MP4 gerados pelo próprio ffmpeg do projeto).
+//
+// 🔌 100% OFFLINE: o WhatsApp é mockado e o MongoDB é DESLIGADO já no topo
+// (MONGODB_URI vazia). Sem isso o .env REAL da raiz era carregado pelo
+// config.js, o /perfil abria conexão com o Atlas e o processo ficava
+// pendurado para sempre depois do "🏁 Fim dos testes".
+// 🐕 No fim roda um watchdog unref(): qualquer handle ainda aberto é
+// denunciado com exit 1 — travamento nunca mais passa em silêncio.
 // Uso:  node scripts/teste-estabilidade.js
 // ============================================================
 
+// ------------------------------------------------------------
+// 🧪 AMBIENTE OFFLINE — precisa vir ANTES de qualquer require do projeto.
+//
+// ⚠️ CAUSA RAIZ (corrigida aqui) do processo que NÃO encerrava depois de
+//    "🏁 Fim dos testes": o config.js carrega o .env da raiz e o
+//    database.js acabava conectando DE VERDADE no MongoDB Atlas
+//    (MONGODB_URI real). O driver do Mongo mantém a topologia aberta
+//    (sockets TLS + monitor de heartbeat) e o event loop nunca drenava —
+//    o script terminava, mas o Node só morria com Ctrl+C.
+//
+//    O config.js só aplica o .env em chaves AUSENTES de process.env
+//    (`if (chave && !(chave in process.env))`), então definir as variáveis
+//    AQUI (mesmo vazias, antes de requerer nada do projeto) impede o
+//    override e mantém o harness realmente offline. Com isso o /ranking
+//    devolve "banco indisponível" — que é justamente o cenário que os
+//    testes querem cobrir; os avisos do [database] no console são
+//    ESPERADOS.
+// ------------------------------------------------------------
+process.env.MONGODB_URI = ''       // desliga o banco do ranking (sem rede)
+process.env.MONGO_URI_RPG = ''     // idem p/ o banco do RPG (se for puxado)
 process.env.DB_PATH = require('path').join(
   require('os').tmpdir(),
-  `hipnos-teste-${Date.now()}.db`
+  `hipnos-teste-${Date.now()}.db`  // resquício da era SQLite — mantido limpo
 )
 
 const path = require('path')
@@ -165,13 +192,21 @@ async function testarPerfil() {
     { id: '177060848861240@lid', phoneNumber: '5511977776666@s.whatsapp.net', admin: 'superadmin' }
   ]
 
+  // ✅ O /perfil SEMPRE responde com IMAGEM: a foto real quando existe ou o
+  // avatar padrão embutido (comandos/dados/avatar-perfil.jpg); o card vai na
+  // LEGENDA da imagem. Texto puro só aparece como fallback quando o envio da
+  // imagem falha (ver comandos/perfil.js, etapas 10 e 14).
+  // ⚠️ Por isso os cenários "sem foto" esperam 'imagem': eles esperavam
+  // 'texto' da época em que o comando caía para um card de texto (commit
+  // 7308318); a reescrita do /perfil (commit bc5db1f) passou a usar o avatar
+  // padrão justamente para NÃO depender de foto e o teste não acompanhou.
   const casos = [
     { nome: 'autor com foto e pushName', sock: criarSockMock({ participants: participantes }), msg: mensagemGrupo('/perfil', { pushName: 'Yuri' }), esperado: 'imagem' },
-    { nome: 'sem foto (404 do WhatsApp)', sock: criarSockMock({ erroFoto: true, participants: participantes }), msg: mensagemGrupo('/perfil', { pushName: 'Yuri' }), esperado: 'texto' },
+    { nome: 'sem foto (404 do WhatsApp) → avatar padrão', sock: criarSockMock({ erroFoto: true, participants: participantes }), msg: mensagemGrupo('/perfil', { pushName: 'Yuri' }), esperado: 'imagem' },
     { nome: 'mencionando outra pessoa', sock: criarSockMock({ participants: participantes }), msg: mensagemGrupo('/perfil', { mencao: ['5511988887777@s.whatsapp.net'] }), esperado: 'imagem' },
-    { nome: 'no privado (DM), sem foto pública', sock: criarSockMock({ erroFoto: true }), msg: mensagemGrupo('/perfil', { dm: true, pushName: 'Yuri' }), esperado: 'texto' },
-    { nome: 'groupMetadata falhando, sem foto', sock: criarSockMock({ erroMetadata: true, erroFoto: true }), msg: mensagemGrupo('/perfil', { pushName: 'Yuri' }), esperado: 'texto' },
-    { nome: 'profilePictureUrl falhando (erro genérico)', sock: criarSockMock({ erroFoto: 'generico', participants: participantes }), msg: mensagemGrupo('/perfil'), esperado: 'texto' },
+    { nome: 'no privado (DM), sem foto pública → avatar padrão', sock: criarSockMock({ erroFoto: true }), msg: mensagemGrupo('/perfil', { dm: true, pushName: 'Yuri' }), esperado: 'imagem' },
+    { nome: 'groupMetadata falhando, sem foto → avatar padrão', sock: criarSockMock({ erroMetadata: true, erroFoto: true }), msg: mensagemGrupo('/perfil', { pushName: 'Yuri' }), esperado: 'imagem' },
+    { nome: 'profilePictureUrl falhando (erro genérico) → avatar padrão', sock: criarSockMock({ erroFoto: 'generico', participants: participantes }), msg: mensagemGrupo('/perfil'), esperado: 'imagem' },
     { nome: 'TODO envio falhando (não pode vazar exceção)', sock: criarSockMock({ falharTodoEnvio: true, participants: participantes }), msg: mensagemGrupo('/perfil'), esperado: 'sem crash' }
   ]
 
@@ -181,9 +216,23 @@ async function testarPerfil() {
     }
     try {
       await perfil.executar(caso.sock, caso.msg.key.remoteJid, caso.msg)
-      const tipos = caso.sock.enviadas.map((e) => (e.conteudo.image ? 'imagem' : 'texto'))
-      const ok = caso.esperado === 'sem crash' ? true : tipos.includes(caso.esperado)
-      console.log(`${ok ? '✅' : '❌'} ${caso.nome} → respostas: [${tipos.join(', ') || 'nenhuma'}]`)
+      // Classifica as respostas: 'imagem' (card na legenda), 'texto'
+      // (fallback puro / aviso de erro) ou 'outro'.
+      const tipos = caso.sock.enviadas.map((e) => {
+        if (e.conteudo.image) return 'imagem'
+        if (e.conteudo.text) return 'texto'
+        return 'outro'
+      })
+      // Toda imagem enviada TEM que carregar o card do perfil na legenda —
+      // impede um "✅" falso de imagem vazia/sem legenda. O marcador é o campo
+      // do card (`🪪 *Nome:* ...`), que é estável em texto puro.
+      const cardOk = caso.sock.enviadas.every(
+        (e) =>
+          !e.conteudo.image ||
+          (typeof e.conteudo.caption === 'string' && e.conteudo.caption.includes('*Nome:*'))
+      )
+      const ok = (caso.esperado === 'sem crash' ? true : tipos.includes(caso.esperado)) && cardOk
+      console.log(`${ok ? '✅' : '❌'} ${caso.nome} → respostas: [${tipos.join(', ') || 'nenhuma'}]${cardOk ? '' : ' | ⚠️ imagem SEM o card na legenda'}`)
     } catch (err) {
       console.log(`❌ ${caso.nome} → CRASH: ${err.message}`)
     }
@@ -356,15 +405,59 @@ async function testarRevelar() {
 }
 
 // ------------------------------------------------------------
+// 🐕 Watchdog anti-travamento de handles
+// ------------------------------------------------------------
+// Converte "processo pendurado" (script termina e o Node nunca sai) em uma
+// falha VISÍVEL: se depois de terminar ainda existir handle aberto, ele é
+// listado e o processo sai com código 1 em vez de ficar preso até um Ctrl+C.
+// O timer é unref() — ele NÃO segura o event loop por si só, então em uma
+// execução saudável ele nunca dispara (o processo encerra normalmente).
+// ⚠️ No Node moderno os TIMERS ref'd NÃO aparecem em _getActiveHandles()
+// (foi um setTimeout sem clearTimeout que travava o processo de verdade), por
+// isso também imprimimos process.getActiveResourcesInfo().
+// ------------------------------------------------------------
+function armarWatchdogDeHandles(ms = 3000) {
+  const vigilante = setTimeout(() => {
+    const handles = typeof process._getActiveHandles === 'function' ? process._getActiveHandles() : []
+    console.error(`\n⚠️  O harness terminou, mas o processo continua vivo: ${handles.length} handle(s) pendurado(s).`)
+    for (const h of handles) {
+      let interno = null
+      try { interno = h && h._handle && h._handle.constructor && h._handle.constructor.name } catch (e) {}
+      const detalhes = [
+        h && h.constructor ? h.constructor.name : typeof h,
+        interno ? `handle=${interno}` : null,
+        h && h._handle && h._handle.fd !== undefined ? `fd=${h._handle.fd}` : null,
+        h === process.stdout ? 'é o MEU stdout' : null,
+        h === process.stderr ? 'é o MEU stderr' : null,
+        h === process.stdin ? 'é o MEU stdin' : null,
+        h && h.remoteAddress ? `remoto=${h.remoteAddress}` : null,
+        h && h.path ? `path=${h.path}` : null
+      ].filter(Boolean)
+      console.error(`   - ${detalhes.join(' | ')}`)
+    }
+    try {
+      console.error(`   recursos do loop: ${JSON.stringify(process.getActiveResourcesInfo())}`)
+    } catch (e) { /* API indisponível nesta versão */ }
+    console.error('   Causas prováveis: conexão aberta (Mongo/HTTP) ou timer sem clearTimeout/unref.')
+    process.exit(1)
+  }, ms)
+  if (typeof vigilante.unref === 'function') vigilante.unref()
+  return vigilante
+}
+
+// ------------------------------------------------------------
 // Execução
 // ------------------------------------------------------------
 ;(async () => {
   console.log('🧪 Harness de estabilidade do Hipnos-Bot')
   console.log(`   Baileys: ${require(path.join(raiz, 'node_modules', '@whiskeysockets', 'baileys', 'package.json')).version}`)
   console.log(`   Mídia de amostra: JPEG ${jpegAmostra.length} bytes | MP4 ${mp4Amostra ? mp4Amostra.length : 'N/D'} bytes`)
+  console.log(`   MongoDB: desligado (offline) — MONGODB_URI=${JSON.stringify(process.env.MONGODB_URI)}`)
   await testarPerfil()
   await testarRevelar()
   console.log('\n🏁 Fim dos testes')
+  // Se algo ficou aberto, o watchdog avisa e derruba o processo com erro.
+  armarWatchdogDeHandles()
 })().catch((err) => {
   console.error('💥 Falha no harness:', err)
   process.exitCode = 1

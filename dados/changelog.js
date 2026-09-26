@@ -18,6 +18,46 @@
 
 module.exports = [
   {
+    data: '2026-09-26',
+    titulo: '/temavip — esquema de cores nos seus cards (VIP)',
+    detalhes: 'Exclusivo para VIPs: /temavip lista mostra os temas (padrão, neon, pastel, escuro e dourado), /temavip neon aplica e /temavip remover volta às cores de sempre. O tema vale para o card do /perfil e para os cards do /ship e do /kiss (também: /temacustom).'
+  },
+  {
+    data: '2026-09-26',
+    titulo: '/assinatura — marque suas figurinhas com o seu nome',
+    detalhes: "Exclusivo para VIPs: /assinatura @joaovip define a marca d'água (até 15 caracteres, sem emoji) que aparece no canto das figurinhas criadas com /s e /figurinha. /assinatura mostra a atual e /assinatura remover desliga. Também: /assinaturavip."
+  },
+  {
+    data: '2026-09-26',
+    titulo: '/corvip — escolha o emoji que aparece antes do seu nome no /ranking',
+    detalhes: 'Exclusivo para VIPs: /corvip 🔥 define a cor (um emoji por vez), /corvip lista mostra as sugestões e a sua cor atual, e /corvip remover volta ao padrão. Também: /corcustom.'
+  },
+  {
+    data: '2026-09-26',
+    titulo: '/nomecustom — escolha o nome que aparece no /perfil e no /ranking',
+    detalhes: 'Exclusivo para VIPs: /nomecustom <nome> define o nome (de 2 a 20 caracteres, sem quebra de linha), /nomecustom sem nada mostra o atual e /nomecustom remover volta ao nome do WhatsApp. Também: /nomevip.'
+  },
+  {
+    data: '2026-09-26',
+    titulo: '/revelaraudio — revela áudios de visualização única',
+    detalhes: 'Responda a um áudio com 👁️ (visualização única) com /revelaraudio que o bot reenvia (também: /revelarpv, /audiorevelado). Exclusivo para VIPs, admins do grupo e donos do bot. Fotos/vídeos continuam no /revelar.'
+  },
+  {
+    data: '2026-09-26',
+    titulo: '/emojimix — misture dois emojis numa imagem só',
+    detalhes: 'Igual à cozinha do Gboard: /emojimix 😂😭 manda a mistura como imagem — /emojimix fig 😂😭 manda como figurinha (também: /mixemoji, /emoji-mix).'
+  },
+  {
+    data: '2026-09-26',
+    titulo: '/adivinha-emoji — adivinhe o filme pela sequência de emojis',
+    detalhes: 'O bot manda só os emojis e o grupo tenta acertar em texto livre (vale sem acento e com pequeno erro de escrita). Dica a cada ~20s, ~90s por rodada. Ex.: /adivinha-emoji (também: /emojiadivinha, /adivinheemoji).'
+  },
+  {
+    data: '2026-09-26',
+    titulo: '/eununca agora vira enquete no grupo',
+    detalhes: 'A frase sorteada vai como enquete nativa com as opções Eu nunca e Eu já (voto único). Ex.: /eununca (também: /nuncaeu).'
+  },
+  {
     data: '2026-09-25',
     titulo: '/verdadeouconsequencia — verdade ou desafio no grupo',
     detalhes: 'Sorteia uma verdade ou um desafio: /verdadeouconsequencia (o destino é sorteado), /verdadeouconsequencia verdade, /verdadeouconsequencia desafio, ou marque alguém com @ pra jogar no lugar dela. Também: /vouc, /verdadeconsequencia.'

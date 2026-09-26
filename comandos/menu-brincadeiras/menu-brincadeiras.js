@@ -115,6 +115,9 @@ module.exports = {
 🪢 /forca [categoria]
 ➥ Descubra a palavra letra por letra antes que o boneco se complete — chute a letra ou a palavra direto no chat (um jogo por grupo; ex: /forca animais).
 
+🧩 /adivinha-emoji
+➥ Adivinhe o filme, expressão ou frase pelos emojis — quem acertar primeiro vence (um jogo por grupo, ~90s por rodada; também: /emojiadivinha, /adivinheemoji).
+
 ❌ /jogar [1-9]
 ➥ Marca uma posição no tabuleiro da partida em curso (ex: /jogar 5, teclado numérico). Só joga quem é a vez.
 

@@ -25,7 +25,7 @@ const {
   normalizeMessageContent
 } = require('@whiskeysockets/baileys')
 const { Sticker, StickerTypes } = require('wa-sticker-formatter')
-const { rodarExecutavel } = require('./webp-animado')
+const { rodarExecutavel, comAssinatura, prepararAssinatura } = require('./webp-animado')
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
@@ -36,6 +36,10 @@ const path = require('path')
 const { verificar: verificarCooldown, marcar: marcarCooldown } = require('../../dados/cooldowns')
 const vip = require('../../vip')
 const { limparNumero } = require('../../config')
+
+// 🧪 Gancho de teste: troca o executor do ffmpeg (padrão _injetar* do projeto).
+// Sem injeção, roda o ffmpeg de verdade — o comportamento não muda.
+let rodar = rodarExecutavel
 
 // ⏱️ Cooldown: 3 minutos POR USUÁRIO (vale em grupo e no PV) — VIPs ficam
 // isentos (a checagem de VIP pula o cooldown inteiramente, nem consulta o Map).
@@ -76,22 +80,52 @@ function apagarComRetry(caminho, tentativas = 3) {
   })()
 }
 
+// ─── ✍️ ASSINATURA VIP: camada extra antes do webp (caminho de IMAGEM) ───
+// O caminho de imagem do /s NÃO usa ffmpeg (quem recorta e re-encoda é o
+// wa-sticker-formatter), então a marca d'água é gravada numa PASSADA SEPARADA:
+// entrada → PNG com o drawtext → o Sticker() recebe o PNG e faz o que sempre
+// fez. Como a marca só existe quando o autor é VIP com assinatura, sem ela
+// nada muda: nem arquivo, nem ffmpeg, nem buffer diferente.
+async function aplicarAssinaturaNaImagem(caminhoEntrada, caminhoSaida, assinatura) {
+  await rodar(
+    caminhoFfmpeg(),
+    [
+      '-y', '-nostdin',
+      '-i', caminhoEntrada,
+      '-vf', comAssinatura('', assinatura),
+      '-frames:v', '1',
+      caminhoSaida
+    ],
+    120000
+  );
+
+  if (!fs.existsSync(caminhoSaida) || fs.statSync(caminhoSaida).size === 0) {
+    throw new Error('o ffmpeg não conseguiu estampar a assinatura na imagem');
+  }
+  return fs.readFileSync(caminhoSaida);
+}
+
 // ─── 🎬 Vídeo → WEBP animado (quadrado 512×512, sem áudio) ───
 // @param {string} caminhoVideo
 // @param {string} caminhoWebp
 // @param {number} [limiteBytes] Limite de bytes que dispara uma 2ª passada
 //                                a menor qualidade/fps (por padrão 1 MB).
 // @returns {Promise<{bytes: number, segundaPassada: boolean}>}
-async function videoParaWebpAnimado(caminhoVideo, caminhoWebp, limiteBytes = LIMITE_BYTES_STICKER) {
+async function videoParaWebpAnimado(caminhoVideo, caminhoWebp, limiteBytes = LIMITE_BYTES_STICKER, assinatura = null) {
   const construirArgs = (fps, qualidade) => [
     '-y', '-nostdin',
     '-i', caminhoVideo,
     '-t', String(LIMITE_VIDEO_SEGUNDOS), // rede de segurança: máximo 10s
     '-vf',
-    'scale=512:512:force_original_aspect_ratio=increase,' +
-    'crop=min(iw\\,512):min(ih\\,512),' +        // recorta apenas quando sobra
-    'pad=512:512:(ow-iw)/2:(oh-ih)/2:black,' +  // preenche fontes minúsculas
-    `fps=${fps}`,
+    // ✍️ Assinatura no FIM da cadeia (depois do pad, as coordenadas w/h já
+    // são as do quadrado 512×512 final). Sem assinatura, filtro idêntico.
+    comAssinatura(
+      'scale=512:512:force_original_aspect_ratio=increase,' +
+      'crop=min(iw\\,512):min(ih\\,512),' +        // recorta apenas quando sobra
+      'pad=512:512:(ow-iw)/2:(oh-ih)/2:black,' +  // preenche fontes minúsculas
+      `fps=${fps}`,
+      assinatura
+    ),
     '-c:v', 'libwebp',
     '-lossless', '0',
     '-q:v', String(qualidade),
@@ -100,7 +134,7 @@ async function videoParaWebpAnimado(caminhoVideo, caminhoWebp, limiteBytes = LIM
     caminhoWebp
   ]
 
-  await rodarExecutavel(caminhoFfmpeg(), construirArgs(FPS_PRIMARIO, QUALITY_PRIMARIA), 120000)
+  await rodar(caminhoFfmpeg(), construirArgs(FPS_PRIMARIO, QUALITY_PRIMARIA), 120000)
 
   let bytes = fs.existsSync(caminhoWebp) ? fs.statSync(caminhoWebp).size : 0
   if (bytes === 0) throw new Error('ffmpeg não conseguiu produzir o webp animado do vídeo')
@@ -108,7 +142,7 @@ async function videoParaWebpAnimado(caminhoVideo, caminhoWebp, limiteBytes = LIM
   // 🔽 2ª passada se a figurinha fica pesada demais para WhatsApp
   let segundaPassada = false
   if (bytes > limiteBytes) {
-    await rodarExecutavel(caminhoFfmpeg(), construirArgs(FPS_COMPRIMIDO, QUALITY_COMPRIMIDA), 120000)
+    await rodar(caminhoFfmpeg(), construirArgs(FPS_COMPRIMIDO, QUALITY_COMPRIMIDA), 120000)
     bytes = fs.existsSync(caminhoWebp) ? fs.statSync(caminhoWebp).size : 0
     segundaPassada = true
     if (bytes === 0) throw new Error('ffmpeg não conseguiu produzir o webp comprimido')
@@ -149,6 +183,9 @@ module.exports = {
   async executar(sock, jid, msg, texto) {
     let caminhoVideo = null
     let caminhoWebp = null
+    // ✍️ Temporários da assinatura (só existem se o autor tiver uma)
+    let caminhoAssinatura = null
+    let caminhoImagemMarcada = null
 
     try {
       // ─── ⏳ COOLDOWN / 💠 VIP (por USUÁRIO, vale em grupo e no PV) ───
@@ -214,6 +251,22 @@ module.exports = {
 
       console.log(`[s] 📎 mídia capturada: ${video ? 'vídeo' : 'imagem'} ${veioNaLegenda ? 'direta (legenda com o comando)' : 'citada (reply)'}`)
 
+      // ─── ✍️ ASSINATURA DO AUTOR (VIP, /assinatura) ───
+      // Uma consulta tolerante ao documento de VIP, feita DEPOIS da captura (ou
+      // seja, só quando há mesmo figura para marcar). Sem VIP, sem assinatura ou
+      // com o banco fora, `assinatura` fica null: nenhum arquivo, nenhum drawtext,
+      // nenhuma chamada extra ao ffmpeg. Falha aqui NUNCA derruba a figurinha.
+      let assinatura = null
+      try {
+        assinatura = prepararAssinatura(await vip.obterAssinatura(autor), `s-${Date.now()}`)
+        if (assinatura) {
+          caminhoAssinatura = assinatura.caminhoTexto
+          console.log(`[s] ✍️ assinatura aplicada: "${assinatura.texto}"`)
+        }
+      } catch (errAssinatura) {
+        console.error('[s] ⚠️ falha ao ler a assinatura (figura sem marca d\'água):', errAssinatura?.message || errAssinatura)
+      }
+
       // Envia uma mensagem de carregamento
       await sock.sendMessage(jid, {
         text: '⏳ Tecendo sua figurinha nas sombras... Aguarde.'
@@ -247,7 +300,7 @@ module.exports = {
         caminhoWebp = path.join(os.tmpdir(), `${idUnico}.webp`)
         fs.writeFileSync(caminhoVideo, buffer)
 
-        const { bytes, segundaPassada } = await videoParaWebpAnimado(caminhoVideo, caminhoWebp)
+        const { bytes, segundaPassada } = await videoParaWebpAnimado(caminhoVideo, caminhoWebp, undefined, assinatura)
         console.log(`[s] 🎬 webp animado pronto: ${bytes} bytes${segundaPassada ? ' (2ª passada comprimida)' : ''}`)
 
         if (bytes > LIMITE_BYTES_STICKER) {
@@ -274,6 +327,22 @@ module.exports = {
         let buffer = Buffer.from([])
         for await (const parte of stream) {
           buffer = Buffer.concat([buffer, parte])
+        }
+
+        // ✍️ Camada extra da assinatura (só com VIP+assinatura): a imagem vai
+        // para um PNG com o drawtext e é esse PNG que entra no Sticker(). Sem
+        // assinatura, `buffer` segue intacto e o caminho é o de sempre.
+        if (assinatura) {
+          const idMarcado = `s-ass-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+          caminhoImagemMarcada = path.join(os.tmpdir(), `${idMarcado}.png`)
+          const origemMarcada = path.join(os.tmpdir(), `${idMarcado}.origem`)
+          fs.writeFileSync(origemMarcada, buffer)
+          try {
+            buffer = await aplicarAssinaturaNaImagem(origemMarcada, caminhoImagemMarcada, assinatura)
+            console.log(`[s] ✍️ marca d'água estampada na imagem (${buffer.length} bytes)`)
+          } finally {
+            await apagarComRetry(origemMarcada)
+          }
         }
 
         // Cria e formata a figurinha
@@ -304,7 +373,7 @@ module.exports = {
       }, { quoted: msg }).catch(() => {})
     } finally {
       // 🧹 Limpeza sempre (incluso em erros)
-      for (const caminho of [caminhoVideo, caminhoWebp]) {
+      for (const caminho of [caminhoVideo, caminhoWebp, caminhoAssinatura, caminhoImagemMarcada]) {
         if (caminho) await apagarComRetry(caminho)
       }
     }
@@ -316,5 +385,9 @@ Object.assign(module.exports, {
   videoParaWebpAnimado,
   inyectarMetadatosWebp,
   LIMITE_VIDEO_SEGUNDOS,
-  LIMITE_BYTES_STICKER
+  LIMITE_BYTES_STICKER,
+  aplicarAssinaturaNaImagem,
+  // 🧪 Ganchos dos testes offline da assinatura VIP (/assinatura): permite
+  // inspecionar os args do ffmpeg (o drawtext no -vf) sem gravar nada.
+  _injetarRodarExecutavel: (fn) => { rodar = fn || rodarExecutavel }
 })

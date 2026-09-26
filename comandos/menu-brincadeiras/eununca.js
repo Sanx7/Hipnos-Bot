@@ -15,6 +15,25 @@ const FRASES = require('../../dados/frases-eununca')
 // Última frase sorteada por grupo (chave: jid, valor: frase).
 const ultimaPorGrupo = new Map()
 
+// Opções fixas da enquete nativa do WhatsApp.
+const OPCOES_ENQUETE = ['Eu nunca', 'Eu já']
+
+function montarEnquete(frase) {
+  return {
+    poll: {
+      name: frase,
+      values: OPCOES_ENQUETE.slice(),
+      selectableCount: 1
+    }
+  }
+}
+
+function montarTextoFallback(frase) {
+  return {
+    text: '🍻 *EU NUNCA...*\n\n' + frase + '\n\nQuem já fez, conta pra gente! 😏'
+  }
+}
+
 function sortearFrase(lista, ultima) {
   if (!Array.isArray(lista) || lista.length === 0) return null
   if (lista.length === 1) return lista[0]
@@ -45,9 +64,12 @@ module.exports = {
         }, { quoted: msg })
       }
       ultimaPorGrupo.set(jid, frase)
-      await sock.sendMessage(jid, {
-        text: '🍻 *EU NUNCA...*\n\n' + frase + '\n\nQuem já fez, conta pra gente! 😏'
-      }, { quoted: msg })
+      try {
+        await sock.sendMessage(jid, montarEnquete(frase))
+      } catch (errPoll) {
+        console.error('Falha ao enviar enquete do eununca, usando texto:', errPoll && errPoll.message ? errPoll.message : errPoll)
+        await sock.sendMessage(jid, montarTextoFallback(frase), { quoted: msg })
+      }
     } catch (err) {
       console.error('Erro no comando eununca:', err)
       await sock.sendMessage(jid, {
@@ -58,6 +80,9 @@ module.exports = {
 
   FRASES,
   sortearFrase,
+  OPCOES_ENQUETE,
+  montarEnquete,
+  montarTextoFallback,
   _ultimaPorGrupo: ultimaPorGrupo,
   _limparMemoria: () => ultimaPorGrupo.clear()
 }
