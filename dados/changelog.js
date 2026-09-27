@@ -19,23 +19,53 @@
 module.exports = [
   {
     data: '2026-09-26',
-    titulo: '/temavip — esquema de cores nos seus cards (VIP)',
-    detalhes: 'Exclusivo para VIPs: /temavip lista mostra os temas (padrão, neon, pastel, escuro e dourado), /temavip neon aplica e /temavip remover volta às cores de sempre. O tema vale para o card do /perfil e para os cards do /ship e do /kiss (também: /temacustom).'
+    titulo: '/insulto — a zoeira leve do grupo',
+    detalhes: 'O espelho do /elogio: /insulto @pessoa devolve uma zoeira leve e engraçada, tirada de uma lista de frases no próprio bot (sem API e sem internet). Sem menção, a zoeira é pra quem chamou. Também: /zoeira e /provocar.'
   },
   {
     data: '2026-09-26',
-    titulo: '/assinatura — marque suas figurinhas com o seu nome',
-    detalhes: "Exclusivo para VIPs: /assinatura @joaovip define a marca d'água (até 15 caracteres, sem emoji) que aparece no canto das figurinhas criadas com /s e /figurinha. /assinatura mostra a atual e /assinatura remover desliga. Também: /assinaturavip."
+    titulo: '/enquete-admin — votação de decisão do grupo',
+    detalhes: 'Só administradores abrem: /enquete-admin pergunta | opção 1 | opção 2 e o grupo vota mandando o número da opção (2 a 6 opções, 2 minutos). Se o "sim" ganhar numa votação de ban (/enquete-admin-ban @pessoa | sim | não), o bot remove a pessoa e bota na blacklist sozinho — com as mesmas proteções do /ban (nunca bane dono do bot). Empate não decide nada. É diferente do /enquete, que é só de opinião e qualquer um abre.'
   },
   {
     data: '2026-09-26',
-    titulo: '/corvip — escolha o emoji que aparece antes do seu nome no /ranking',
-    detalhes: 'Exclusivo para VIPs: /corvip 🔥 define a cor (um emoji por vez), /corvip lista mostra as sugestões e a sua cor atual, e /corvip remover volta ao padrão. Também: /corcustom.'
+    titulo: '/enquete — enquete de opinião no grupo',
+    detalhes: 'Monte assim: /enquete pergunta | opção 1 | opção 2 (até 6 opções) e o grupo vota mandando o número da opção no chat. Qualquer membro pode abrir a enquete (diferente do /enquete-admin, que é administrativo); dura 2 minutos e pode ser encerrada antes com /encerrar-enquete. No fim sai a contagem de cada opção e a vencedora (ou o empate).'
   },
   {
     data: '2026-09-26',
-    titulo: '/nomecustom — escolha o nome que aparece no /perfil e no /ranking',
-    detalhes: 'Exclusivo para VIPs: /nomecustom <nome> define o nome (de 2 a 20 caracteres, sem quebra de linha), /nomecustom sem nada mostra o atual e /nomecustom remover volta ao nome do WhatsApp. Também: /nomevip.'
+    titulo: '/compatibilidade — quanto duas almas se entendem',
+    detalhes: 'Mencione uma pessoa para comparar com você (/compatibilidade @fulano) ou duas para comparar entre elas. O bot responde com a porcentagem de 0 a 100% e um veredito. O resultado é do par e trava por dia: hoje e sempre hoje, a mesma dupla tem a mesma porcentagem (também: /match).'
+  },
+  {
+    data: '2026-09-26',
+    titulo: '/desenharpalavra — Pictionary só com texto',
+    detalhes: 'Quem chama o comando vira o descritor e recebe a palavra sorteada só no privado; no grupo, ele descreve com palavras (sem escrever a resposta, ou a dica é invalidada) e os demais chutam no chat. Rodada de 3 minutos e um jogo por grupo. Também: /pictionary.'
+  },
+  {
+    data: '2026-09-26',
+    titulo: 'Efeitos novos: /contraste, /espelhar, /pixel, /rip e os apelidos /gray, /inverter, /cadeia',
+    detalhes: 'Mais quatro efeitos na foto de perfil, feitos pelo próprio bot (sem depender de API): /contraste aumenta o contraste, /espelhar espelha a imagem, /pixel pixeliza e /rip coloca a foto numa lápide com "RIP". Os comandos antigos também ganharam nomes alternativos: /greyscale aceita /gray, /invert aceita /inverter e /jail aceita /cadeia. O /pixelate continua funcionando, agora como apelido do /pixel.'
+  },
+  {
+    data: '2026-09-26',
+    titulo: 'Novos efeitos de foto: /slap, /spank, /batslap, /beautiful, /bobross, /ad e /apagar',
+    detalhes: 'Sete memes novos na foto de perfil — /slap @pessoa combina as duas fotos num tapa, e /spank, /batslap, /beautiful, /bobross, /ad e /apagar (também /deletar) aplicam o efeito em quem mandar ou em quem for mencionado. Também chegaram /passed, /pixelate e /heart, e o /clown agora é feito pelo próprio bot (não depende mais de API). Detalhes em /menu-efeitos.'
+  },
+  {
+    data: '2026-09-26',
+    titulo: '/tiktok-audio — só o som do TikTok, em MP3',
+    detalhes: 'Mande o mesmo link do /tiktok com /tiktok-audio e o bot responde com apenas o áudio do vídeo em MP3. Quando o vídeo não tem faixa publicada, o som é extraído do próprio vídeo. Também: /tiktok-mp3, /tt-audio e /tk-audio.'
+  },
+  {
+    data: '2026-09-26',
+    titulo: '/set-prefix — troque o prefixo dos comandos (de / para !)',
+    detalhes: 'Só para donos do bot: /set-prefix ! faz os comandos passarem a responder com "!" na hora, sem reiniciar o bot, e o prefixo fica salvo no banco (sobrevive a reinício e redeploy). /set-prefix sem argumento mostra o atual, /set-prefix reset volta para "/" e a "/" antiga continua funcionando para não quebrar o costume do grupo. Aceita qualquer símbolo (! . - + ? #) — letra e número são recusados porque roubariam as mensagens normais do grupo. Também: /prefixo.'
+  },
+  {
+    data: '2026-09-26',
+    titulo: 'Pacote de personalização VIP: /temavip, /assinatura, /corvip, /nomecustom e /badge',
+    detalhes: 'Exclusivo para VIPs, tudo no mesmo dia: /temavip escolhe as cores do card do /perfil (e dos cards de /ship e /kiss; também /temacustom), /assinatura marca as figurinhas criadas com /s e /figurinha (também /assinaturavip), /corvip define o emoji antes do seu nome no /ranking (também /corcustom), /nomecustom escolhe o nome exibido no /perfil e no /ranking (também /nomevip) — e o selo 💠 VIP no /perfil é AUTOMÁTICO: ele aparece sozinho ao lado do nome enquanto o VIP estiver ativo e some quando expira; /badge (também /selovip) mostra o status do selo na hora.'
   },
   {
     data: '2026-09-26',

@@ -59,7 +59,27 @@ const CATEGORIAS_NEKOS_BEST = {
   poke: 'poke',
   cuddle: 'cuddle',
   nom: 'nom',
+  // ⚠️ /lutar e /matar caem em 'punch' (ver AVISO_FALLBACK_LUTA).
+  fight: 'punch',
+  kill: 'punch',
 };
+
+// 🚧 FALLBACK TEMPORÁRIO de /lutar e /matar para a categoria `punch`
+// ────────────────────────────────────────────────────────────────────
+// Testado de verdade em 27/09/2026 (axios direto, sem o bot):
+//   · nekos.best/api/v2/fight → HTTP 404
+//   · nekos.best/api/v2/kill  → HTTP 404
+//   · a lista OFICIAL de endpoints (nekos.best/api/v2/endpoints, 63 rotas)
+//     NÃO possui `fight` nem `kill` — logo nenhuma das duas APIs tem GIF
+//     de luta/morte de verdade hoje.
+//   · waifu.pics não pôde ser testado deste ambiente (ENOTFOUND no domínio,
+//     inclusive nas categorias que já funcionavam), então a conclusão sobre
+//     ela NÃO é conclusiva.
+// Enquanto não aparecer uma API com GIF de luta/morte, os dois comandos
+// reaproveitam o visual do `punch` (mesma categoria do /soco). É um
+// fallback TEMPORÁRIO: trocar aqui é uma linha, quando houver a API certa.
+// Categorias vizinhas que existem no nekos.best caso queira variar depois:
+// `shoot`, `bonk`, `angry`.
 
 // ─── ⏱️ Utilitário: delay sem bloquear o event loop ───
 function delay(ms) {
@@ -323,21 +343,35 @@ function criarHandler(categoria, emoji, textoAcao) {
 }
 
 // ─── 📋 Lista de comandos de ação ───
+// 🔤 `aliases`: apenas NOMEALTERNATIVO → o handler é o MESMO item (sem
+//    código duplicado). O loader registra o apelido apontando pro mesmo
+//    comando, então /abracar e /abraço são a mesma coisa por dentro.
 const ACOES = [
-  { nome: 'tapa',      descricao: 'Dá um tapa em alguém — responda a mensagem da pessoa (reply) ou mencione com @usuario.',      categoria: 'slap',   emoji: '👋', textoAcao: 'tapa' },
-  { nome: 'beijo',     descricao: 'Dá um beijo em alguém — responda a mensagem da pessoa (reply) ou mencione com @usuario.',     categoria: 'kiss',   emoji: '💋', textoAcao: 'beijo' },
-  { nome: 'abraço',    descricao: 'Dá um abraço em alguém — responda a mensagem da pessoa (reply) ou mencione com @usuario.',    categoria: 'hug',    emoji: '🤗', textoAcao: 'abraço' },
-  { nome: 'soco',      descricao: 'Dá um soco em alguém — responda a mensagem da pessoa (reply) ou mencione com @usuario.',      categoria: 'punch',  emoji: '👊', textoAcao: 'soco' },
-  { nome: 'chute',     descricao: 'Dá um chute em alguém — responda a mensagem da pessoa (reply) ou mencione com @usuario.',     categoria: 'kick',   emoji: '🦶', textoAcao: 'chute' },
-  { nome: 'carinho',   descricao: 'Faz carinho em alguém — responda a mensagem da pessoa (reply) ou mencione com @usuario.',     categoria: 'pat',    emoji: '🫳', textoAcao: 'carinho' },
-  { nome: 'mordida',   descricao: 'Dá uma mordida em alguém — responda a mensagem da pessoa (reply) ou mencione com @usuario.',  categoria: 'bite',   emoji: '🦷', textoAcao: 'mordida' },
-  { nome: 'cutucada',  descricao: 'Cutuca alguém — responda a mensagem da pessoa (reply) ou mencione com @usuario.',             categoria: 'poke',   emoji: '👉', textoAcao: 'cutucada' },
-  { nome: 'aconchego', descricao: 'Aconchega alguém — responda a mensagem da pessoa (reply) ou mencione com @usuario.',          categoria: 'cuddle', emoji: '🫂', textoAcao: 'aconchego' },
-  { nome: 'comer',     descricao: 'Come alguém — responda a mensagem da pessoa (reply) ou mencione com @usuario.',               categoria: 'nom',    emoji: '😋', textoAcao: 'mordida gostosa' },
+  { nome: 'tapa',      aliases: ['tapao'],    descricao: 'Dá um tapa em alguém — responda a mensagem da pessoa (reply) ou mencione com @usuario.',      categoria: 'slap',   emoji: '👋', textoAcao: 'tapa' },
+  { nome: 'beijo',     aliases: ['beijar'],   descricao: 'Dá um beijo em alguém — responda a mensagem da pessoa (reply) ou mencione com @usuario.',     categoria: 'kiss',   emoji: '💋', textoAcao: 'beijo' },
+  { nome: 'abraço',    aliases: ['abracar'],  descricao: 'Dá um abraço em alguém — responda a mensagem da pessoa (reply) ou mencione com @usuario.',    categoria: 'hug',    emoji: '🤗', textoAcao: 'abraço' },
+  { nome: 'soco',      aliases: ['socar'],    descricao: 'Dá um soco em alguém — responda a mensagem da pessoa (reply) ou mencione com @usuario.',      categoria: 'punch',  emoji: '👊', textoAcao: 'soco' },
+  { nome: 'chute',     aliases: ['chutar'],   descricao: 'Dá um chute em alguém — responda a mensagem da pessoa (reply) ou mencione com @usuario.',     categoria: 'kick',   emoji: '🦶', textoAcao: 'chute' },
+  { nome: 'carinho',   aliases: ['fazer-carinho'], descricao: 'Faz carinho em alguém — responda a mensagem da pessoa (reply) ou mencione com @usuario.',     categoria: 'pat',    emoji: '🫳', textoAcao: 'carinho' },
+  { nome: 'mordida',   aliases: ['morder'],   descricao: 'Dá uma mordida em alguém — responda a mensagem da pessoa (reply) ou mencione com @usuario.',  categoria: 'bite',   emoji: '🦷', textoAcao: 'mordida' },
+  { nome: 'cutucada',  aliases: ['cutucar'],  descricao: 'Cutuca alguém — responda a mensagem da pessoa (reply) ou mencione com @usuario.',             categoria: 'poke',   emoji: '👉', textoAcao: 'cutucada' },
+  { nome: 'aconchego', aliases: ['abraçar'],  descricao: 'Aconchega alguém — responda a mensagem da pessoa (reply) ou mencione com @usuario.',          categoria: 'cuddle', emoji: '🫂', textoAcao: 'aconchego' },
+  { nome: 'comer',     aliases: ['jantar', 'devorar'], descricao: 'Come alguém — responda a mensagem da pessoa (reply) ou mencione com @usuario.',            categoria: 'nom',    emoji: '😋', textoAcao: 'mordida gostosa' },
+
+  // ⚔️ LUTA — usam a categoria `fight` (que cai em `punch`; ver
+  //    AVISO_FALLBACK_LUTA no topo do arquivo). Nenhum GIF de luta/morte
+  //    existe hoje nas APIs, então o visual é o mesmo do /soco.
+  { nome: 'lutar',     descricao: 'Luta contra alguém — responda a mensagem da pessoa (reply) ou mencione com @usuario.', categoria: 'fight', emoji: '🥊', textoAcao: 'luta' },
+  { nome: 'matar',     descricao: 'Mata alguém — responda a mensagem da pessoa (reply) ou mencione com @usuario.',     categoria: 'kill',  emoji: '💀', textoAcao: 'morte' },
 ];
 
+// 📤 Exporta no padrão do loader: um comando por item do array, com o
+// handler já pronto. `_categoria` e `_emoji` ficam só para os testes.
 module.exports = ACOES.map(acao => ({
   nome: acao.nome,
+  aliases: acao.aliases,
   descricao: acao.descricao,
-  executar: criarHandler(acao.categoria, acao.emoji, acao.textoAcao)
+  executar: criarHandler(acao.categoria, acao.emoji, acao.textoAcao),
+  _categoria: acao.categoria,
+  _emoji: acao.emoji,
 }));

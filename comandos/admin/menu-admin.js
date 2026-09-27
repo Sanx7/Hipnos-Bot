@@ -33,6 +33,9 @@ module.exports = {
 ☠️ /ban @membro
 ➥ Punição máxima: Expulsa e joga na blacklist.
 
+🏛️ /enquete-admin pergunta | opção 1 | opção 2
+➥ Votação de DECISÃO: só admin abre e o grupo vota pelo número da opção (2 a 6 opções, 2 min). /encerrar-enquete fecha antes. Para banir por votação: /enquete-admin-ban @membro | sim | não — se o "sim" ganhar, o bot bane sozinho (nunca um dono do bot; empate não decide).
+
 ⚠️ /adv @membro motivo
 ➥ Adverte um mortal com justificativa. Na 3ª advertência ativa ele é expulso e jogado na blacklist automaticamente. (Também: /advertir e /warn.)
 

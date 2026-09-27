@@ -8,7 +8,8 @@
 //   4. RECADO / status ("about") via sock.fetchStatus
 //   5-7. % Bonito/Gostoso/Safado (aleatórios, 0-100, a cada chamada)
 //   8. Frase filosófica aleatória
-//   + Extras: cargo no grupo e estatísticas do /ranking (em grupo)
+//   + Extras: cargo no grupo, estatísticas do /ranking (em grupo) e o
+//     selo 💠 VIP automático ao lado do nome de quem é VIP (/badge).
 //
 // ⚠️ CAUSA RAIZ DO CRASH CORRIGIDA AQUI (mesmo padrão do /revelar):
 //   O envio anterior usava `{ image: { url: fotoUrl } }` SEM jpegThumbnail.
@@ -219,6 +220,21 @@ function apagarComRetry(caminho, tentativas = 3) {
 // 🎲 Porcentaje aleatorio 0-100 (independiente en cada llamada)
 const porcentajeAleatorio = () => Math.floor(Math.random() * 101)
 
+// 💠 SELO VIP AUTÁTICO DO CARD (/badge é só a CONSULTA rápida desse selo):
+// ele não tem comando de ativação — a checagem é em TEMPO REAL (vip.isVip)
+// toda vez que o /perfil monta o card, então o selo some sozinho quando o
+// VIP expira (não existe lógica de expiração própria aqui).
+// ⚠️ Só entra na linha de TEXTO do card: a faixa da imagem tematica usa a
+// fonte bitmap SANS_32_WHITE, que não tem glifos de emoji.
+const SELO_VIP = '💠 VIP'
+
+// 🏅 linhaNomeComSelo(nome, ehVip) → a linha "🪪 *Nome:*" do card, com o
+// selo anexado ao nome quando a pessoa DO CARD é VIP ativo. Exportada
+// junto com SELO_VIP p/ os testes offline (mesmo padrão do comporCardPerfil).
+function linhaNomeComSelo(nome, ehVip) {
+  return `🪪 *Nome:* ${nome}${ehVip ? ` ${SELO_VIP}` : ''}`
+}
+
 // 🌟 Recado ("about") do contato via USync — NUNCA lança (erros → null)
 async function obtenerRecado(sock, jidRecado) {
   try {
@@ -417,6 +433,20 @@ module.exports = {
         estatisticas?.nome ||
         formatarNumero(digitosExibicion)
 
+      // 6.5) 💠 SELO VIP AUTOMÁTICO (/badge): checagem EM TEMPO REAL com o
+      //     MESMO sistema do /darvip e do /listavip (vip.isVip) sobre a
+      //     pessoa DO CARD. VIP ativo → o selo entra na linha do nome;
+      //     vencido/sem registro → nada muda (o próprio isVip apaga o
+      //     registro vencido, então o selo some junto com o VIP sem
+      //     nenhum extra de expiração). Falha de infra (Mongo fora) NUNCA
+      //     pune: o card segue sem selo, exatamente como antes.
+      let ehVipDoCard = false
+      try {
+        ehVipDoCard = await vip.isVip(participante?.phoneNumber || participante?.id || alvoJid)
+      } catch (errSelo) {
+        console.error('[perfil] ⚠️ falha ao checar o selo VIP (seguindo sem selo):', errSelo?.message || errSelo)
+      }
+
       // 🪵 LOG de diagnóstico (etapas) — padrão do /revelar
       console.log(`[perfil] 🔍 alvo=${alvoJid} | emGrupo=${emGrupo} | digits=${digitosExibicion}`)
       console.log('[perfil] 👤 nome/estatísticas OK, passando para o recado...')
@@ -531,7 +561,7 @@ module.exports = {
         '',
         '🌑 A identidade deste mortal, revelada pelas sombras:',
         '',
-        `🪪 *Nome:* ${nombreExhibicion}`,
+        linhaNomeComSelo(nombreExhibicion, ehVipDoCard),
         `🔢 *Número:* ${formatarNumero(digitosExibicion)}`,
         `💬 *Recado:* ${recadoTexto}`
       ]
@@ -599,6 +629,8 @@ module.exports = {
 // /fake-chat e do /s): o card temático é testado pixel a pixel sem sock.
 Object.assign(module.exports, {
   comporCardPerfil,
+  SELO_VIP,
+  linhaNomeComSelo,
   CARD_LADO,
   CARD_FAIXA,
   CARD_BORDA,

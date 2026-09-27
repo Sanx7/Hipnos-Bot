@@ -11,6 +11,9 @@ const {
   registrarJogo,
   removerJogo
 } = require('../../dados/jogos-ativos')
+// 🧠 Comparação tolerante — FONTE ÚNICA em dados/comparacao-palavras.js
+// (compartilhada com o /desenharpalavra; as funções abaixo só reexportam).
+const comparacao = require('../../dados/comparacao-palavras')
 
 const TIPO_JOGO = TIPOS.ADIVINHA_EMOJI
 
@@ -38,51 +41,23 @@ let agendar = (fn, ms) => setTimeout(fn, ms)
 let limparTimer = (id) => clearTimeout(id)
 
 function normalizar (texto) {
-  return String(texto ?? '')
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .toLowerCase()
-    .trim()
+  return comparacao.normalizar(texto)
 }
 
 function semArtigos (texto) {
-  const stop = new Set(['o', 'a', 'os', 'as', 'um', 'uma', 'de', 'do', 'da', 'dos', 'das', 'e', 'em', 'no', 'na', 'nos', 'nas', 'para', 'pra', 'por', 'com', 'que'])
-  return String(texto || '').split(/\s+/).filter((p) => p && !stop.has(p)).join(' ')
+  return comparacao.semArtigos(texto)
 }
 
 function soAlfaNum (texto) {
-  return String(texto || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '')
+  return comparacao.soAlfaNum(texto)
 }
 
 function levenshtein (a, b) {
-  const s = String(a || '')
-  const t = String(b || '')
-  if (s === t) return 0
-  if (!s.length) return t.length
-  if (!t.length) return s.length
-  let prev = new Array(t.length + 1)
-  let curr = new Array(t.length + 1)
-  for (let j = 0; j <= t.length; j++) prev[j] = j
-  for (let i = 1; i <= s.length; i++) {
-    curr[0] = i
-    for (let j = 1; j <= t.length; j++) {
-      const custo = s[i - 1] === t[j - 1] ? 0 : 1
-      curr[j] = Math.min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + custo)
-    }
-    const tmp = prev
-    prev = curr
-    curr = tmp
-  }
-  return prev[t.length]
+  return comparacao.levenshtein(a, b)
 }
 
 function similaridade (a, b) {
-  const s = String(a || '')
-  const t = String(b || '')
-  if (!s && !t) return 1
-  if (!s || !t) return 0
-  const dist = levenshtein(s, t)
-  return 1 - dist / Math.max(s.length, t.length)
+  return comparacao.similaridade(a, b)
 }
 
 function charadaValida (item) {
@@ -98,23 +73,9 @@ function sortearCharada () {
 }
 
 function acertou (palpite, resposta) {
-  const alvo = normalizar(resposta)
-  const chute = normalizar(palpite)
-  if (!alvo || !chute) return false
-  if (chute === alvo) return true
-  const alvoCru = soAlfaNum(alvo)
-  const chuteCru = soAlfaNum(chute)
-  if (!alvoCru || !chuteCru) return false
-  if (chuteCru === alvoCru) return true
-  const alvoMioloCru = soAlfaNum(semArtigos(alvo))
-  const chuteMioloCru = soAlfaNum(semArtigos(chute))
-  if (alvoMioloCru && alvoMioloCru === chuteMioloCru) return true
-  if (alvoMioloCru.length >= 4 && chuteMioloCru.length >= 4) {
-    if (alvoMioloCru.includes(chuteMioloCru) || chuteMioloCru.includes(alvoMioloCru)) return true
-  }
-  if (similaridade(alvoCru, chuteCru) >= LIMIAR_SIMILARIDADE) return true
-  if (alvoMioloCru && chuteMioloCru && similaridade(alvoMioloCru, chuteMioloCru) >= LIMIAR_SIMILARIDADE) return true
-  return false
+  // 🧠 Mesma tolerância do /desenharpalavra — a implementação mora no módulo
+  //    compartilhado dados/comparacao-palavras.js (fonte única).
+  return comparacao.acertou(palpite, resposta, LIMIAR_SIMILARIDADE)
 }
 
 function mascararResposta (resposta, reveladas) {

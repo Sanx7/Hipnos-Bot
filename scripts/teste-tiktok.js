@@ -13,7 +13,9 @@
 // ============================================
 
 const path = require('path')
-const tiktok = require(path.resolve(__dirname, '..', 'comandos', 'menu-utilitario', 'tiktok'))
+// ⚠️ O comando mora em comandos/menu-download/ (o /tiktok foi movido para lá
+// junto com o /play e o /pinterest); este require é o caminho ATUAL.
+const tiktok = require(path.resolve(__dirname, '..', 'comandos', 'menu-download', 'tiktok'))
 
 // ─── Sock mockado (sendMessage registrador) ───
 function criarSock () {
@@ -158,6 +160,87 @@ async function main () {
     const texto = ultimoTexto(enviadas)
     if (!texto || !/Não consegui baixar esse vídeo/i.test(texto)) throw new Error(`aviso final: ${texto}`)
     tiktok._injetarLib()
+  })
+
+  await testar('áudio: music.playUrl[] (v1/v2) tem prioridade sobre o vídeo', async () => {
+    const v1 = { status: 'success', result: { video: { playAddr: ['http://video.mp4'] }, music: { title: 'Faixa X', playUrl: ['http://faixa.mp3'] } } }
+    const r = tiktok.extrairUrlAudio(v1)
+    if (r.url !== 'http://faixa.mp3' || r.origem !== 'audio') throw new Error(`v1: ${JSON.stringify(r)}`)
+    if (r.musica !== 'Faixa X') throw new Error('perdeu o nome da faixa')
+  })
+
+  await testar('áudio: v3 devolve music como string', async () => {
+    const v3 = { status: 'success', result: { videoHD: 'http://v3.mp4', music: 'http://v3.mp3' } }
+    const r = tiktok.extrairUrlAudio(v3)
+    if (r.url !== 'http://v3.mp3' || r.origem !== 'audio') throw new Error(`v3: ${JSON.stringify(r)}`)
+  })
+
+  await testar('áudio: sem faixa cai no vídeo com origem "video"', async () => {
+    const semFaixa = { status: 'success', result: { video: { playAddr: ['http://so-video.mp4'] } } }
+    const r = tiktok.extrairUrlAudio(semFaixa)
+    if (r.url !== 'http://so-video.mp4' || r.origem !== 'video') throw new Error(`fallback: ${JSON.stringify(r)}`)
+    if (tiktok.extrairUrlAudio({ status: 'error' }) !== null) throw new Error('status error deveria dar null')
+  })
+
+  await testar('áudio: resolverAudio usa a mesma cascata v1→v2→v3', async () => {
+    const chamadas = []
+    tiktok._injetarLib(async (link, versao) => {
+      chamadas.push(versao)
+      if (versao === 'v1') return { status: 'error', message: 'sem faixa' }
+      if (versao === 'v2') return { status: 'success', result: { music: { playUrl: ['http://v2.mp3'] } } }
+      throw new Error('não deveria chegar no v3')
+    }, 15000)
+    const r = await tiktok.resolverAudio(LINK)
+    if (r.url !== 'http://v2.mp3' || chamadas.join() !== 'v1,v2') throw new Error(`chamadas: ${chamadas.join()}`)
+    tiktok._injetarLib()
+  })
+
+  await testar('tiktok-audio: exports, aliases e detecção de MP3', async () => {
+    const audio = require(path.resolve(__dirname, '..', 'comandos', 'menu-download', 'tiktok-audio'))
+    if (audio.nome !== 'tiktok-audio') throw new Error(`nome: ${audio.nome}`)
+    for (const a of ['tiktok-aud', 'tiktok-mp3', 'tt-audio', 'tk-audio']) {
+      if (!audio.aliases.includes(a)) throw new Error(`alias faltando: ${a}`)
+    }
+    if (typeof audio.executar !== 'function') throw new Error('executar não é função')
+    if (!audio.ehMp3('http://x.com/a.mp3?x=1')) throw new Error('deveria reconhecer .mp3 com query string')
+    if (audio.ehMp3('http://x.com/a.m4a')) throw new Error('m4a NÃO é mp3')
+    if (audio.ehMp3('http://x.com/video.mp4')) throw new Error('mp4 NÃO é mp3')
+  })
+
+  await testar('tiktok-audio: sem link → aviso de uso sem tocar na rede', async () => {
+    const audio = require(path.resolve(__dirname, '..', 'comandos', 'menu-download', 'tiktok-audio'))
+    tiktok._injetarLib(() => { throw new Error('NÃO deveria tocar na rede') }, 15000)
+    const { sock, enviadas } = criarSock()
+    await audio.executar(sock, 'G@g.us', criarMsg('/tiktok-audio'), '/tiktok-audio')
+    const texto = ultimoTexto(enviadas)
+    if (!texto || !/Como usar/i.test(texto)) throw new Error(`aviso inesperado: ${texto}`)
+    tiktok._injetarLib()
+  })
+
+  await testar('tiktok-audio: cascata toda falha → erro amigável final', async () => {
+    const audio = require(path.resolve(__dirname, '..', 'comandos', 'menu-download', 'tiktok-audio'))
+    tiktok._injetarLib(async () => ({ status: 'error', message: 'down' }), 15000)
+    const { sock, enviadas } = criarSock()
+    await audio.executar(sock, 'G@g.us', criarMsg('/tiktok-audio ' + LINK), '/tiktok-audio ' + LINK)
+    const texto = ultimoTexto(enviadas)
+    if (!texto || !/Não consegui baixar o áudio/i.test(texto)) throw new Error(`aviso final: ${texto}`)
+    tiktok._injetarLib()
+  })
+
+  await testar('tiktok-audio: limite de 50MB vira aviso amigável', async () => {
+    const audio = require(path.resolve(__dirname, '..', 'comandos', 'menu-download', 'tiktok-audio'))
+    const grande = new tiktok.ErroTiktok('vídeo de 120.0 MB excede o limite de 50 MB', 'grande')
+    const aviso = audio.avisoParaErro(grande)
+    if (!/120/.test(aviso) || !/50 MB/.test(aviso)) throw new Error(`aviso de tamanho: ${aviso}`)
+    if (audio.avisoParaErro({ semAudio: true }) !== audio.ERRO_SEM_AUDIO) throw new Error('mudo: aviso errado')
+    if (audio.avisoParaErro({ corrompido: true }) !== audio.ERRO_CORROMPIDO) throw new Error('corrompido: aviso errado')
+    if (audio.avisoParaErro({ timeout: true }) !== audio.ERRO_TIMEOUT) throw new Error('timeout: aviso errado')
+  })
+
+  await testar('menu-utilitario anuncia o /tiktok-audio', async () => {
+    const fs = require('fs')
+    const menu = fs.readFileSync(path.resolve(__dirname, '..', 'comandos', 'menu-utilitario', 'menu-utilitario.js'), 'utf8')
+    if (!/\/tiktok-audio/.test(menu)) throw new Error('o /menu-utilitario não cita o /tiktok-audio')
   })
 
   console.log(reprovadas === 0 ? '\n🎉 Todos os testes passaram.' : `\n💥 ${reprovadas} teste(s) reprovado(s).`)

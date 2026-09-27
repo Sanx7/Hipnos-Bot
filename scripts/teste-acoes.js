@@ -89,14 +89,36 @@ async function rodarCaso(nome, msg, validar) {
   console.log('🧪 Teste offline dos comandos de ação (sock falso, sem WhatsApp real)\n')
   let falhas = 0
 
-  // 0) Os 10 comandos exportados com nome/executar
+  // 0) Todos os comandos exportados com nome/executar
   const nomes = acoes.map(a => a.nome)
-  const esperados = ['tapa', 'beijo', 'abraço', 'soco', 'chute', 'carinho', 'mordida', 'cutucada', 'aconchego', 'comer']
+  const esperados = ['tapa', 'beijo', 'abraço', 'soco', 'chute', 'carinho', 'mordida', 'cutucada', 'aconchego', 'comer', 'lutar', 'matar']
   const faltando = esperados.filter(n => !nomes.includes(n))
   const moduloOk = faltando.length === 0 && acoes.every(a => a.nome && typeof a.executar === 'function')
   console.log('📋 Comandos exportados:', nomes.join(', '))
-  console.log('   10 comandos com nome/executar?', moduloOk ? '✅ SIM' : `❌ NÃO (faltando: ${faltando.join(', ') || '—'})`)
+  console.log('   ' + esperados.length + ' comandos com nome/executar?', moduloOk ? '✅ SIM' : `❌ NÃO (faltando: ${faltando.join(', ') || '—'})`)
   if (!moduloOk) falhas++
+
+  // 0.1) Aliases: nome alternativo aponta para o MESMO comando/handler
+  const aliasEsperados = { abracar: 'abraço', beijar: 'beijo', socar: 'soco', jantar: 'comer' }
+  let aliasesOk = true
+  for (const [alias, alvo] of Object.entries(aliasEsperados)) {
+    const dono = acoes.find(a => Array.isArray(a.aliases) && a.aliases.includes(alias))
+    if (!dono) { console.log(`   ❌ alias /${alias} não existe`); aliasesOk = false; continue }
+    if (dono.nome !== alvo) { console.log(`   ❌ /${alias} aponta para /${dono.nome} (deveria ser /${alvo})`); aliasesOk = false; continue }
+    // O handler tem de ser o MESMO objeto de função (sem código duplicado)
+    const original = acoes.find(a => a.nome === alvo)
+    if (dono.executar !== original.executar) { console.log(`   ❌ /${alias} tem handler DIFERENTE de /${alvo}`); aliasesOk = false }
+  }
+  console.log('   4 aliases reaproveitando o handler?', aliasesOk ? '✅ SIM' : '❌ NÃO')
+  if (!aliasesOk) falhas++
+
+  // 0.2) /lutar e /matar existem e caem no fallback de categoria (punch)
+  const lutar = acoes.find(a => a.nome === 'lutar')
+  const matar = acoes.find(a => a.nome === 'matar')
+  const soco = acoes.find(a => a.nome === 'soco')
+  const lutaOk = lutar && matar && soco && lutar._categoria === 'fight' && matar._categoria === 'kill' && soco._categoria === 'punch'
+  console.log('   /lutar (fight) e /matar (kill) registrados?', lutaOk ? '✅ SIM' : '❌ NÃO')
+  if (!lutaOk) falhas++
 
   // 1) Reply → alvo é o autor da mensagem citada
   const okReply = await rodarCaso('1) Alvo via REPLY (mensagem citada — prioridade 1)', msgComReply, (ms) => {

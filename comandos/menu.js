@@ -74,8 +74,8 @@ enfrentam o julgamento das sombras."
 🎭 EFEITOS DE IMAGEM
 
 🎭 /menu-efeitos (ou /efeitos)
-➥ Abre o grimório dos efeitos: beijos, ships, overlays e filtros para a foto de perfil.
-(também: /menu-efeito).
+➥ Abre o grimório dos efeitos: beijos, ships, memes, overlays e filtros para a foto de perfil.
+(também: /menuefeitos e /menu-efeito).
 
 ════════════════════
 

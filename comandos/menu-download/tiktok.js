@@ -24,6 +24,15 @@
 // + execFile com args em ARRAY — nunca sharp/libvips in-process). Ao receber
 // jpegThumbnail pronto, a Baileys PULA a geração interna de thumb (o único
 // caminho onde ela importaria sharp).
+//
+// ♪ ÁUDIO DIRETO (reaproveitado pelo /tiktok-audio): este módulo é a FONTE
+// ÚNICA do link do TikTok. Além de extrairUrlResultado (vídeo sem marca),
+// exporta extrairUrlAudio/resolverAudio, que buscam o ÁUDIO da faixa na
+// MESMA cascata: music.playUrl (v1 TiktokAPI / v2 SSSTik — string[]) ou
+// music como string (v3 MusicalDown). Quando a fonte não entrega faixa
+// (vídeo com som original, fonte muda no futuro), devolve a URL do VÍDEO
+// com origem:'video' — o /tiktok-audio extrai o áudio com o ffmpeg
+// (audio-extrator.js, o mesmo do /tomp3 e do /transcrever).
 // ============================================================
 
 const fs = require('fs')
@@ -145,8 +154,78 @@ async function resolverVideo (link) {
   throw new ErroTiktok('todas as fontes falharam', 'falha')
 }
 
+// ─── Extrai a URL de ÁUDIO do resultado; sem faixa, cai no vídeo ───
+// Devolve { url, origem: 'audio' | 'video', titulo, autor, musica }.
+// A ordem de preferência é SEMPRE a faixa (music) — quando ela existe, o
+// /tiktok-audio nem precisa do ffmpeg.
+function extrairUrlAudio (resultado) {
+  if (!resultado || resultado.status === 'error' || !resultado.result) return null
+  const r = resultado.result
+  const base = {
+    titulo: String(r.title || r.description || '').trim(),
+    autor: String(r.author?.nickname || r.author?.unique_id || r.author?.username || '').trim()
+  }
+
+  // v1 (TiktokAPI) / v2 (SSSTik): music.playUrl (string[])
+  const faixa = r.music?.playUrl
+  if (Array.isArray(faixa)) {
+    const url = faixa.find((u) => typeof u === 'string' && u.length > 0)
+    if (url) return { url, origem: 'audio', musica: String(r.music?.title || '').trim(), ...base }
+  } else if (typeof faixa === 'string' && faixa.length > 0) {
+    return { url: faixa, origem: 'audio', musica: String(r.music?.title || '').trim(), ...base }
+  }
+
+  // v3 (MusicalDown): music é a própria URL do áudio (string)
+  if (typeof r.music === 'string' && r.music.length > 0) {
+    return { url: r.music, origem: 'audio', musica: '', ...base }
+  }
+
+  // Sem faixa publicada → devolve o vídeo (o comando extrai o áudio depois)
+  const video = extrairUrlResultado(resultado)
+  if (video?.url) return { url: video.url, origem: 'video', musica: '', ...base }
+  return null
+}
+
+// ─── Tenta UMA versão da lib buscando o ÁUDIO (15s de teto) ───
+async function tentarVersaoAudio (link, versao) {
+  const resultado = await comTimeout(
+    chamarLib(link, versao),
+    timeoutTentativaMs,
+    `versão ${versao} excedeu ${Math.round(timeoutTentativaMs / 1000)}s`
+  )
+  if (!resultado || resultado.status === 'error') {
+    throw new ErroTiktok(`versão ${versao} recusou o vídeo (${resultado?.message || 'sem detalhes'})`, 'falha')
+  }
+  const audio = extrairUrlAudio(resultado)
+  if (!audio || !audio.url) {
+    throw new ErroTiktok(`versão ${versao} não trouxe áudio nem vídeo utilizável`, 'falha')
+  }
+  return audio
+}
+
+// ─── Cascata de ÁUDIO v1 → v2 → v3 (mesma ordem do vídeo) ───
+async function resolverAudio (link) {
+  const falhas = []
+  for (const versao of VERSOES_TENTATIVAS) {
+    try {
+      return await tentarVersaoAudio(link, versao)
+    } catch (err) {
+      falhas.push(`${versao}: ${err?.message || err}`)
+      console.error(`[tiktok-audio] tentativa ${versao} falhou:`, err?.message || err)
+    }
+  }
+  console.error('[tiktok-audio] todas as versões falharam:', falhas.join(' | '))
+  throw new ErroTiktok('todas as fontes falharam', 'falha')
+}
+
 // ─── Baixa o MP4 via axios (arraybuffer), com limite de 50MB ───
 async function baixarVideo (url) {
+  return baixarComLimite(url, 'vídeo')
+}
+
+// ─── Download genérico com teto de tamanho (usado p/ áudio e vídeo) ───
+// `rotulo` só muda o texto do erro ("vídeo de X MB" / "áudio de X MB").
+async function baixarComLimite (url, rotulo = 'mídia') {
   const resposta = await axios.get(url, {
     responseType: 'stream',
     timeout: TIMEOUT_DOWNLOAD_MS,
@@ -159,7 +238,7 @@ async function baixarVideo (url) {
     // ⛔ Limite pelo header ANTES de consumir o corpo
     const declarado = Number(resposta.headers?.['content-length'])
     if (Number.isFinite(declarado) && declarado > LIMITE_BYTES) {
-      throw new ErroTiktok(`vídeo de ${(declarado / 1048576).toFixed(1)} MB excede o limite de ${LIMITE_MB} MB`, 'grande')
+      throw new ErroTiktok(`${rotulo} de ${(declarado / 1048576).toFixed(1)} MB excede o limite de ${LIMITE_MB} MB`, 'grande')
     }
     const partes = []
     let total = 0
@@ -168,7 +247,7 @@ async function baixarVideo (url) {
         total += pedaco.length
         if (total > LIMITE_BYTES) {
           resposta.data.destroy()
-          rejeitar(new ErroTiktok(`vídeo de ${(total / 1048576).toFixed(1)} MB excede o limite de ${LIMITE_MB} MB`, 'grande'))
+          rejeitar(new ErroTiktok(`${rotulo} de ${(total / 1048576).toFixed(1)} MB excede o limite de ${LIMITE_MB} MB`, 'grande'))
           return
         }
         partes.push(pedaco)
@@ -177,7 +256,7 @@ async function baixarVideo (url) {
       resposta.data.on('error', rejeitar)
     })
     const buffer = Buffer.concat(partes)
-    if (buffer.length === 0) throw new ErroTiktok('o download do vídeo voltou vazio', 'falha')
+    if (buffer.length === 0) throw new ErroTiktok(`o download do ${rotulo} voltou vazio`, 'falha')
     return buffer
   } catch (err) {
     resposta.data.destroy()
@@ -289,6 +368,12 @@ module.exports = {
   resolverVideo,
   baixarVideo,
   extrairUrlResultado,
+  // ♪ Reaproveitados pelo /tiktok-audio (mesma lib, mesma cascata, mesmo teto)
+  extrairUrlAudio,
+  resolverAudio,
+  baixarComLimite,
+  ErroTiktok,
+  LIMITE_MB,
   _injetarLib: (fn, timeoutMs) => {
     chamarLib = fn || PADRAO_LIB
     timeoutTentativaMs = timeoutMs || PADRAO_TIMEOUT

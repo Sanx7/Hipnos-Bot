@@ -14,6 +14,14 @@ process.on('unhandledRejection', (motivo, promise) => {
   console.error('   ↳ Origem da promise:', promise)
 })
 
+// 🔕 RUÍDO DO LIBSIGNAL (dependência da Baileys): avisos como
+// "Closing session: SessionEntry {...}" são impressos com console.info
+// AVULSO e despejam o objeto da sessão Signal — com as chaves criptográficas
+// — no log a cada renegociação de sessão (rotina normal de envio, NÃO é
+// erro). Este módulo compacta esses avisos numa linha; detalhes e porquê
+// em func/log-signal.js. Instalado ANTES de qualquer require da Baileys.
+require('./func/log-signal')
+
 const {
   default: makeWASocket,
   initAuthCreds,
@@ -131,11 +139,17 @@ app.listen(port, () => {
 // dependência circular (comando -> bot -> comando) durante o carregamento.
 const { comandos } = require('./comandos-registry')
 
+// 🔤 PREFIXO DINÂMICO dos comandos (FONTE ÚNICA: prefixo.js — MongoDB).
+// O roteador NÃO tem mais "/" fixo: o que vale é o prefixo configurado
+// (troca em tempo real pelo /set-prefix, sem reiniciar o bot). Validação,
+// persistência e cache vivem todos em prefixo.js — aqui só consumimos.
+const prefixoComandos = require('./prefixo')
+
 // 🎮 Registro COMPARTILHADO de jogos por grupo (dados/jogos-ativos.js).
 // Duas responsabilidades que o bot.js usa aqui:
 //   1) 🔒 um jogo ativo por grupo (bloqueio cruzado /velha × /anagrama × /gartic);
-//   2) 💬 entregar as mensagens de TEXTO LIVRE (sem "/") aos jogos que
-//      dependem de ler palpites, como o /gartic.
+//   2) 💬 entregar as mensagens de TEXTO LIVRE (sem o prefixo de comando) aos
+//      jogos que dependem de ler palpites, como o /gartic.
 // Módulo sem dependências → pode ser exigido pelo bot.js sem ciclo.
 const { processarMensagemLivre } = require('./dados/jogos-ativos')
 
@@ -293,6 +307,14 @@ async function startBot() {
   sockAtual = sock
   // Permite que boas-vindas pendentes reenviem pelo socket recriado.
   registrarSocketBoasVindas(sock)
+
+  // 🔤 PREFIXO: aquece o cache com UMA leitura no MongoDB, para que a 1ª
+  //    mensagem recebida não espere o banco. FIRE-AND-FORGET de propósito:
+  //    o startBot não pode travar a conexão do Baileys esperando o Mongo.
+  prefixoComandos
+    .obterPrefixo()
+    .then((p) => console.log(`🔤 [prefixo] comandos respondendo a "${p}" (use /set-prefix para mudar)`))
+    .catch(() => { /* obterPrefixo nunca lança: este catch é só rede de segurança */ })
 
   // ⏰ LEMBRETES: registra o socket novo + roda a checagem inicial (catch-up
   // do que venceu com o bot offline) e arma o timer de 30s (idempotente).
@@ -674,12 +696,21 @@ async function startBot() {
       }
       // 💤━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-      // 🎮 TEXTO LIVRE PARA JOGOS — mensagens que NÃO são comandos podem ser
-      // palpites de uma partida ativa no grupo (ex.: /gartic). O registro
-      // compartilhado (dados/jogos-ativos.js) decide se há um ouvinte
-      // interessado; se a mensagem for consumida, paramos aqui. O fluxo
-      // normal de comandos abaixo nem é tocado.
-      if (!text.startsWith('/')) {
+      // 🎮 TEXTO LIVRE PARA JOGOS — mensagens que NÃO são comandos (isto é,
+      //      que não começam com o prefixo configurado) podem ser palpites de
+      //      uma partida ativa no grupo (ex.: /gartic). O registro
+      //      compartilhado (dados/jogos-ativos.js) decide se há um ouvinte
+      //      interessado; se a mensagem for consumida, paramos aqui. O fluxo
+      //      normal de comandos abaixo nem é tocado.
+      //
+      // 🔤 PREFIXO DINÂMICO (prefixo.js): o "/" NÃO é mais fixo aqui — o que
+      //      vale é o prefixo salvo no MongoDB (troca em tempo real pelo
+      //      /set-prefix). `null` = não é comando (cai no texto livre abaixo);
+      //      `''` = o prefixo sozinho, sem nome (ex.: "/" ou "!").
+      await prefixoComandos.obterPrefixo()
+      const nomeComando = prefixoComandos.resolverNomeComando(text)
+
+      if (nomeComando === null) {
         try {
           if (await processarMensagemLivre(sock, jid, msg, text)) return
         } catch (errPalpite) {
@@ -700,10 +731,9 @@ async function startBot() {
         return
       }
 
-      const nomeComando = text
-        .slice(1)
-        .split(' ')[0]
-        .toLowerCase()
+      // Prefixo sem nome de comando (ex.: "/" ou "!"): o bot ignora em
+      // silêncio — igual à barra fixa de antes.
+      if (!nomeComando) return
 
       const comando = comandos.get(nomeComando)
 

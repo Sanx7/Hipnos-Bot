@@ -32,7 +32,10 @@ const TIPOS = {
   GARTIC: 'gartic',
   QUIZ: 'quiz',
   FORCA: 'forca',
-  ADIVINHA_EMOJI: 'adivinha-emoji'
+  ADIVINHA_EMOJI: 'adivinha-emoji',
+  DESENHAR_PALAVRA: 'desenharpalavra',
+  ENQUETE: 'enquete',
+  ENQUETE_ADMIN: 'enquete-admin'
 }
 
 const ROTULOS = {
@@ -41,7 +44,10 @@ const ROTULOS = {
   gartic: 'gartic',
   quiz: 'quiz',
   forca: 'forca',
-  'adivinha-emoji': 'adivinha-emoji'
+  'adivinha-emoji': 'adivinha-emoji',
+  desenharpalavra: 'desenhar-palavra',
+  enquete: 'enquete',
+  'enquete-admin': 'enquete-admin'
 }
 
 // jid do grupo → { tipo, dados, desde }

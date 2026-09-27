@@ -2,7 +2,7 @@
 // 🧪 teste-elogio.js — Valida o /elogio (100% OFFLINE, sem rede)
 // ============================================
 // Verifica:
-//   - exports: nome, aliases, descrição e a lista de frases (30-40 itens);
+//   - exports: nome, aliases, descrição e a lista de frases (~135 itens);
 //   - formato exato da resposta: "✨ @{digitos}, {frase}.";
 //   - o texto e o mentions[] usam o MESMO JID (senão o @ não renderiza);
 //   - sem menção → o alvo é QUEM MANDOU (autor da mensagem);
@@ -96,10 +96,10 @@ async function main () {
     if (typeof elogio.executar !== 'function') throw new Error('sem executar()')
   })
 
-  await testar('lista de elogios: entre 30 e 40 frases, sem ponto final', async () => {
+  await testar('lista de elogios: 135 frases no total, sem ponto final', async () => {
     const lista = elogio.__frases
     if (!Array.isArray(lista)) throw new Error('__frases não é array')
-    if (lista.length < 30 || lista.length > 40) throw new Error(`lista com ${lista.length} frases (esperado 30-40)`)
+    if (lista.length < 130 || lista.length > 140) throw new Error(`lista com ${lista.length} frases (esperado ~135)`)
     const unicas = new Set(lista)
     if (unicas.size !== lista.length) throw new Error('há frases duplicadas')
     for (const frase of lista) {

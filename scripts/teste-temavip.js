@@ -84,7 +84,7 @@ vip.__definirColecaoTeste(colecaoFake)
 const comando = require('../comandos/menu-vip/temavip')
 const T = comando._test
 const perfil = require('../comandos/perfil')
-const efeitos = require('../comandos/menu-fig/efeitos-imagem')
+const efeitos = require('../comandos/menu-efeitos/efeitos-imagem')
 
 // ─── 👥 Cenário ───
 const JID_GRUPO = '120363000000000000@g.us'
@@ -193,14 +193,18 @@ async function main() {
     if (registro.get('temacustom') !== comando) throw new Error('/temacustom não aponta para o comando')
   })
 
-  await testar('menu-vip e changelog (no topo) anunciam o /temavip', async () => {
+  await testar('menu-vip e changelog anunciam o /temavip', async () => {
     const menu = fs.readFileSync(path.join(__dirname, '..', 'comandos', 'menu-vip', 'menu-vip.js'), 'utf8')
     if (!/\/temavip/.test(menu)) throw new Error('o /menu-vip não cita o /temavip')
     if (!/\/temacustom/.test(menu)) throw new Error('o /menu-vip não cita o alias /temacustom')
 
     const changelog = require('../dados/changelog')
-    if (!/\/temavip/.test(changelog[0].titulo)) {
-      throw new Error('a entrada do /temavip deveria estar no TOPO do changelog')
+    // A entrada precisa EXISTIR (mesma regra do /assinatura, do /corvip e do
+    // /nomecustom): o changelog é ordenado do mais novo pro mais antigo, e
+    // hoje quem lidera é o /set-prefix — um lançamento novo não pode ser
+    // impedido de subir só porque o /temavip foi o último a entrar.
+    if (!changelog.some((entrada) => /\/temavip/.test(entrada.titulo))) {
+      throw new Error('o changelog não tem entrada para o /temavip')
     }
   })
 
@@ -410,7 +414,7 @@ async function main() {
     if (!/comporCardPerfil/.test(fontePerfil)) throw new Error('o /perfil não compõe o card temático')
     if (!/temas-vip/.test(fontePerfil)) throw new Error('o /perfil não usa o catálogo de paletas')
 
-    const fonteEfeitos = fs.readFileSync(path.join(__dirname, '..', 'comandos', 'menu-fig', 'efeitos-imagem.js'), 'utf8')
+    const fonteEfeitos = fs.readFileSync(path.join(__dirname, '..', 'comandos', 'menu-efeitos', 'efeitos-imagem.js'), 'utf8')
     if (!/obterTemaVip/.test(fonteEfeitos)) throw new Error('os cards de par não leem o tema do autor')
     if (!/comporPar\(fotoA\.buffer, fotoB\.buffer, modo, percentual, paleta\)/.test(fonteEfeitos)) {
       throw new Error('a paleta não está sendo passada pro canvas do card')

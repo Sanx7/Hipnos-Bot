@@ -47,6 +47,9 @@ module.exports = {
 ✨ /elogio (@pessoa)
 ➥ Enche alguém de elogios absurdamente exagerados (sem menção, elogia você mesmo).
 
+😈 /insulto (@pessoa)
+➥ Dá uma zoeira leve e engraçada em alguém (também: /zoeira; sem menção, zoa você mesmo).
+
 🎭 /verdadeouconsequencia [verdade|desafio] (@pessoa)
 ➥ Sorteia uma verdade ou um desafio pro sorteado (sem categoria, o destino é aleatório; sem menção, cai em quem chamou). Também: /vouc, /verdadeconsequencia.
 
@@ -54,19 +57,19 @@ module.exports = {
 
 🎭 AÇÕES (INTERAÇÃO ANIMADA)
 
-👋 /tapa @usuario
+👋 /tapa @usuario (também: /tapao)
 ➥ Dá um tapa em alguém (GIF animado) — responda a mensagem da pessoa (reply) ou mencione com @usuario.
 
-💋 /beijo @usuario
+💋 /beijo @usuario (também: /beijar)
 ➥ Dá um beijo em alguém (GIF animado) — responda a mensagem da pessoa (reply) ou mencione com @usuario.
 
 🤗 /abraço @usuario
 ➥ Dá um abraço em alguém (GIF animado) — responda a mensagem da pessoa (reply) ou mencione com @usuario.
 
-👊 /soco @usuario
+👊 /soco @usuario (também: /socar)
 ➥ Dá um soco em alguém (GIF animado) — responda a mensagem da pessoa (reply) ou mencione com @usuario.
 
-🦶 /chute @usuario
+🦶 /chute @usuario (também: /chutar)
 ➥ Dá um chute em alguém (GIF animado) — responda a mensagem da pessoa (reply) ou mencione com @usuario.
 
 🫳 /carinho @usuario
@@ -81,8 +84,18 @@ module.exports = {
 🫂 /aconchego @usuario
 ➥ Aconchega alguém (GIF animado) — responda a mensagem da pessoa (reply) ou mencione com @usuario.
 
-😋 /comer @usuario
+😋 /comer @usuario (também: /jantar, /devorar)
 ➥ Come alguém (GIF animado) — responda a mensagem da pessoa (reply) ou mencione com @usuario.
+
+════════════════════
+
+⚔️ LUTA (o GIF é o mesmo do /soco — nenhuma API tem luta de verdade ainda)
+
+🥊 /lutar @usuario
+➥ Luta contra alguém (GIF animado) — responda a mensagem da pessoa (reply) ou mencione com @usuario.
+
+💀 /matar @usuario
+➥ Mata alguém (GIF animado) — responda a mensagem da pessoa (reply) ou mencione com @usuario.
 
 ════════════════════
 
@@ -114,6 +127,15 @@ module.exports = {
 
 🪢 /forca [categoria]
 ➥ Descubra a palavra letra por letra antes que o boneco se complete — chute a letra ou a palavra direto no chat (um jogo por grupo; ex: /forca animais).
+
+🖌️ /desenharpalavra [categoria]
+➥ Pictionary só com texto: quem chama vira o *descritor* e recebe a palavra no privado, enquanto os outros a adivinham no chat (também: /pictionary; um jogo por grupo, ~3 min).
+
+💞 /compatibilidade @fulano [@outro]
+➥ Calcula a compatibilidade entre duas pessoas, em % — com 1 menção compara com você, com 2 compara as duas. O veredito é do *par* e trava por dia (também: /match).
+
+📊 /enquete pergunta | opção 1 | opção 2
+➥ Enquete de opinião: qualquer membro abre, o grupo vota mandando o NÚMERO da opção (2 a 6 opções, 2 min). /encerrar-enquete fecha antes (só quem criou).
 
 🧩 /adivinha-emoji
 ➥ Adivinhe o filme, expressão ou frase pelos emojis — quem acertar primeiro vence (um jogo por grupo, ~90s por rodada; também: /emojiadivinha, /adivinheemoji).

@@ -1,9 +1,10 @@
 // ============================================
 // 💠 MENU-VIP — Pergaminho dos Privilegiados
 // ============================================
-// Lista SOMENTE os comandos do sistema de VIP (hoje: /darvip, /listavip,
-// /nomecustom, /corvip e /assinatura — os três últimos são os únicos que os
-// próprios VIPs usam; os outros dois são dos donos do bot),
+// Lista SOMENTE os comandos do sistema de VIP (hoje: /darvip e /listavip
+// são dos donos do bot; /nomecustom, /corvip, /assinatura, /temavip e a
+// consulta /badge são dos próprios VIPs — e o selo 💠 do /perfil é um
+// benefício AUTOMÁTICO, sem comando de ativação),
 // seguindo o mesmo estilo visual do /menu principal.
 // Os comandos em si são exclusivos dos DONOS do bot (OWNER_NUMBERS),
 // mas consultar este menu é livre — igual ao /menu geral.
@@ -39,6 +40,9 @@ module.exports = {
 ════════════════════
 
 💠 VANTAGENS DE SER VIP
+
+💠 Selo no /perfil (AUTOMÁTICO)
+⇥ Enquanto seu VIP estiver vigente, o selo 💠 VIP aparece sozinho ao lado do seu nome no /perfil — nada para ativar. Ele some sozinho quando o VIP expira. Confira o seu com /badge (também: /selovip).
 
 🏷️ /nomecustom <nome>
 ➥ Escolhe o nome que o bot exibe por você no /perfil e no /ranking.

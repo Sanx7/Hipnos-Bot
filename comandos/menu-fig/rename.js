@@ -1,6 +1,9 @@
 const { downloadContentFromMessage } = require('@whiskeysockets/baileys')
 const { Sticker, StickerTypes } = require('wa-sticker-formatter')
 const { webpEhAnimado } = require('./webp-animado')
+// 🔤 Prefixo dinâmico (fonte única: ../../prefixo.js) — tira o prefixo
+// configurado do texto dos argumentos, sem assumir "/" nem 1 caractere.
+const prefixoComandos = require('../../prefixo')
 
 // ============================================================
 // 🏷️ /renomear — renomeia figurinha (estática OU animada)
@@ -27,7 +30,9 @@ module.exports = {
         }, { quoted: msg })
       }
 
-      const argumentos = texto.slice(1).split(' ').slice(1).join(' ')
+      // 🔤 Tira o prefixo pela config central (antes o código cortava 1
+      //    caractere fixo, o que quebrava com qualquer prefixo novo).
+      const argumentos = prefixoComandos.removerPrefixo(texto).split(' ').slice(1).join(' ')
       let nomePacote = 'Hipnos Bot'
       let nomeAutor = 'Sombras do Limbo'
 

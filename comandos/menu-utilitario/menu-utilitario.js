@@ -42,6 +42,9 @@ module.exports = {
 🎵 /tiktok <link>
 ➥ Baixa e envia vídeos do TikTok sem marca d'água (também: /tt, /tk e /tiktokdl). Ex.: /tiktok https://vm.tiktok.com/XXXXXXX
 
+🎧 /tiktok-audio <link>
+➥ Baixa só o SOM do vídeo do TikTok em MP3 — mesmo link do /tiktok. Quando o vídeo não tem faixa publicada, o áudio é extraído do vídeo (também: /tiktok-mp3, /tt-audio e /tk-audio). Ex.: /tiktok-audio https://vm.tiktok.com/XXXXXXX
+
  📌 /pinterest <link>
  ➥ Baixa imagem ou vídeo de um pin sem marca d'água (também: /pin e /pindl). Ex.: /pinterest https://pin.it/XXXXX
 

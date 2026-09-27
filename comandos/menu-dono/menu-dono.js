@@ -9,6 +9,8 @@
 // - /redes aparece aqui por ser um comando ligado ao CRIADOR do bot, MAS
 //   o uso dele é LIVRE (qualquer pessoa pode chamar) — a entrada deixa
 //   isso explícito para não confundir.
+// - /set-prefix também aparece aqui porque é do DONO, mas é GLOBAL (vale
+//   para o bot inteiro, não para um grupo) — por isso o aviso na entrada.
 // Consultar este menu é livre — igual aos demais menus (só o USO dos
 // comandos, exceto /redes, é restrito aos donos).
 // ============================================
@@ -17,7 +19,7 @@ const { RODAPE_MENU } = require('../../config')
 
 module.exports = {
   nome: 'menu-dono',
-  descricao: 'Abre o pergaminho dos soberanos: /dono, /seradm, /soadm, /ia-interativa e /redes.',
+  descricao: 'Abre o pergaminho dos soberanos: /dono, /seradm, /soadm, /ia-interativa, /set-prefix e /redes.',
 
   async executar(sock, jid, msg) {
     try {
@@ -49,6 +51,11 @@ module.exports = {
 ➥ Sem argumento, mostra o estado atual.
 ➥ Ligada: Hipnos responde sozinho quando alguém menciona o bot ou responde a uma mensagem dele
    (máximo 1 resposta a cada 30s por pessoa, sem histórico de conversa).
+
+🔤 /set-prefix <símbolo>
+➥ Troca o prefixo de TODOS os comandos (ex.: de / para !) — só dono do bot, e vale na hora, sem reiniciar.
+➥ Sem argumento mostra o atual; /set-prefix reset volta para "/". A "/" antiga continua funcionando.
+➥ Salvo no banco: o prefixo sobrevive a reinício e redeploy.
 
 ════════════════════
 
