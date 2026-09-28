@@ -60,6 +60,9 @@ module.exports = {
  /welcome (1 ou 0)
  Ativa ou desativa a saudação de novos membros. Sem argumento mostra o status. (Também responde a /bemvindo.)
 
+🔞 /modoadulto (1 ou 0)
+➥ Liga/desliga o modo adulto do grupo. Sem argumento mostra o status. (Também: /modo-adulto.)
+
 🖼️ /setbannerbv
 ➥ Define o banner próprio deste grupo (envie ou responda a uma imagem). A foto do novo membro entra na moldura da arte. Sem imagem mostra as instruções.
 

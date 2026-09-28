@@ -112,6 +112,9 @@ enfrentam o julgamento das sombras."
 👑 /menu-admin
 ➥ Abre o arsenal de moderação: gestão de membros, blacklist e guardiões do limbo.
 
+🔞 /modoadulto (1 ou 0)
+➥ Liga/desliga o modo adulto do grupo (só admin). Com ele ligado, use /menu-adulto.
+
 ════════════════════
 
 👑 MENU DONO (SÓ DONO)
