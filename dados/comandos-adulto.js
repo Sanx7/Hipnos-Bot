@@ -55,7 +55,7 @@ gifs: [
 },
 {
 nome: 'blow2',
-aliases: ['boquete2'],
+aliases: ['blow2','bqt2','boquete2'],
 legenda: 'voce pagou um boquete gostoso em alguem',
 frase: '{autor} fez um boquete gostoso para {alvo}',
 gifs: [
