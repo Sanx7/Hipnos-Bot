@@ -1,9 +1,9 @@
 module.exports = [
 {
 nome: 'arrancarcalcinha',
-aliases: ['tirarcalcinha'],
+aliases: ['tirarcalcinha','arrancarcalcinha'],
 legenda: 'voce tirou a calcinha de alguem',
-frase: '{autor} tirou a calcinha de {alvo}',
+frase: '{autor} arrancou a calcinha da (o) {alvo}',
 gifs: [
 'assets/gifs/arrancarcalcinha/arrancarcalcinha.gif',
 ]
@@ -12,7 +12,7 @@ gifs: [
 nome: 'atirar1',
 aliases: ['tiro1'],
 legenda: 'voce atirou em alguem',
-frase: '{autor} deu um tiro em {alvo}',
+frase: '{autor} deu um tiro na (no) {alvo}',
 gifs: [
 'assets/gifs/atirar/atirar.mp4',
 ]
@@ -28,18 +28,18 @@ gifs: [
 },
 {
 nome: 'beijogostoso',
-aliases: ['bjgostoso'],
+aliases: ['bjgostoso','beijogostoso'],
 legenda: 'voce deu um beijo gostoso em alguem',
-frase: '{autor} deu um beijo gostoso em {alvo}',
+frase: '{autor} deu um beijo gostoso na (no) {alvo}',
 gifs: [
 'assets/gifs/beijogostoso/beijogostoso.mp4',
 ]
 },
 {
 nome: 'beijolesbico',
-aliases: ['bjlesbico'],
+aliases: ['bjlesbico','beijolesbico'],
 legenda: 'voce deu um beijo lesbico em alguem',
-frase: '{autor} deu um beijo lesbico em {alvo}',
+frase: '{autor} deu um beijo lesbico na (no) {alvo}',
 gifs: [
 'assets/gifs/beijolesbico/beijo-lesbico.mp4',
 ]
@@ -47,8 +47,8 @@ gifs: [
 {
 nome: 'blow1',
 aliases: ['blow','bqt','boquete'],
-legenda: 'voce mamou gososo alguem',
-frase: '{autor} chupou o p@u do (a) {alvo}',
+legenda: 'voce mamou gostoso alguem',
+frase: '{autor} chupou o p@u molhadinho do (a) {alvo}',
 gifs: [
 'assets/gifs/blow/blow1.mp4',
 ]
@@ -57,7 +57,7 @@ gifs: [
 nome: 'blow2',
 aliases: ['blow2','bqt2','boquete2'],
 legenda: 'voce pagou um boquete gostoso em alguem',
-frase: '{autor} fez um boquete gostoso para {alvo}',
+frase: '{autor} fez um boquete gostoso na (no) {alvo}',
 gifs: [
 'assets/gifs/blow/blow2.mp4',
 ]
@@ -66,7 +66,7 @@ gifs: [
 nome: 'caranopeito',
 aliases: ['crnopeito'],
 legenda: 'voce caiu de cara nos peitos de alguem',
-frase: '{autor} caiu de cara nos peitos da (o) {alvo}',
+frase: '{autor} caiu de cara nos peitos da (o) {alvo} e se sentiu no paraiso',
 gifs: [
 'assets/gifs/caranopeito/caranopeito.mp4',
 ]
@@ -84,7 +84,7 @@ gifs: [
 nome: 'chuparpeito1',
 aliases: ['chpeito1'],
 legenda: 'voce chupou o peito de alguem',
-frase: '{autor} chupou o peito de {alvo}',
+frase: '{autor} chupou o peito deliciosamente da (o) {alvo}',
 gifs: [
 'assets/gifs/chuparpeito/chuparpeito.gif',
 ]
@@ -93,7 +93,7 @@ gifs: [
 nome: 'chuparpeito2',
 aliases: ['chpeito2'],
 legenda: 'voce chupou o peito de alguem',
-frase: '{autor} chupou o peito gostosinho de {alvo}',
+frase: '{autor} chupou o peito gostosinho da (o) {alvo}',
 gifs: [
 'assets/gifs/chuparpeito/chuparpeito2.gif',
 ]
@@ -120,7 +120,7 @@ gifs: [
 nome: 'comer1',
 aliases: ['transar','fazersexo']    ,
 legenda: 'voce transou',
-frase: '{autor} transou com {alvo}',
+frase: '{autor} transou gostoso com {alvo}',
 gifs: [
 'assets/gifs/comer/comer.gif',
 ]
@@ -129,7 +129,7 @@ gifs: [
 nome: 'comer2',
 aliases: ['transar2', 'fazersexo2'],
 legenda: 'voce comeu alguem',
-frase: '{autor} comeu {alvo}',
+frase: '{autor} comeu deliciosamnete {alvo}',
 gifs: [
 'assets/gifs/comer/comer2.gif',
 ]
@@ -138,7 +138,7 @@ gifs: [
 nome: 'comer3',
 aliases: ['transar3', 'fazersexo3'],
 legenda: 'voce meteu em alguem',
-frase: '{autor} meteu em {alvo}',
+frase: '{autor} meteu em lentinho {alvo}',
 gifs: [
 'assets/gifs/comer/comer3.gif',
 ]
@@ -147,7 +147,7 @@ gifs: [
 nome: 'comer4',
 aliases: ['transar4', 'fazersexo4'],
 legenda: 'voce empurrou em alguem',
-frase: '{autor} empurrou em {alvo}',
+frase: '{autor} empurrou forte em {alvo}',
 gifs: [
 'assets/gifs/comer/comer4.gif',
 ]
@@ -156,7 +156,7 @@ gifs: [
 nome: 'comer5',
 aliases: ['transar5', 'fazersexo5'],
 legenda: 'voce fez sexo gostoso com alguem',
-frase: '{autor} fez sexo gostoso com {alvo}',
+frase: '{autor} fez sexo gostoso e selvagem com {alvo}',
 gifs: [
 'assets/gifs/comer/comer5.gif',
 ]
@@ -165,7 +165,7 @@ gifs: [
 nome: 'esfregar',
 aliases: ['seesfregar'],
 legenda: 'voce se esfregou',
-frase: '{autor} esfregou a xereca',
+frase: '{autor} esfregou a xereca molhadinha',
 gifs: [
 'assets/gifs/esfregar/seesfregar.gif',
 ]
@@ -174,7 +174,7 @@ gifs: [
 nome: 'lambida1',
 aliases: ['lamber1'],
 legenda: 'voce deu uma lambida',
-frase: '{autor} deu uma lambida na bct da (o) {alvo}',
+frase: '{autor} deu uma lambida gostosa na bct da (o) {alvo}',
 gifs: [
 'assets/gifs/lambida/lambida1.gif',
 ]
@@ -183,7 +183,7 @@ gifs: [
 nome: 'lambida2',
 aliases: ['lamber2'],
 legenda: 'voce deu uma lambida',
-frase: '{autor} deu uma lambida na xrc da (o) {alvo}',
+frase: '{autor} deu uma lambida suculenta na xrc da (o) {alvo}',
 gifs: [
 'assets/gifs/lambida/lambida2.gif',
 ]
@@ -192,7 +192,7 @@ gifs: [
 nome: 'lambidarosto1',
 aliases: ['lamberosto1'],
 legenda: 'voce lambeu o rosto de alguem',
-frase: '{autor} lambeu o rosto de {alvo}',
+frase: '{autor} lambeu o rosto da (o) {alvo} e encheu de baba',
 gifs: [
 'assets/gifs/lambidarosto/lambidanorosto.mp4',
 ]
@@ -201,7 +201,7 @@ gifs: [
 nome: 'lambidarosto2',
 aliases: ['lamberosto2'],
 legenda: 'voce lambeu o rosto de alguem',
-frase: '{autor} lambeu o rosto de {alvo}',
+frase: '{autor} lambeu o rosto da (o) {alvo} e ela (ele) gosotu',
 gifs: [
 'assets/gifs/lambidarosto/lambidanorosto2.mp4',
 ]
@@ -210,7 +210,7 @@ gifs: [
 nome: 'mamar',
 aliases: [],
 legenda: 'voce mamou',
-frase: '{autor} mamou no peito da (o) {alvo}',
+frase: '{autor} mamou no peito da (o) {alvo} enquanto ela (ele) gemia de prazer',
 gifs: [
 'assets/gifs/mamar/mamar.mp4',
 ]
@@ -237,7 +237,7 @@ gifs: [
 nome: 'morder',
 aliases: ['mordida'],
 legenda: 'voce deu uma mordida',
-frase: '{autor} deu uma mordida em {alvo}',
+frase: '{autor} deu uma mordida na (no) {alvo}',
 gifs: [
 'assets/gifs/morder/morder.mp4',
 ]
@@ -246,7 +246,7 @@ gifs: [
 nome: 'mostrapeito',
 aliases: [],
 legenda: 'voce mostrou o peito',
-frase: '{autor} mostrou o peito para {alvo}',
+frase: '{autor} mostrou o peitinho para {alvo}',
 gifs: [
 'assets/gifs/mostrarpeito/mostrarpeito.mp4',
 ]
@@ -264,7 +264,7 @@ gifs: [
 nome: 'rebolar1',
 aliases: ['rebolar','rebola'],
 legenda:'voce rebolou',
-frase: '{autor} rebolou para {alvo}',
+frase: '{autor} rebolou para gostoso {alvo}',
 gifs: [
 'assets/gifs/rebolar/rebolar.gif',
 ]
@@ -273,7 +273,7 @@ gifs: [
 nome: 'rebolar2',
 aliases: ['rebola2'],
 legenda: 'voce rebolou',
-frase: '{autor} rebolou para {alvo}',
+frase: '{autor} rebolou para lentinho {alvo}',
 gifs: [
 'assets/gifs/rebolar/rebolar2.mp4',
 ]
@@ -291,7 +291,7 @@ gifs: [
 nome: 'sentada1',
 aliases: ['sentarnacara1'],
 legenda: 'sentou na cara do seu parceiro (a) e começou a se esfregar nele(a)',
-frase: '{autor} sentou na cara de {alvo}',
+frase: '{autor} sentou na cara da (o) {alvo} e ele sentiu um leve cheiro de peixe',
 gifs: [
 'assets/gifs/sentada/sentada.gif',
 ]
@@ -300,7 +300,7 @@ gifs: [
 nome: 'sentada2',
 aliases: ['sentarnacara2'],
 legenda: 'voce sentou na cara do seu parceiro (a) e começou a se esfregar nele(a)',
-frase: '{autor} sentou na cara de {alvo}',
+frase: '{autor} sentou na cara da (o) {alvo}',
 gifs: [
 'assets/gifs/sentada/sentada1.gif',
 ]
@@ -309,7 +309,7 @@ gifs: [
 nome: 'sentada3',
 aliases: ['sentarnacara3'],
 legenda: 'voce sentou na cara do seu parceiro (a) e começou a se esfregar nele(a)',
-frase: '{autor} sentou na cara de {alvo}',
+frase: '{autor} sentou na cara de {alvo} e sufocou ele(a) com a xereca',
 gifs: [
 'assets/gifs/sentada/sentada2.mp4',
 ]
@@ -318,7 +318,7 @@ gifs: [
 nome: 'sentar1',
 aliases: ['quicar'],
 legenda: 'voce se sentou no colo do seu parceiro (a) e começou a quicar nele(a)',
-frase: '{autor} se sentou no colo de {alvo} e começou a quicar nele(a)',
+frase: '{autor} se sentou no colo de {alvo} e começou a quicar deliciosamente nele(a)',
 gifs: [
 'assets/gifs/sentar/sentar.gif',
 ]
@@ -327,7 +327,7 @@ gifs: [
 nome: 'sentar2',
 aliases: ['quicar2'],
 legenda: 'voce se sentou no colo do seu parceiro (a) e começou a quicar nele(a)',
-frase: '{autor} se sentou no colo de {alvo} e começou a quicar nele(a)',
+frase: '{autor} se sentou no colo de {alvo} e começou a quicar gostosinho nele(a)',
 gifs: [
 'assets/gifs/sentar/sentar2.gif',
 ]
@@ -336,7 +336,7 @@ gifs: [
 nome: 'soco',
 aliases: ['murro'],
 legenda: 'voce deu um soco​👊',
-frase: '{autor} deu um soco​👊 na cara de {alvo}',
+frase: '{autor} deu um soco​👊 na cara da (o) {alvo}',
 gifs: [
 'assets/gifs/soco/soco.mp4',
 ]
@@ -345,7 +345,7 @@ gifs: [
 nome: 'tapa',
 aliases: ['bater'],
 legenda: 'voce deu tapa🖐️​',
-frase: '{autor} deu um tapa🖐️​ na cara de {alvo}',
+frase: '{autor} deu um tapa🖐️​ na cara da (o) {alvo}',
 gifs: [
 'assets/gifs/tapa/tapa.mp4',
 ]
@@ -353,8 +353,8 @@ gifs: [
 {
 nome: 'tapabunda1',
 aliases: ['baternabunda1'],
-legenda: 'voce deu um tapa na🖐️​ bunda do seu parceiro (a), ela se contorce de prazer',
-frase: '{autor} deu um tapa🖐️​ na bunda de {alvo} e ele(a) se contorceu de prazer😈​',
+legenda: 'voce deu um tapa na🖐️​ bunda de alguem',
+frase: '{autor} deu um tapa🖐️​ na bunda da (o) {alvo} e ele(a) se contorceu de prazer e gemeu alto😈​',
 gifs: [
 'assets/gifs/tapabunda/tapanabunda.mp4',
 ]
@@ -362,8 +362,8 @@ gifs: [
 {
 nome: 'tapabunda2',
 aliases: ['baternabunda2'],
-legenda: 'Voce da um tapa na🖐️​ bunda do seu parceiro (a), ela se contorce de prazer',
-frase: '{autor} deu um tapa🖐️​ na bunda de {alvo} e ele(a) se contorceu de prazer😈​',
+legenda: 'Voce da um tapa na🖐️​ bunda de alguem',
+frase: '{autor} deu um tapa🖐️​ na bunda da (o) {alvo} e ele(a) se contorceu de prazer e pediu mais😈​',
 gifs: [
 'assets/gifs/tapabunda/tapanabunda2.mp4',
 ]
@@ -372,7 +372,7 @@ gifs: [
 nome: 'tesourar',
 aliases: ['tesoura','sexolesbico'],
 legenda: 'Voce e sua parceira se aproximam e fazem um sexo lésbico, se esfregando e se lambendo.',
-frase: '{autor} e {alvo} fizeram um sexo lésbico😈​',
+frase: '{autor} e {alvo} fizeram um sexo lésbico roçando fortemente uma na outra😈​',
 gifs: [
 'assets/gifs/tesourar/tesourar.gif',
 ]

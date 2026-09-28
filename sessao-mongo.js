@@ -31,6 +31,14 @@
 //         bytes num campo dedicado (__rawBuffer__) e, na leitura, devolver
 //         um Binary — que o conversor da própria mongo-baileys transforma
 //         de volta no Buffer EXATO, byte a byte.
+//       ⚠️ O serialize() do libsignal devolve Uint8Array (NÃO Buffer!) e o
+//         driver BSON pode entregar Binary (binData). Buffer.isBuffer() NÃO
+//         detecta nenhum dos dois — por isso o wrapper também trata Binary
+//         e Uint8Array/views binárias: sem isso o $set cru chega ao servidor
+//         como binData e derruba com "Modifiers operate on fields but we
+//         found type binData instead" em loop (a lib engole o erro e tenta
+//         de novo a cada evento). A correção converte tudo para Buffer
+//         canônico antes de guardar em __rawBuffer__.
 //
 //    c) PRIMITIVO como valor (lib/Signal/lid-mapping.js:69-75):
 //         keys.set({ 'lid-mapping': { [telefone]: lidUser,
@@ -60,10 +68,10 @@
 //    silêncio (startBot().catch já imprime "Falha ao iniciar/reconectar").
 // ============================================================
 
-const { MongoClient } = require('mongodb')
+const { Binary, MongoClient } = require('mongodb')
 
 // Campos dedicados (cada tipo de valor cru tem o seu):
-const CHAVE_BUFFER_CRU = '__rawBuffer__' // valores Buffer (session/sender-key/identity-key)
+const CHAVE_BUFFER_CRU = '__rawBuffer__' // valores binários (session/sender-key/identity-key: Buffer, Binary, Uint8Array)
 const CHAVE_VALOR_CRU = '__rawValue__'   // valores primitivos (lid-mapping: strings) e arrays
 
 // 🪵 LOG TEMPORÁRIO de diagnóstico: imprime o TIPO de cada valor antes de
@@ -74,9 +82,24 @@ const LOG_ESCRITAS = false
 // Descrição compacta do tipo do valor, para o log de diagnóstico
 function descreverTipo(valor) {
   if (Buffer.isBuffer(valor)) return `Buffer(${valor.length} bytes)`
+  if (valor instanceof Binary) return `Binary(${valor.length()} bytes)`
+  if (ArrayBuffer.isView(valor)) return `${valor.constructor?.name || 'TypedArray'}(${valor.byteLength} bytes)`
   if (valor === null) return 'null'
   if (Array.isArray(valor)) return `array(${valor.length})`
   return typeof valor
+}
+
+// Todo valor binário cru vira Buffer canônico antes de ir ao $set.
+// Cobre os 3 formatos que a Baileys/driver entregam:
+// Buffer (sender-key), Binary/binData (driver BSON) e Uint8Array ou outra
+// view tipada (session.serialize() do libsignal). Retorna null se não for binário.
+function paraBufferCru(valor) {
+  if (Buffer.isBuffer(valor)) return valor
+  if (valor instanceof Binary) return Buffer.from(valor.buffer)
+  // Uint8Array e demais views (DataView etc.) — inclui subclasses do driver.
+  // Array.isArray e string ficam de fora: têm tratamento próprio abaixo.
+  if (ArrayBuffer.isView(valor)) return Buffer.from(valor.buffer, valor.byteOffset, valor.byteLength)
+  return null
 }
 
 /**
@@ -97,13 +120,19 @@ function vestirColecaoAuth(colecao) {
         console.log(`[sessao-mongo] ✍️ ${descreverTipo(set)} → ${chave}`)
       }
 
-      if (Buffer.isBuffer(set)) {
-        // (3b) VALOR CRU — Buffer: session/sender-key/identity-key. Os bytes
-        // vão num campo dedicado; a leitura devolve Binary e a lib converte
-        // de volta para el Buffer exato. (NÃO MEXER: já validado byte a byte)
+      const bufferCru = paraBufferCru(set)
+      if (bufferCru) {
+        // (3b) VALOR CRU — binário: session/sender-key/identity-key. Pode
+        // chegar como Buffer, Binary (binData do driver) ou Uint8Array
+        // (session.serialize() do libsignal — NÃO passa em Buffer.isBuffer!).
+        // Sem este envelope o driver envia `$set: <binData>` e o servidor
+        // rejeita com "Modifiers operate on fields but we found type
+        // binData instead". Os bytes vão no campo dedicado __rawBuffer__;
+        // na leitura devolvemos o Binary e a lib converte de volta para o
+        // Buffer exato. (NÃO MEXER: já validado byte a byte)
         return colecao.updateOne(
           filtro,
-          { $set: { [CHAVE_BUFFER_CRU]: set } },
+          { $set: { [CHAVE_BUFFER_CRU]: bufferCru } },
           opcoes
         )
       }
