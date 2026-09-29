@@ -321,7 +321,7 @@ async function main() {
 
     // 2) O menu não pode inventar comando de efeito que não existe.
     //    Aliases legítimos (dos próprios comandos e dos submenus) valem.
-    const submenus = new Set(['menuefeitos', 'menu-efeito', 'efeitos', 'menu-fig', 'fulano', 'pessoa'])
+    const submenus = new Set(['menuefeitos', 'menu-efeito', 'efeitos', 'menu-fig', 'fulano', 'pessoa', 'esquilo', 'gigante', 'robo', 'demonio', 'rapido', 'lento', 'reverso', 'estourar'])
     const nomesReais = new Set(efeitos.filter((c) => c.nome).map((c) => c.nome))
     for (const c of efeitos) {
       if (c.nome && Array.isArray(c.aliases)) for (const a of c.aliases) nomesReais.add(a)

@@ -102,6 +102,10 @@ database.buscarRanking = async () => rankingFake
 
 const comando = require('../comandos/menu-vip/corvip')
 const ranking = require('../comandos/ranking')
+// 🏛️ O /ranking virou pergaminho em imagem; estes testes conferem o TEXTO
+// (emoji da cor antes do nome), então forçam o caminho de fallback. O
+// pergaminho em si tem teste próprio: scripts/teste-ranking.js.
+ranking._injetarCapa(async () => { throw new Error('teste de texto: sem pergaminho') })
 const T = comando._test
 
 // ─── 👥 Cenário ───

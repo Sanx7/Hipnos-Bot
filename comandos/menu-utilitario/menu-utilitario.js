@@ -118,6 +118,9 @@ module.exports = {
 🤖 /gpt <pergunta>
 ➥ Pergunte à mente do Limbo — respostas diretas e precisas (também: /chatgpt, /ia e /ask). Ex.: /gpt O que é a teoria da relatividade?
 
+🗞️ /jornal
+➥ Resume as conversas do dia do grupo como capa de jornal (também: /resumododia e /manchetes). Ex.: /jornal
+
 🔮 /gemini <pergunta>
 ➥ Consulte o oráculo do Limbo (também: /googleia e /bard). Ex.: /gemini Crie um poema sobre o sono
 

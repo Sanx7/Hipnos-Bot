@@ -49,6 +49,11 @@ const { registrarMensagem } = require('./database')
 // extendedTextMessage.text). Módulo separado p/ poder ser testado sem subir o bot.
 const { extrairTextoComando } = require('./dados/texto-comando')
 
+// 🗞️ CAPTURA DIÁRIA (/jornal): registra texto de grupos p/ o resumo do dia.
+// Memória (Map por jid) + espelho Mongo com TTL (sobrevive ao restart).
+// Nunca lança: qualquer falha é logada e o fluxo segue.
+const capturaDiaria = require('./dados/captura-diaria')
+
 // ⚙️ Configurações globais do bot
 // - OWNER_NUMBERS: lista de donos SEMPRE pode usar os comandos (mesmo no modo restrito)
 // - AVISAR_BLOQUEIO: true = avisa não-admin | false = ignora silenciosamente
@@ -563,6 +568,15 @@ async function startBot() {
       // documento-com-legenda) SEM alterar msg.message: os monitores de grupo
       // (antiDocument etc.) precisam ver a estrutura ORIGINAL.
       const text = extrairTextoComando(msg)
+
+      // 🗞️ CAPTURA DIÁRIA (/jornal): toda mensagem de grupo entra no
+      // acumulado do dia (só texto livre; comandos/mídia são filtrados lá
+      // dentro). Roda antes de tudo e nunca bloqueia o fluxo.
+      try {
+        if (String(jid || '').endsWith('@g.us')) capturaDiaria.capturarMensagem(msg, jid)
+      } catch (errJornal) {
+        console.error('[jornal] falha na captura (fluxo segue normal):', errJornal?.message || errJornal)
+      }
 
       const muteCmd = comandos.get("mute")
       const mutedUsers = muteCmd?.mutedUsers

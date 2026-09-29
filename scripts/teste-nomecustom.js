@@ -103,6 +103,10 @@ database.buscarEstatisticasUsuario = async () => ({ total: 0, posicao: null, tot
 const comando = require('../comandos/menu-vip/nomecustom')
 const perfil = require('../comandos/perfil')
 const ranking = require('../comandos/ranking')
+// 🏛️ O /ranking virou pergaminho em imagem; estes testes conferem o TEXTO
+// (nome custom no lugar do nome do banco), então forçam o fallback. O
+// pergaminho em si tem teste próprio: scripts/teste-ranking.js.
+ranking._injetarCapa(async () => { throw new Error('teste de texto: sem pergaminho') })
 const T = comando._test
 
 // ─── 👥 Cenário ───

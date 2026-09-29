@@ -18,6 +18,21 @@
 
 module.exports = [
   {
+    data: '2026-09-30',
+    titulo: '/ranking agora é um pergaminho grego ilustrado',
+    detalhes: 'O /ranking virou imagem: pergaminho envelhecido, frisco grego dourado, rolos de ouro no topo e na base e o seu nome pintado com a cor do seu /corvip. Se a imagem falhar, a lista em texto continua sendo enviada.'
+  },
+  {
+    data: '2026-09-30',
+    titulo: '/jornal — o resumo do dia do grupo em capa de jornal',
+    detalhes: 'Use /jornal no grupo para resumir as conversas do dia com a IA numa capa de jornal (também: /resumododia e /manchetes).'
+  },
+  {
+    data: '2026-09-29',
+    titulo: 'Modificador de voz: /esquilo, /gigante, /robo, /demonio, /rapido, /lento, /reverso e /estourar',
+    detalhes: 'Responda a uma nota de voz ou áudio com um dos 8 efeitos e receba o áudio distorcido de volta (nota de voz continua nota de voz). Limite de 20MB ou 3 minutos por áudio.'
+  },
+  {
     data: '2026-09-26',
     titulo: '/insulto — a zoeira leve do grupo',
     detalhes: 'O espelho do /elogio: /insulto @pessoa devolve uma zoeira leve e engraçada, tirada de uma lista de frases no próprio bot (sem API e sem internet). Sem menção, a zoeira é pra quem chamou. Também: /zoeira e /provocar.'

@@ -144,6 +144,36 @@ module.exports = {
 
 ════════════════════
 
+🔉 MODIFICADOR DE VOZ
+
+Responda a uma nota de voz ou audio com o efeito:
+
+🐿️ /esquilo
+➥ Voz aguda e rápida (responda a um áudio).
+
+🦣 /gigante
+➥ Voz grave e lenta (responda a um áudio).
+
+🤖 /robo
+➥ Voz robótica metálica (responda a um áudio).
+
+😈 /demonio
+➥ Voz grave com eco sombrio (responda a um áudio).
+
+⏩ /rapido
+➥ Acelera sem mudar o tom (responda a um áudio).
+
+⏪ /lento
+➥ Desacelera sem mudar o tom (responda a um áudio).
+
+🔁 /reverso
+➥ Toca o áudio de trás para frente (responda a um áudio).
+
+📢 /estourar
+➥ Áudio estourado, caixa de som no talo (responda a um áudio).
+
+════════════════════
+
 🚧 INDISPONÍVEIS (dependiam da Some Random API)
 
 🚧 /bolsonaro
