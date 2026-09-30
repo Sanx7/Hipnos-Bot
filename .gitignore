@@ -9,3 +9,6 @@ mensagens.db-shm
 .env
 # Log gerado pelo script de teste do /play
 teste-play.log
+# Backup do migrador do /ranking (LID → número real): nome com data e
+# documentos do banco de produção — nunca versionar.
+backup-*.json

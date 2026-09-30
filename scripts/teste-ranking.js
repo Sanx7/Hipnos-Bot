@@ -20,7 +20,11 @@ const { SANS_16_WHITE, SANS_32_WHITE } = require('jimp/fonts')
 // banco precisa acontecer antes do require.
 const database = require('../database')
 let rankingFake = []
-database.buscarRanking = async () => rankingFake
+// 🪪 Guardamos o limite pedido: o comando tem que buscar MAIS linhas que as 10
+// exibidas, porque o agrupamento por número (a mesma pessoa com LID + telefone
+// no banco) só sai certo se os DOIS documentos entrarem antes do corte.
+let limitePedido = 0
+database.buscarRanking = async (_grupo, limite) => { limitePedido = limite; return rankingFake }
 
 // 💠 VIPs FAKE: nenhuma consulta ao Mongo, só o mapa que cada teste montar.
 const vip = require('../vip')
@@ -352,6 +356,68 @@ async function main () {
     const mapa = await resolverNumeros([], [LID_CRUDO])
     exigir(mapa.get(LID_CRUDO) === NUM_REAL, 'o mapeamento da sessao nao resolveu: ' + JSON.stringify([...mapa]))
     lid.__definirConsultaSessaoTeste(null)
+  })
+
+  // ═══════════════════════════════════════════════════════════════════
+  // 🪪👥 A MESMA PESSOA EM DOIS DOCUMENTOS (LID + telefone) — o bug que
+  // a migração (scripts/migrar-ranking-lid.js) conserta no banco e que o
+  // comando precisa tolerar enquanto o banco ainda não foi migrado: sem
+  // agrupar, a pessoa aparecia DUAS vezes e o ranking tinha um buraco.
+  // ═══════════════════════════════════════════════════════════════════
+  await testar('agrupamento: LID + telefone da MESMA pessoa viram UMA linha com a SOMA', async () => {
+    pedidosDeEstilos.length = 0
+    rankingFake = [
+      { usuario_id: LID_CRUDO, nome: 'NomeVindoDoBanco', total: 7 },
+      { usuario_id: NUM_REAL, nome: 'NomeVindoDoBanco', total: 5 }
+    ]
+    estilosFake = new Map([[NUM_REAL, { numero: NUM_REAL, nome: 'MeuNomeVip', cor: '🔥', alcunha: null }]])
+    let itensDesenhados = null
+    ranking._injetarCapa(async (args) => { itensDesenhados = args.itens; return Buffer.alloc(8) })
+    const { sock } = criarSock({
+      groupMetadata: async () => ({ subject: 'Recinto LID', participants: PARTICIPANTES_LID })
+    })
+    await ranking.executar(sock, JID_GRUPO, mensagem('/ranking'))
+    ranking._restaurarCapa()
+
+    exigir(itensDesenhados, 'o desenho não recebeu itens')
+    exigir(itensDesenhados.length === 1, 'a pessoa foi duplicada no pódio: ' + JSON.stringify(itensDesenhados.map((i) => i.total)))
+    exigir(itensDesenhados[0].total === 12, 'os totais não foram somados: ' + itensDesenhados[0].total)
+    exigir(itensDesenhados[0].nome === 'MeuNomeVip', 'o VIP do número real não foi usado: ' + itensDesenhados[0].nome)
+    exigir(itensDesenhados[0].saiu === false, 'quem está no grupo foi marcado como saiu')
+    estilosFake = new Map()
+  })
+
+  await testar('agrupamento: quem tem documento por LID e por telefone não vira "saiu do grupo"', async () => {
+    rankingFake = [
+      { usuario_id: LID_CRUDO, nome: 'Fantasma', total: 9 },
+      { usuario_id: NUM_REAL, nome: 'Fantasma', total: 4 }
+    ]
+    // O LID resolve pelo mapeamento da SESSÃO e, nos metadados, só sobrou o
+    // TELEFONE da pessoa (o participante saiu pelo LID, continuou pelo número):
+    // com os DOIS ids no item, ela não pode ser marcada como "saiu do grupo".
+    lid.__definirConsultaSessaoTeste(async (lidCru) => (lidCru === LID_CRUDO ? NUM_REAL : null))
+    let itensDesenhados = null
+    ranking._injetarCapa(async (args) => { itensDesenhados = args.itens; return Buffer.alloc(8) })
+    const { sock } = criarSock({
+      groupMetadata: async () => ({ subject: 'Recinto', participants: [{ id: NUM_REAL + '@s.whatsapp.net' }] })
+    })
+    await ranking.executar(sock, JID_GRUPO, mensagem('/ranking'))
+    ranking._restaurarCapa()
+    lid.__definirConsultaSessaoTeste(null)
+
+    exigir(itensDesenhados, 'o desenho não recebeu itens')
+    exigir(itensDesenhados.length === 1, 'a pessoa foi duplicada: ' + JSON.stringify(itensDesenhados))
+    exigir(itensDesenhados[0].total === 13, 'a soma (13) não saiu: ' + itensDesenhados[0].total)
+    exigir(itensDesenhados[0].saiu === false, 'marcou "saiu" mesmo estando no grupo pelo telefone')
+  })
+
+  await testar('busca: o comando pede MAIS linhas que as 10 exibidas (antes de agrupar)', async () => {
+    rankingFake = [{ usuario_id: ID_TOP, nome: 'João', total: 1 }]
+    const { sock } = criarSock()
+    await ranking.executar(sock, JID_GRUPO, mensagem('/ranking'))
+    exigir(limitePedido === ranking.__internos.LIMITE_BUSCA_AGRUPAMENTO,
+      'buscou ' + limitePedido + ' linhas, deveria buscar ' + ranking.__internos.LIMITE_BUSCA_AGRUPAMENTO)
+    exigir(limitePedido > 10, 'com apenas 10 linhas, o agrupamento perderia o documento do telefone')
   })
 
   await testar('resolverNumeros: número real fica, LID dos metadados vira telefone e o desconhecido fica', async () => {

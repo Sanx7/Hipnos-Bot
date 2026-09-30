@@ -40,9 +40,15 @@ const { comporCartazProcurado, miniaturaDoCartaz } = require('../../dados/cartaz
 const { formatarNumero } = require('../../config')
 // 🪪 O banco do ranking guarda o `usuario_id` como o bot.js o recebeu do
 // Baileys (LID cru quando o grupo tem LID habilitado), enquanto o documento
-// de VIP é gravado pelo NÚMERO REAL (/darvip). Mesmo do /ranking: resolve
-// os dígitos para o telefone ANTES de consultar o VIP e de sortear a alcunha.
-const { resolverNumeroDeDigitos } = require('../../lid')
+// de VIP é gravado pelo NÚMERO REAL (/darvip). Mesmo do /ranking: o módulo
+// compartilhado ../../ranking-registro.js resolve os identificadores
+// (resolverNumeros) e AGRUPA as linhas da MESMA pessoa (agruparPorNumero —
+// LID + telefone = 1 candidato com a SOMA), garantindo o líder certo.
+const {
+  LIMITE_BUSCA_AGRUPAMENTO,
+  resolverNumeros,
+  agruparPorNumero
+} = require('../../ranking-registro')
 
 // 📜 Frase de rodapé do cartaz (a mesma do humor do /ranking).
 const RODAPE_CARTAZ = 'Quem linger mais no chat, mais aparece aqui.'
@@ -100,38 +106,20 @@ let comporCartaz = comporCartazProcurado
 let gerarMiniatura = miniaturaDoCartaz
 
 // 👥 O líder ainda faz parte do grupo? (o ranking guarda histórico, então pode
-// ter saído desde então). Falha de metadados → assume que está (o cartaz
-// não deve sair com "saiu do grupo" por causa de um erro de rede).
-async function aindaNoGrupo (sock, jid, usuarioId, numeroReal) {
-  const alvo = String(usuarioId || '').replace(/\D/g, '')
-  if (!alvo) return true
-  try {
-    const metadados = await sock.groupMetadata(jid)
-    const lista = metadados?.participants || []
-    // Compara o id cru E o número real: num grupo com LID cada lado pode
-    // estar no outro formato (participante pelo LID, banco pelo telefone).
-    return lista.some((p) => {
-      const id = normalizarParticipante(p)
-      return id === alvo || (numeroReal && id === numeroReal)
-    })
-  } catch (err) {
-    console.error('[procurado] ⚠️ sem metadados do grupo (assumindo que está):', err?.message || err)
-    return true
-  }
-}
-
-// 🪪 Número REAL do líder: o `usuario_id` do banco pode ser LID cru e o VIP
-// está gravado pelo telefone. Nunca lança — na falha, segue com os dígitos.
-async function numeroRealDoLider (sock, jid, usuarioId) {
-  const alvo = normalizarId(usuarioId)
-  try {
-    const metadados = await sock.groupMetadata(jid)
-    const { numero } = await resolverNumeroDeDigitos(metadados?.participants || [], alvo)
-    return numero || alvo
-  } catch (err) {
-    console.error('[procurado] ⚠️ falha ao resolver o identificador do líder:', err?.message || err)
-    return alvo
-  }
+// ter saído desde então). Função PURA sobre a lista de participantes (os
+// metadados são lidos UMA vez pelo comando): compara TODOS os identificadores
+// do líder agrupado (LID e telefone, via `agruparPorNumero`) e também o número
+// real resolvido — num grupo com LID cada lado pode estar no outro formato.
+// ⚠️ Falha de metadados NÃO é tratada aqui: quem chama decide (sem lista, o
+// cartaz não pode sair com "saiu do grupo" por causa de um erro de rede).
+function aindaNoGrupo(participantes, ids, numeroReal) {
+  const alvos = (Array.isArray(ids) ? ids : [ids])
+    .map((id) => normalizarId(id))
+    .filter(Boolean)
+  if (numeroReal) alvos.push(normalizarId(numeroReal))
+  if (!alvos.length) return true
+  const lista = participantes || []
+  return lista.some((p) => alvos.includes(normalizarParticipante(p)))
 }
 
 // 📸 Foto de perfil do líder: URL pública + download. Devolve null (sem
@@ -180,9 +168,12 @@ module.exports = {
         }, { quoted: msg })
       }
 
-      // 2) O #1 do ranking (mesma consulta do /ranking, filtrada pelo grupo)
-      const top = await buscarRanking(jid, 1)
-      if (!top.length) {
+      // 2) 📊 As linhas do ranking deste grupo. 🪪 Busca MAIS do que a posição
+      //    que será exibida (LIMITE_BUSCA_AGRUPAMENTO): o agrupamento do passo 3
+      //    junta o LID e o telefone da MESMA pessoa, e o documento do telefone
+      //    pode estar fora da primeira posição.
+      const linhas = await buscarRanking(jid, LIMITE_BUSCA_AGRUPAMENTO)
+      if (!linhas.length) {
         return sock.sendMessage(jid, {
           text:
             '🌑 *Ninguém está sendo procurado...*\n\n' +
@@ -191,15 +182,53 @@ module.exports = {
         }, { quoted: msg })
       }
 
-      const lider = top[0]
+      // 3) 🪪 Metadados do grupo UMA única vez (aqui pode: o /procurado é um
+      //    comando, não o messages.upsert — que não pode pagar um IQ de rede
+      //    por mensagem). Com eles resolvemos os identificadores (LID cru →
+      //    telefone) e AGRUPAMOS as linhas da MESMA pessoa: o líder é quem tem
+      //    a MAIOR SOMA, e não o maior documento isolado.
+      let participantes = []
+      let temMetadados = false
+      try {
+        const metadados = await sock.groupMetadata(jid)
+        participantes = metadados?.participants || []
+        temMetadados = true
+      } catch (errMeta) {
+        console.error('[procurado] ⚠️ sem metadados do grupo (seguindo sem eles):', errMeta?.message || errMeta)
+      }
 
-      // 3) 🪪 Número REAL do líder (o banco pode guardar o LID cru). Vale
+      let numeros = new Map()
+      try {
+        numeros = await resolverNumeros(participantes, linhas.map((i) => i.usuario_id))
+      } catch (errResolucao) {
+        console.error('[procurado] ⚠️ falha ao resolver os identificadores:', errResolucao?.message || errResolucao)
+      }
+
+      let candidatos = []
+      try {
+        candidatos = agruparPorNumero(linhas, numeros)
+      } catch (errAgrupamento) {
+        console.error('[procurado] ⚠️ falha ao agrupar por número (usando as linhas cruas):', errAgrupamento?.message || errAgrupamento)
+        candidatos = linhas
+      }
+
+      const lider = candidatos[0]
+      if (!lider) {
+        return sock.sendMessage(jid, {
+          text:
+            '🌑 *Ninguém está sendo procurado...*\n\n' +
+            'Ainda não há mensagens registradas neste grupo. 💤\n' +
+            'Envie algumas mensagens e chame o /procurado novamente.'
+        }, { quoted: msg })
+      }
+
+      // 4) 🪪 O `usuario_id` do líder JÁ É o número resolvido, então ele vale
       //    para o VIP, para a alcunha padrão e para o "saiu do grupo".
-      const numero = await numeroRealDoLider(sock, jid, lider.usuario_id)
+      const numero = lider.usuario_id
 
-      // 4) Estilo do VIP (nome custom + alcunha custom) e nome exibido.
+      // 5) Estilo do VIP (nome custom + alcunha custom) e nome exibido.
       //    Falha do banco de VIPs não derruba o cartaz — fica o padrão.
-      let nome = lider.nome || formatarNumero(lider.usuario_id)
+      let nome = lider.nome || formatarNumero(numero)
       let alcunha = alcunhas.alcunhaPadrao(numero)
       try {
         const estilo = await vip.obterEstilosVip([numero])
@@ -210,13 +239,15 @@ module.exports = {
         console.error('[procurado] ⚠️ falha ao ler o estilo do VIP (seguindo no padrão):', errEstilo?.message || errEstilo)
       }
 
-      // 5) O "desde" é a data de hoje (ver a nota de simplificação no topo).
+      // 6) O "desde" é a data de hoje (ver a nota de simplificação no topo).
+      //    O total é a SOMA do grupo (LID + telefone da mesma pessoa).
       const desde = dataDeHoje()
       const total = lider.total
       const palavra = total > 1 ? 'mensagens' : 'mensagem'
-      const saiu = !(await aindaNoGrupo(sock, jid, lider.usuario_id, numero))
+      // ⚠️ Sem metadados não dá para saber quem saiu: NÃO marca (a rede não pune).
+      const saiu = temMetadados ? !aindaNoGrupo(participantes, lider.ids, numero) : false
 
-      // 6) 📜 O cartaz. Qualquer tropeço (moldura, arte, miniatura, envio)
+      // 7) 📜 O cartaz. Qualquer tropeço (moldura, arte, miniatura, envio)
       //    cai no TEXTO logo abaixo, sem perder a informação.
       const legenda = `🕵️ Procurado: ${nome}${saiu ? ' (saiu do grupo)' : ''}`
       try {
@@ -255,6 +286,7 @@ module.exports = {
     RODAPE_CARTAZ,
     dataDeHoje,
     normalizarParticipante,
+    aindaNoGrupo,
     baixarFoto,
     respostaEmTexto
   }

@@ -20,12 +20,19 @@ const vip = require('../vip')
 
 // Formatação legível dos números (fonte única: ../config — usada também pelo /dono)
 const { formatarNumero } = require('../config')
-// 🪪 Resolução do identificador do BANCO (pode ser LID cru) para o número real
-// — mesma ideia PROOF-LID do /nomecustom, do /corvip e do /darvip. Sem isso o
-// nome custom e a cor nunca aparecem: o VIP é gravado pelo número real e o
-// ranking devolve o `usuario_id` como o bot.js o recebeu do Baileys (LID cru
-// quando o grupo tem LID habilitado). Ver a nota longa no resolverNumeros.
-const { resolverNumeroDeDigitos } = require('../lid')
+// 🪪 Resolução dos identificadores do BANCO (podem ser LID cru) para o número
+// real e AGRUPAMENTO das linhas da MESMA pessoa. O módulo compartilhado
+// ../ranking-registro.js é o MESMO que o bot.js usa para GRAVAR pelo número real
+// e que o /procurado usa para achar o líder — assim escrita, VIP/cor e exibição
+// falam sempre do mesmo identificador:
+//   • LIMITE_BUSCA_AGRUPAMENTO — quantas linhas buscar ANTES de agrupar;
+//   • resolverNumeros(participantes, ids) — idCru → número real;
+//   • agruparPorNumero(itens, numeros) — soma as linhas do mesmo número.
+const {
+  LIMITE_BUSCA_AGRUPAMENTO,
+  resolverNumeros,
+  agruparPorNumero
+} = require('../ranking-registro')
 
 // 🏛️ O desenho do pergaminho (e a miniatura do preview) vivem num módulo só.
 const { comporPergaminhoRanking, miniaturaDoPergaminho } = require('../pergaminho-ranking')
@@ -41,31 +48,6 @@ function normalizarParticipante(participante) {
   return idStr.split('@')[0].split(':')[0].replace(/\D/g, '')
 }
 
-// 🪪 resolverNumeros(participantes, ids): mapa idCruDoBanco → número REAL.
-//   ⚠️ ESTE É O CORE DA CORREÇÃO: o `usuario_id` do Mongo vem do `sender` cru
-//   do bot.js (bot.js:460) e o `normalizarId` do database.js só guarda os
-//   dígitos — num grupo com LID habilitado isso é o LID ("175952680210489"),
-//   NÃO o telefone. Como o /darvip, o /nomecustom e o /corvip gravam o
-//   documento de VIP pelo NÚMERO REAL, consultar o VIP com o LID nunca
-//   encontra nada: o nome sai do banco e a cor some (vira tinta padrão).
-//   Aqui os dois lados da comparação passam a usar o mesmo formato.
-//   `resolverNumeroDeDigitos` NUNCA lança; id vazio/sem resposta cai no bruto.
-async function resolverNumeros(participantes, ids) {
-  const mapa = new Map()
-  for (const id of ids) {
-    const alvo = normalizarId(id)
-    if (!alvo || mapa.has(alvo)) continue
-    try {
-      const { numero } = await resolverNumeroDeDigitos(participantes, alvo)
-      mapa.set(alvo, numero || alvo)
-    } catch (err) {
-      // Falhou a resolução? Segue com o identificador do banco (nome padrão).
-      console.error('[ranking] ⚠️ falha ao resolver identificador:', alvo, err?.message || err)
-      mapa.set(alvo, alvo)
-    }
-  }
-  return mapa
-}
 
 // Medalhas para o pódio do TOP 3; depois vira "4º", "5º"...
 const MEDALHAS = ['🥇', '🥈', '🥉']
@@ -93,11 +75,14 @@ module.exports = {
         )
       }
 
-      // 2) Busca no banco os TOP 10 do grupo atual (filtrado por grupo_id)
-      const top = await buscarRanking(jid, 10)
+      // 2) Busca no banco as linhas do grupo atual (filtrado por grupo_id).
+      //    🪪 LIMITE_BUSCA_AGRUPAMENTO (maior que 10) de propósito: o
+      //    agrupamento por número (passo 5.5) pode juntar o LID e o telefone da
+      //    MESMA pessoa, e o documento do telefone costuma estar fora do top 10.
+      const bruto = await buscarRanking(jid, LIMITE_BUSCA_AGRUPAMENTO)
 
       // 3) Grupo ainda sem mensagens registradas -> resposta amigável
-      if (!top.length) {
+      if (!bruto.length) {
         return sock.sendMessage(
           jid,
           {
@@ -132,9 +117,20 @@ module.exports = {
       //    Falha aqui não derruba o ranking — cai no identificador cru.
       let numeros = new Map()
       try {
-        numeros = await resolverNumeros(participantes, top.map((i) => i.usuario_id))
+        numeros = await resolverNumeros(participantes, bruto.map((i) => i.usuario_id))
       } catch (errResolucao) {
         console.error('[ranking] ⚠️ falha ao resolver os identificadores:', errResolucao?.message || errResolucao)
+      }
+
+      // 5.5) 📊 AGRUPA POR NÚMERO RESOLVIDO e só ENTÃO corta o top 10: a mesma
+      //    pessoa com LID + telefone no banco vira UMA linha com a SOMA (sem
+      //    isso ela apareceria duas vezes e o ranking ficaria com um "buraco").
+      let top = []
+      try {
+        top = agruparPorNumero(bruto, numeros).slice(0, 10)
+      } catch (errAgrupamento) {
+        console.error('[ranking] ⚠️ falha ao agrupar por número (usando as linhas cruas):', errAgrupamento?.message || errAgrupamento)
+        top = bruto.slice(0, 10)
       }
 
       // 6) 💠 Estilos dos VIPs entre os 10 do pódio (/nomecustom e /corvip —
@@ -170,9 +166,12 @@ module.exports = {
         // E o número real: num grupo com LID cada lado pode estar no outro
         // formato (participante pelo LID, banco pelo telefone, ou vice-versa).
         const numeroReal = numeros.get(idCru)
+        // 🪪 Depois do agrupamento o item pode ter VÁRIOS identificadores (o
+        //    LID e o telefone da mesma pessoa): basta UM deles estar no grupo.
+        const idsDoItem = Array.isArray(item.ids) && item.ids.length ? item.ids : [idCru]
         const aindaNoGrupo = participantes.some((p) => {
           const idDoParticipante = normalizarParticipante(p)
-          return idDoParticipante === idCru || (numeroReal && idDoParticipante === numeroReal)
+          return idsDoItem.includes(idDoParticipante) || (numeroReal && idDoParticipante === numeroReal)
         })
         const aviso = aindaNoGrupo ? '' : ' *(saiu do grupo)*'
 
@@ -229,6 +228,8 @@ module.exports = {
     MEDALHAS,
     normalizarParticipante,
     resolverNumeros,
+    agruparPorNumero,
+    LIMITE_BUSCA_AGRUPAMENTO,
     comporPergaminhoRanking,
     miniaturaDoPergaminho
   }

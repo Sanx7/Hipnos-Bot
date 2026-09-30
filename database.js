@@ -15,8 +15,14 @@
 //     usuario_id:     "5511999999999",
 //     nome:           "João",
 //     total:          42,
-//     ultimaMensagem: 1700000000000
+//     ultimaMensagem: 1700000000000,
+//     lid:            "175952680210489"    // opcional (ver registrarMensagem)
 //   }
+//
+// ⚠️ O `usuario_id` é gravado pelo NÚMERO REAL: o ranking-registro.js resolve
+//    o identificador @lid que vem do Baileys para o telefone ANTES de chamar
+//    registrarMensagem. Sem mapeamento na sessão, o documento fica mesmo sob o
+//    LID e ganha o campo auxiliar `lid` — é ele que a migração encontra depois.
 //
 // ÍNDICE ÚNICO COMPOSTO: { grupo_id: 1, usuario_id: 1 }
 // CONEXÃO: singleton com ping de saúde e auto-reconexão.
@@ -26,6 +32,10 @@ const { MongoClient } = require('mongodb')
 
 const NOME_BANCO = process.env.MONGODB_DB || 'whatsapp'
 const NOME_COLECAO = process.env.MONGODB_COLLECTION_RANKING || 'ranking'
+// 🧱 Campos que o registro do ranking NUNCA sobrescreve ($set/$setOnInsert):
+//    `lid` é a "caixa-preta" do identificador @lid original — a migração
+//    (scripts/migrar-ranking-lid.js) depende dela para achar as linhas antigas.
+const CAMPOS_PROTEGIDOS = ['lid']
 
 let clienteMongo = null
 let colecaoCacheada = null
@@ -129,21 +139,33 @@ function normalizarId(jid) {
 // Usa upsert com $inc (atômico) — cria o documento se não existe, ou
 // incrementa o campo "total" em 1 se já existe. Também atualiza "nome"
 // (caso a pessoa tenha trocado) e "ultimaMensagem".
+//
+// 🪪 extras: { lid } — opcional. O bot.js grava pelo NÚMERO REAL (o
+//    ranking-registro.js resolve o @lid antes de chamar aqui); quando o LID não
+//    tem mapeamento na sessão, o documento fica mesmo sob o LID e recebe o campo
+//    auxiliar `lid`, que a migração usa depois para renomear/fundir. Com o LID
+//    já resolvido não enviamos nada. 🛡️ Em NENHUM caminho escrevemos
+//    `usuario_id` de um documento já existente: isso quebraria o índice único
+//    (idx_ranking_grupo_usuario) e desalinharia o contador.
 // -------------------------------------------------------------------
-async function registrarMensagem(grupoId, usuarioId, nome) {
+async function registrarMensagem(grupoId, usuarioId, nome, extras = {}) {
   try {
     const colecao = await obterColecaoRanking()
     const idNormalizado = normalizarId(usuarioId)
 
+    const $set = { nome: nome || null, ultimaMensagem: Date.now() }
+    // 🧱 $set nunca toca em campo protegido (defesa em camadas).
+    for (const campo of CAMPOS_PROTEGIDOS) {
+      if ($set[campo] === undefined) delete $set[campo]
+    }
+
+    const atualizacao = { $inc: { total: 1 }, $set }
+    const lid = extras?.lid ? normalizarId(extras.lid) : ''
+    if (lid) atualizacao.$setOnInsert = { lid }
+
     await colecao.updateOne(
       { grupo_id: grupoId, usuario_id: idNormalizado },
-      {
-        $inc: { total: 1 },
-        $set: {
-          nome: nome || null,
-          ultimaMensagem: Date.now()
-        }
-      },
+      atualizacao,
       { upsert: true }
     )
   } catch (err) {
@@ -167,11 +189,13 @@ async function buscarRanking(grupoId, limite = 10) {
       .limit(limite)
       .toArray()
 
-    // Mantém EXATAMENTE o mesmo formato de retorno do SQLite
+    // Mantém o formato de retorno do SQLite + o lid original, que o /ranking e
+    // o /procurado usam para AGRUPAR as linhas da mesma pessoa.
     return documentos.map((doc) => ({
       usuario_id: doc.usuario_id,
       nome: doc.nome,
-      total: doc.total
+      total: doc.total,
+      lid: doc.lid || null
     }))
   } catch (err) {
     console.error('⚠️ [database] falha ao buscar ranking:', err?.message)

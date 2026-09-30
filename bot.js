@@ -39,9 +39,12 @@ const qrcode = require('qrcode-terminal')
 const fs = require('fs')
 const path = require('path')
 
-// 📊 Módulo do banco de dados do /ranking (MongoDB)
-// Expõe: registrarMensagem(grupoId, usuarioId, nome)
-const { registrarMensagem } = require('./database')
+// 📊 Registro do ranking (/ranking). 🪪 LID→número real resolvido ANTES de
+// gravar: o ranking-registro.js tenta mapear o identificador @lid para o
+// telefone (mesma prova do lid.js: nota-lid + @lid do participante no grupo);
+// sem prova, grava pelo LID com o campo auxiliar `lid` (migrável depois).
+// Nunca lança — o ranking é acessório e não pode derrubar o fluxo do bot.
+const rankingRegistro = require('./ranking-registro')
 
 // 📝 Extração do texto/LEGENDA da mensagem (dados/texto-comando.js) — é o que
 // permite mandar a foto com "/s" na legenda e o comando ser roteado (antes só
@@ -468,7 +471,12 @@ async function startBot() {
       // O try/catch garante que o ranking nunca atrapalhe o fluxo normal.
       if (jid.endsWith('@g.us')) {
         try {
-          registrarMensagem(jid, sender, msg.pushName)
+          // 🪪 Resolve o @lid para o número real ANTES de registrar.
+          rankingRegistro
+            .registrarComNumeroReal(jid, sender, msg.pushName)
+            .catch((errRegistro) => {
+              console.error('❌ Erro ao registrar mensagem no ranking:', errRegistro)
+            })
         } catch (errRegistro) {
           console.error('❌ Erro ao registrar mensagem no ranking:', errRegistro)
         }

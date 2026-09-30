@@ -28,8 +28,10 @@ const { SANS_16_WHITE, SANS_32_WHITE } = require('jimp/fonts')
 const database = require('../database')
 let rankingFake = []
 let rankingFalha = null
-database.buscarRanking = async () => {
+let limitePedido = 0
+database.buscarRanking = async (_grupo, limite) => {
   if (rankingFalha) throw rankingFalha
+  limitePedido = limite
   return rankingFake
 }
 
@@ -458,6 +460,95 @@ async function main () {
       exigir(!img.conteudo.caption.includes('saiu do grupo'), 'marcou "saiu" só por falta de rede')
     })
   })
+  await testar('comando: sem metadados do grupo NÃO marca "saiu" (rede não pune)', async () => {
+    definirRanking([LIDER_TESTE])
+    definirEstilos(new Map())
+    const { sock, enviadas } = criarSock({ groupMetadata: async () => { throw new Error('sem rede') } })
+    await comCartazFalso(async () => {
+      await comando.executar(sock, JID_GRUPO, mensagem())
+      const img = imagemEnviada(enviadas)
+      exigir(!img.conteudo.caption.includes('saiu do grupo'), 'marcou "saiu" só por falta de rede')
+    })
+  })
+
+  // ═══════════════════════════════════════════════════════════════════
+  // 🪪 A MESMA PESSOA EM DOIS DOCUMENTOS (LID + telefone) — enquanto o banco
+  // não é migrado (scripts/migrar-ranking-lid.js), o líder pode ter um
+  // documento sob o LID e outro sob o telefone. O /procurado precisa
+  // AGRUPAR (mesma pessoa, contagem somada) e usar o NÚMERO REAL para o VIP.
+  // ═══════════════════════════════════════════════════════════════════
+  const LID_LIDER = '175952680210489'
+  const TELEFONE_LIDER = '554184062975'
+  const PARTICIPANTES_LID = [{ id: LID_LIDER + '@lid', phoneNumber: TELEFONE_LIDER + '@s.whatsapp.net' }]
+
+  await testar('LID: LID + telefone da MESMA pessoa viram UM cartaz com a SOMA', async () => {
+    definirRanking([
+      { usuario_id: LID_LIDER, nome: 'Nome do Banco', total: 900 },
+      { usuario_id: TELEFONE_LIDER, nome: 'Nome do Banco', total: 387 }
+    ])
+    definirEstilos(new Map([[TELEFONE_LIDER, { nome: 'NomeDoVip', alcunha: 'Punho de Zeus', cor: '' }]]))
+    await comCartazFalso(async (dados) => {
+      const { sock, enviadas } = criarSock({
+        groupMetadata: async () => ({ subject: 'Recinto LID', participants: PARTICIPANTES_LID })
+      })
+      await comando.executar(sock, JID_GRUPO, mensagem())
+      const img = imagemEnviada(enviadas)
+      exigir(img, 'não enviou imagem')
+      const d = dados()
+      exigir(d.total === 1287, 'os totais não foram somados: ' + d.total)
+      exigir(d.nome === 'NomeDoVip', 'o VIP do número real não foi usado: ' + d.nome)
+      exigir(d.alcunha === 'Punho de Zeus', 'não usou a alcunha custom: ' + d.alcunha)
+      exigir(!img.conteudo.caption.includes('saiu do grupo'), 'marcou "saiu" para quem está no grupo')
+    })
+  })
+
+  await testar('LID: o ranking é buscado com o limite de AGRUPAMENTO, não com 1', async () => {
+    definirRanking([LIDER_TESTE])
+    definirEstilos(new Map())
+    await comCartazFalso(async () => {
+      const { sock } = criarSock()
+      await comando.executar(sock, JID_GRUPO, mensagem())
+      exigir(limitePedido > 1, 'o /procurado pediu só ' + limitePedido + ' linha(s) e perderia o documento do telefone')
+    })
+  })
+
+  await testar('metadados do grupo são lidos UMA vez (nada de consulta por linha)', async () => {
+    definirRanking([
+      { usuario_id: LID_LIDER, nome: 'A', total: 10 },
+      { usuario_id: TELEFONE_LIDER, nome: 'A', total: 5 },
+      { usuario_id: '5511999990000', nome: 'B', total: 1 }
+    ])
+    definirEstilos(new Map())
+    let chamadas = 0
+    await comCartazFalso(async () => {
+      const { sock } = criarSock({
+        groupMetadata: async () => { chamadas += 1; return { subject: 'Recinto LID', participants: PARTICIPANTES_LID } }
+      })
+      await comando.executar(sock, JID_GRUPO, mensagem())
+    })
+    exigir(chamadas === 1, 'os metadados foram lidos ' + chamadas + ' vez(es)')
+  })
+
+  await testar('banco de VIPs é consultado pelo NÚMERO REAL do líder agrupado', async () => {
+    definirRanking([{ usuario_id: LID_LIDER, nome: 'Fulano', total: 1287 }])
+    definirEstilos(new Map())
+    const pedidos = []
+    vip.obterEstilosVip = async (numeros) => { pedidos.push([...(numeros || [])]); return new Map() }
+    try {
+      await comCartazFalso(async () => {
+        const { sock } = criarSock({
+          groupMetadata: async () => ({ subject: 'Recinto LID', participants: PARTICIPANTES_LID })
+        })
+        await comando.executar(sock, JID_GRUPO, mensagem())
+      })
+    } finally {
+      vip.obterEstilosVip = async () => estilosFake
+    }
+    const pedido = pedidos[pedidos.length - 1] || []
+    exigir(pedido.includes(TELEFONE_LIDER), 'não consultou o VIP pelo número real: ' + JSON.stringify(pedido))
+    exigir(!pedido.includes(LID_LIDER), 'consultou o VIP pelo LID cru: ' + JSON.stringify(pedido))
+  })
+
 
   console.log('')
   console.log(reprovadas === 0
