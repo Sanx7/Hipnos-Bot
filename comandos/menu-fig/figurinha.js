@@ -66,6 +66,13 @@ const path = require('path')
 // UMA consulta tolerante por figura. Sem VIP, sem assinatura ou sem banco, vem
 // null e a figurinha sai EXATAMENTE como hoje (filtro idêntico, sem arquivo).
 const vip = require('../../vip')
+// 🪪 Número REAL de quem enviou (vip-acesso.js, fonte única do pacote VIP): o
+// documento de VIP é gravado pelo TELEFONE (/assinatura e /darvip resolvem o
+// LID antes de gravar), então consultar a assinatura com o "@lid" cru só
+// funciona depois que o mapeamento LID→telefone da sessão sincronizou —
+// resolvido aqui, os metadados do grupo bastam (mesmo remédio do /s, do
+// /corvip e do /ranking).
+const { resolverAutorVip } = require('../../vip-acesso')
 
 // 🧪 Gancho de teste: troca o executor do ffmpeg (padrão _injetar* do projeto).
 // Sem injeção, roda o ffmpeg de verdade — o comportamento não muda.
@@ -301,10 +308,12 @@ module.exports = {
       // com o banco fora, `assinatura` fica null e o filtro é IDENTICO ao de
       // hoje (nada de arquivo temporário, nada de drawtext). Falha aqui NUNCA
       // derruba a figurinha: a marca d'água é um extra, não um requisito.
-      const autor = msg.key.participant || msg.key.remoteJid
+      // 🪪 Número REAL de quem enviou (vip-acesso.js): é ele que indexa o
+      // documento de VIP lido aqui — ver a nota do require no topo.
+      const { numero: autorVip } = await resolverAutorVip(sock, jid, msg, 'figurinha')
       let assinatura = null
       try {
-        assinatura = prepararAssinatura(await vip.obterAssinatura(autor), idUnico)
+        assinatura = prepararAssinatura(await vip.obterAssinatura(autorVip), idUnico)
         if (assinatura) {
           caminhoAssinatura = assinatura.caminhoTexto
           console.log(`[figurinha] ✍️ assinatura aplicada: "${assinatura.texto}"`)

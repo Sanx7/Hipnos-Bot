@@ -2,7 +2,7 @@
 // 💠 MENU-VIP — Pergaminho dos Privilegiados
 // ============================================
 // Lista SOMENTE os comandos do sistema de VIP (hoje: /darvip e /listavip
-// são dos donos do bot; /nomecustom, /corvip, /assinatura, /temavip e a
+// são dos donos do bot; /nomecustom, /corvip, /assinatura, /temavip, /alcunha e a
 // consulta /badge são dos próprios VIPs — e o selo 💠 do /perfil é um
 // benefício AUTOMÁTICO, sem comando de ativação),
 // seguindo o mesmo estilo visual do /menu principal.
@@ -54,6 +54,12 @@ module.exports = {
 ➥ Escolhe o emoji que aparece antes do seu nome no /ranking (ex.: /corvip 🔥).
 ➥ Só UM emoji por vez; /corvip lista mostra as sugestões e a sua cor atual.
 ➥ /corvip remover volta ao padrão (também: /corcustom, /corvip reset).
+
+⚔️ /alcunha <apelido>
+➥ Escolhe o seu apelido de guerra, que aparece no cartaz do /procurado.
+➥ Todo mundo já tem uma alcunha (a padrão sai do seu número e nunca muda sozinha) — esta é a sua versão.
+➥ Até 25 caracteres, sem emoji; /alcunha remover volta à padrão.
+➥ Exclusivo de VIP.
 
 ✍️ /assinatura <texto>
 ➥ Marca as figurinhas que você cria com /s e /figurinha (canto inferior direito).

@@ -36,6 +36,11 @@ const path = require('path')
 const { verificar: verificarCooldown, marcar: marcarCooldown } = require('../../dados/cooldowns')
 const vip = require('../../vip')
 const { limparNumero } = require('../../config')
+// 🪪 Número REAL de quem chamou (vip-acesso.js, fonte única do pacote VIP):
+// o documento de VIP é gravado pelo telefone (/darvip), mas o autor chega
+// como LID cru em grupos com LID habilitado — consultar o estilo com o LID
+// nunca encontra nada e a assinatura não sai (mesmo bug do /corvip).
+const { resolverAutorVip } = require('../../vip-acesso')
 
 // 🧪 Gancho de teste: troca o executor do ffmpeg (padrão _injetar* do projeto).
 // Sem injeção, roda o ffmpeg de verdade — o comportamento não muda.
@@ -194,9 +199,14 @@ module.exports = {
       // aviso e o pedido NEM é processado (a mídia nem é tocada).
       const autor = msg.key.participant || msg.key.remoteJid
       const chaveAutor = limparNumero(autor)
+      // 🪪 NÚMERO REAL do autor (vip-acesso.js): o documento de VIP é gravado
+      // pelo TELEFONE (/darvip) e num grupo com LID habilitado o autor chega
+      // como "@lid" — com o número real resolvido o VIP é achado mesmo
+      // quando o mapeamento LID→telefone da sessão ainda não sincronizou.
+      const { numero: autorVip } = await resolverAutorVip(sock, jid, msg, 's')
       let ehVip = false
       try {
-        ehVip = await vip.isVip(autor)
+        ehVip = await vip.isVip(autorVip)
       } catch (errVip) {
         // 🛡️ Falha de infra (ex.: Mongo fora) não pune o usuário: segue com o
         // cooldown normal — o pior caso é esperar os 3min, nunca um bloqueio.
@@ -258,7 +268,7 @@ module.exports = {
       // nenhuma chamada extra ao ffmpeg. Falha aqui NUNCA derruba a figurinha.
       let assinatura = null
       try {
-        assinatura = prepararAssinatura(await vip.obterAssinatura(autor), `s-${Date.now()}`)
+        assinatura = prepararAssinatura(await vip.obterAssinatura(autorVip), `s-${Date.now()}`)
         if (assinatura) {
           caminhoAssinatura = assinatura.caminhoTexto
           console.log(`[s] ✍️ assinatura aplicada: "${assinatura.texto}"`)

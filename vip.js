@@ -45,6 +45,13 @@
 //      do esquema de cor (padrao/neon/pastel/escuro/dourado, catálogo no
 //      temas-vip.js) que o /temavip aplica nos cards (fundo/texto/destaque);
 //      obterTemaVip(numero) devolve null (sem lançar) quando não há tema.
+//  12. validarAlcunha/definirAlcunha/removerAlcunha — campo `alcunhaCustom`:
+//      o "apelido de guerra" (até ALCUNHA_MAX = 25 caracteres, sem quebra de
+//      linha nem emoji) que o VIP define no /alcunha e que aparece no
+//      cartaz do /procurado. TODO mundo tem alcunha: sem custom (ou com o
+//      VIP vencido) vale a padrão de dados/alcunhas.js, que sai do número
+//      por hash e nunca muda sozinha; obterAlcunhaCustom(numero) devolve
+//      null (sem lançar) quando não há custom.
 //
 // NÃO existe VIP vitalício: todo registro tem `expira_em` obrigatório
 // (sempre uma data futura calculada a partir dos dias concedidos).
@@ -62,6 +69,9 @@
 //                                      // d'água nas figurinhas do /s
 //     temaVip:       "neon"            // OPCIONAL (/temavip) — esquema de
 //                                      // cor dos cards (catálogo temas-vip)
+//     alcunhaCustom: "Punho de Zeus"   // OPCIONAL (/alcunha) — apelido de
+//                                      // guerra; sem ela vale a alcunha
+//                                      // padrão de dados/alcunhas.js
 //   }
 // ============================================
 
@@ -649,6 +659,98 @@ async function removerTemaVip(numeroBruto) {
   return resultado
 }
 
+
+// -------------------------------------------------------------------
+// ⚔️ ALCUNHA (campo `alcunhaCustom` do MESMO documento de VIP) — /alcunha
+// -------------------------------------------------------------------
+// A alcunha é o "apelido de guerra" da pessoa (ver dados/alcunhas.js para o
+// banco e a regra determinística). TODO mundo tem uma — a padrão sai do
+// número e nunca muda sozinha. O VIP pode sobrescrever com a sua via
+// `/alcunha <texto>`; sem VIP ativo (ou com o VIP vencido, que apaga o
+// registro) a pessoa volta automaticamente para a alcunha padrão.
+//
+// Regras (o /alcunha traduz cada motivo em mensagem):
+//   - até ALCUNHA_MAX (25) caracteres: é o que cabe na linha do cartaz de
+//     procurado sem tomar a faixa inteira;
+//   - sem quebra de linha nem caracteres de controle/zero-width — a
+//     sanitização é A MESMA do /nomecustom (CARACTERES_INVISIVEIS), então
+//     uma alcunha nunca quebra o desenho do cartaz;
+//   - SEM emoji pela mesma razão do /assinatura: as fontes bitmap do Jimp
+//     (o cartaz do /procurado) não têm glifo de emoji.
+// Motivos de recusa: 'vazio' | 'longo' | 'emoji' (e, na gravação, os mesmos
+// 'sem-vip' | 'infra' | 'falha' dos outros campos).
+// -------------------------------------------------------------------
+const ALCUNHA_MAX = 25
+
+// 🧼 Normalizador do campo `alcunhaCustom`: o saneamento do /nomecustom
+// (NFC, tira invisíveis/controlos, um espaço só, sem pontas).
+function normalizarAlcunha (textoBruto) {
+  return String(textoBruto ?? '')
+    .normalize('NFC')
+    .replace(CARACTERES_INVISIVEIS, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+// ✅ validarAlcunha(texto): { ok: true, alcunha, tamanho } |
+//    { ok: false, motivo: 'vazio' | 'longo' | 'emoji', alcunha, tamanho? }
+// Assíncrona (valida emoji com a lib, igual ao /assinatura).
+async function validarAlcunha (textoBruto) {
+  const alcunha = normalizarAlcunha(textoBruto)
+  if (!alcunha) return { ok: false, motivo: 'vazio', alcunha: '' }
+
+  const tamanho = [...alcunha].length
+  if (tamanho > ALCUNHA_MAX) return { ok: false, motivo: 'longo', alcunha, tamanho }
+
+  // 🚫 Emoji não tem glifo na fonte do Jimp (sairia quadradinho/bolha).
+  try {
+    const regex = await criarRegexEmoji()
+    if ((alcunha.match(regex) || []).length > 0) {
+      return { ok: false, motivo: 'emoji', alcunha, tamanho }
+    }
+  } catch (err) {
+    // Falha da lib NÃO bloqueia: o tamanho já passou e o desenho do cartaz
+    // ignora o que a fonte não souber desenhar.
+    console.error('⚠️ [vip] falha ao checar emoji na alcunha:', err?.message || err)
+  }
+
+  return { ok: true, alcunha, tamanho }
+}
+
+// ✍️ definirAlcunha(numeroBruto, texto): grava `alcunhaCustom` no documento do
+// VIP ATIVO (LID resolvido p/ o número real, como os outros campos).
+async function definirAlcunha (numeroBruto, textoBruto) {
+  const validacao = await validarAlcunha(textoBruto)
+  if (!validacao.ok) return validacao
+
+  const resultado = await definirCampoDeVipAtivo(numeroBruto, 'alcunhaCustom', validacao.alcunha)
+  if (!resultado.ok) return resultado
+  console.log(`[vip] ⚔️ alcunha definida p/ ${resultado.numero}: "${validacao.alcunha}"`)
+  return { ok: true, alcunha: validacao.alcunha, tamanho: validacao.tamanho }
+}
+
+// 🧹 removerAlcunha(numeroBruto): apaga a alcunha — a pessoa volta para a
+// alcunha PADRÃO (a do número). { ok: true, tinha } | { ok: false, motivo }.
+async function removerAlcunha (numeroBruto) {
+  const resultado = await removerCampoDeVipAtivo(numeroBruto, 'alcunhaCustom', normalizarAlcunha)
+  if (resultado.ok) console.log(`[vip] 🧹 alcunha removida de ${resultado.numero}`)
+  return resultado
+}
+
+// ⚔️ obterAlcunhaCustom(numeroBruto): alcunha custom do VIP ATIVO (ou null
+// quando não é VIP / não definiu). NUNCA lança — o /procurado é um comando
+// público e ele não define alcunha, ele LÊ.
+async function obterAlcunhaCustom (numeroBruto) {
+  try {
+    const lido = await lerCamposDeVipAtivo(numeroBruto, { alcunhaCustom: normalizarAlcunha })
+    return lido?.alcunhaCustom || null
+  } catch (err) {
+    console.error('⚠️ [vip] falha ao ler a alcunha custom:', err?.message || err)
+    return null
+  }
+}
+
+
 // 🎨 obterTemaVip(numeroBruto): tema do VIP ATIVO (ou null). NUNCA lança —
 // é usada pelo /perfil e pelos cards de par, que NUNCA podem quebrar por
 // causa de um tema (sem banco, VIP sem tema ou registro vencido = null,
@@ -772,16 +874,18 @@ async function obterCoresVip(numeros) {
   return mapa
 }
 
-// ✨ obterEstilosVip(numeros): mapa numero → { nome, cor } numa consulta SÓ
-// (é o que o /ranking usa: nome custom + cor juntos, sem 2 idas ao banco).
+// ✨ obterEstilosVip(numeros): mapa numero → { nome, cor, alcunha } numa
+// consulta SÓ (é o que o /ranking e o /procurado usam: nome custom, cor e
+// alcunha juntos, sem 2 idas ao banco).
 async function obterEstilosVip(numeros) {
   const mapa = new Map()
   const lidos = await lerCamposDeVipsAtivos(numeros, {
     nomeCustom: limparNomeCustom,
-    corVip: normalizarCorVip
+    corVip: normalizarCorVip,
+    alcunhaCustom: normalizarAlcunha
   })
   for (const [numero, item] of lidos) {
-    mapa.set(numero, { nome: item.nomeCustom, cor: item.corVip })
+    mapa.set(numero, { nome: item.nomeCustom, cor: item.corVip, alcunha: item.alcunhaCustom })
   }
   return mapa
 }
@@ -855,7 +959,12 @@ module.exports = {
   definirTemaVip,
   obterTemaVip,
   removerTemaVip,
+  validarAlcunha,
+  definirAlcunha,
+  removerAlcunha,
+  obterAlcunhaCustom,
   ASSINATURA_MAX,
+  ALCUNHA_MAX,
   SUGESTOES_COR_VIP,
   NOME_CUSTOM_MIN,
   NOME_CUSTOM_MAX,

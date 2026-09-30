@@ -37,6 +37,12 @@ const { createRequire } = require('node:module')
 
 const { extrairTextoComando } = require('../dados/texto-comando')
 const { extrairFramesAnimados } = require('../comandos/menu-fig/webp-animado')
+// 💠 VIP: o documento vive no MongoDB indexado pelo TELEFONE (o /darvip e o
+// /assinatura resolvem o LID antes de gravar). Aqui ele é uma collection fake
+// em memória e o mapeamento LID→telefone da sessão é injetado como AUSENTE no
+// cenário da PARTE 5 — é exatamente aí que a assinatura sumia.
+const vip = require('../vip')
+const lid = require('../lid')
 // 🔀 O /s (modo CROP) é carregado aqui SÓ para o teste de PRECEDÊNCIA de
 // aliases: os dois comandos irmãos não podem anunciar o mesmo apelido.
 // ⚠️ Nome `comandoS` de propósito: dentro do main() existe uma variável local
@@ -46,6 +52,33 @@ const comandoS = require('../comandos/menu-fig/sticker')
 const LADO = 512
 const GRUPO = '12036@g.us'
 const AUTOR = '5511999999999@s.whatsapp.net'
+
+// ── 💠 Cenário VIP (PARTE 5) ──
+const NUM_VIP = '5511900000001'
+const JID_VIP = `${NUM_VIP}@s.whatsapp.net`
+// ⚠️ O MESMO formato que o Baileys entrega em grupo com LID habilitado: o
+// telefone real do VIP só aparece no `phoneNumber` dos metadados.
+const LID_VIP = '999888777@lid'
+const DOIS_DIAS = 2 * 24 * 60 * 60 * 1000
+
+// 🗄️ Collection FAKE dos VIPs (contrato mínimo usado pelas leituras do vip.js)
+const documentosVip = new Map([
+  [NUM_VIP, { numero: NUM_VIP, expira_em: Date.now() + DOIS_DIAS, assinatura: '@joaovip' }]
+])
+const colecaoVipFake = {
+  async findOne (filtro) {
+    for (const documento of documentosVip.values()) {
+      const casa = Object.entries(filtro || {}).every(([campo, valor]) => documento[campo] === valor)
+      if (casa) return JSON.parse(JSON.stringify(documento))
+    }
+    return null
+  },
+  async updateOne () { return { matchedCount: 1 } },
+  async deleteOne () { return { deletedCount: 0 } },
+  async deleteMany () { return { deletedCount: 0 } },
+  find () { return { sort () { return this }, async toArray () { return [] } } }
+}
+vip.__definirColecaoTeste(colecaoVipFake)
 
 const binFfmpeg = (() => {
   try {
@@ -175,8 +208,19 @@ function contarTemporarios () {
 }
 
 // ── 📨 Sock fake: registra o que o comando envia ──
+// `groupMetadata` é o que deixa o comando descobrir o NÚMERO REAL de um autor
+// que chega como "@lid": é do `phoneNumber` do participante que o
+// vip-acesso.js (resolverAutorVip) tira o telefone usado para consultar o
+// documento de VIP. Sem ele a resolução cairia no mapeamento da sessão.
+const PARTICIPANTES = [
+  { id: AUTOR },
+  { id: LID_VIP, phoneNumber: JID_VIP }
+]
 let enviados = []
 const sockFake = {
+  async groupMetadata () {
+    return { subject: 'Recinto de Teste', participants: PARTICIPANTES }
+  },
   async sendMessage (jid, conteudo) {
     enviados.push({ jid, conteudo, texto: conteudo?.text || '', sticker: conteudo?.sticker || null })
     return {}
@@ -201,11 +245,12 @@ const msgCitando = (no, caption = '/figurinha') => ({
 const baixou = (r, tipo, marcador) =>
   r.envios.length === 1 && r.envios[0].tipo === tipo && r.envios[0].no?.mediaKey === marcador
 
-// Roda o comando com um conteúdo e devolve o que foi baixado/enviado
-async function rodarComando (conteudo) {
+// Roda o comando com um conteúdo e devolve o que foi baixado/enviado.
+// `participante` é quem enviou (o autor chega como "@lid" em grupo com LID).
+async function rodarComando (conteudo, participante = AUTOR) {
   enviados = []
   downloads.length = 0
-  const msg = { key: { remoteJid: GRUPO, participant: AUTOR }, message: conteudo, pushName: 'Teste' }
+  const msg = { key: { remoteJid: GRUPO, participant: participante }, message: conteudo, pushName: 'Teste' }
   await figurinha.executar(sockFake, GRUPO, msg, extrairTextoComando(msg))
   return { mensagens: enviados, envios: downloads }
 }
@@ -221,8 +266,22 @@ async function prepararMidias () {
     quadrada: await gerarImagem('quadrada.jpg', '512x512', COR_A),
     retrato: await gerarImagem('retrato.jpg', '300x600', COR_A, { metade: true, corMetade: COR_B }),
     paisagem: await gerarImagem('paisagem.jpg', '600x300', COR_A, { metade: true, corMetade: COR_B }),
-    videoRetrato: await gerarVideo('video-retrato.mp4', '300x600', COR_A)
+    videoRetrato: await gerarVideo('video-retrato.mp4', '300x600', COR_A),
+    // 🖤 Imagem PRETA: qualquer pixel claro que aparecer nela é a marca d'água
+    // (é assim que a PARTE 5 prova que a assinatura VIP foi aplicada).
+    preta: await gerarImagem('preta.jpg', '512x512', '0x000000')
   }
+}
+
+// 🔎 Conta os pixels CLAROS de um webp (marca d'água branca sobre preto).
+async function contarClaros (buffer, marca) {
+  const entrada = path.join(tmp, `claros-${marca}.webp`)
+  const saida = path.join(tmp, `claros-${marca}.gray`)
+  fs.writeFileSync(entrada, buffer)
+  await rodar(['-y', '-hide_banner', '-loglevel', 'error', '-i', entrada, '-f', 'rawvideo', '-pix_fmt', 'gray', saida])
+  let claros = 0
+  for (const byte of fs.readFileSync(saida)) if (byte > 100) claros += 1
+  return claros
 }
 
 // ============================================
@@ -433,6 +492,35 @@ async function main () {
   for (const apelido of ['figurinha', 'fig']) {
     checar(`precedência: /${apelido} → comando /figurinha`, registro.get(apelido)?.nome === 'figurinha')
   }
+
+  // ============================================
+  // 💠 PARTE 5 — assinatura do VIP que chega como "@lid" (sem mapeamento)
+  // ============================================
+  // O documento de VIP é indexado pelo TELEFONE. Com o mapeamento LID→telefone
+  // da sessão INDISPONÍVEL (injetado assim aqui), consultar o documento com o
+  // "@lid" cru não acha nada — era exatamente assim que a assinatura sumia. O
+  // comando resolve o autor por vip-acesso.js (metadados do grupo primeiro).
+  lid.__definirConsultaSessaoTeste(async () => null)
+  bufferAtual = midias.preta.buffer
+
+  checar('linha de base: o documento de VIP NÃO é achado pelo "@lid" cru',
+    (await vip.obterAssinatura(LID_VIP)) === null)
+  checar('linha de base: o NÚMERO REAL do autor tem a assinatura gravada',
+    (await vip.obterAssinatura(NUM_VIP)) === '@joaovip')
+
+  r = await rodarComando(msgDireta(foto), LID_VIP)
+  sticker = rotulo(r)
+  const clarosDoVip = sticker?.sticker ? await contarClaros(sticker.sticker, 'vip') : 0
+  checar('VIP em "@lid": a figurinha sai com a assinatura (marca visível na imagem preta)',
+    clarosDoVip > 0, `${clarosDoVip} pixel(s) claro(s)`)
+
+  r = await rodarComando(msgDireta(foto), AUTOR) // mortal comum
+  const semMarca = rotulo(r)
+  const clarosDoComum = semMarca?.sticker ? await contarClaros(semMarca.sticker, 'comum') : 0
+  checar('mortal comum: nenhuma marca d\'água (a assinatura é exclusiva do VIP)',
+    Boolean(semMarca?.sticker) && clarosDoComum === 0, `${clarosDoComum} pixel(s) claro(s)`)
+
+  lid.__definirConsultaSessaoTeste(null)
 
   // ── Resultado ──
   console.log(`\nResultado: ${ok} aprovados; ${falhou} falhas.`)

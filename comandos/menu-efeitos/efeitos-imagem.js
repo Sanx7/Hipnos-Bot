@@ -68,6 +68,11 @@ const { caminhoFfmpeg, apagarComRetry } = require('../menu-utilitario/audio-extr
 // de sempre — a leitura nunca lança (mesmo padrão do /s com a assinatura).
 const vip = require('../../vip')
 const temasVip = require('../../temas-vip')
+// 🪪 Número REAL de quem invocou (vip-acesso.js, fonte única do pacote VIP): o
+// tema é gravado pelo TELEFONE (/temavip resolve o LID antes de gravar), então
+// consultá-lo com o "@lid" cru só funciona depois que o mapeamento da sessão
+// sincronizou — resolvido aqui, os metadados do grupo bastam.
+const { resolverAutorVip } = require('../../vip-acesso')
 
 const BASE_SRA = 'https://api.some-random-api.com/canvas'
 const TIMEOUT_API_MS = 10000
@@ -403,9 +408,12 @@ function comandoPar({ nome, aliases, descricao, modo, par }) {
 
         // 🎨 Tema VIP (/temavip) de QUEM INVOCOU: paleta das cores do card.
         // Nunca lança — banco fora ou sem tema → cores fixas de sempre.
+        // 🪪 Número REAL do autor (ver o require no topo): o tema é indexado
+        // pelo telefone, não pelo "@lid" que pode chegar do grupo.
+        const { numero: autorVip } = await resolverAutorVip(sock, jid, msg, 'efeitos')
         let paleta = null
         try {
-          const tema = await vip.obterTemaVip(sender)
+          const tema = await vip.obterTemaVip(autorVip)
           if (tema) paleta = temasVip.obterPaleta(tema)
         } catch (errTema) {
           console.error('[efeitos] ⚠️ falha ao ler o tema VIP:', errTema?.message || errTema)

@@ -29,6 +29,9 @@
 //       via: 'direto' (jid já é número real) | 'metadados' | 'mapeamento'
 //       | null (LID não resolvível — o chamador decide o que fazer)
 //   - resolverLidParaTelefone(lid) → telefone (dígitos) ou null
+//   - resolverNumeroDeDigitos(participants, idBruto) → { numero, via }
+//       mesma ideia do de cima, mas para o identificador que JÁ VEIO sem o
+//       "@lid" (é o que o banco do /ranking devolve — ver a nota da função)
 //
 // ✳️ Toda falha de resolução é best-effort (loga e devolve null) — nunca
 // derruba o comando que a chamou. Há cache em memória para não repetir
@@ -123,9 +126,54 @@ async function resolverNumeroAlvo(participants, jidBruto) {
   return { numero: numeroDireto, via: null }
 }
 
+// -------------------------------------------------------------------
+// 🪪 resolverNumeroDeDigitos(participantes, idBruto): resolve um identificador
+// que chegou SÓ COM DÍGITOS — o formato em que o banco do /ranking grava o
+// `usuario_id` (database.normalizarId remove "@lid" e o ":device").
+//
+// ⚠️ POR QUE ESTA FUNÇÃO EXISTE (e não dá para usar resolverNumeroAlvo):
+// `resolverNumeroAlvo` decide se precisa resolver olhando `ehLid(jid)`, isto
+// é, se a string TERMINA em "@lid". Recebendo "175952680210489" (sem o
+// sufixo, como está no Mongo) ela acharia que já é o número real e devolveria
+// `via: 'direto'` — sem resolver NADA. Aqui a decisão é feita pelos DÍGITOS:
+//
+//   1) `acharParticipante` casa o identificador tanto pelo `id` (que num grupo
+//      com LID habilitado é o LID) quanto pelo `phoneNumber` (número real).
+//      Achou com `phoneNumber` preenchido → esse é o número real a consultar;
+//   2) não achou nos metadados (saiu do grupo, ou o grupo não traz
+//      phoneNumber) → tenta o mapeamento LID→telefone da sessão (mesma fonte do
+//      passo 3 do resolverNumeroAlvo);
+//   3) sem resposta → devolve os dígitos como vieram (`via: null`), para o
+//      chamador seguir com o que tem — nunca inventa número.
+//
+// É o que faz o /ranking e o /procurado acharem o documento de VIP (que o
+// /darvip gravou pelo NÚMERO REAL) quando o ranking tem o LID cru.
+// NUNCA lança.
+// -------------------------------------------------------------------
+async function resolverNumeroDeDigitos(participantes, idBruto) {
+  const digitos = limparNumero(idBruto)
+  if (!digitos) return { numero: '', via: null }
+
+  // 1) Metadados do grupo: achou o participante → o phoneNumber é o número real
+  const participante = acharParticipante(participantes, digitos)
+  if (participante) {
+    const real = limparNumero(participante.phoneNumber)
+    // Sem phoneNumber no participante: o próprio `id` já é o número real.
+    return real ? { numero: real, via: 'metadados' } : { numero: digitos, via: 'direto' }
+  }
+
+  // 2) Fora dos metadados → mapeamento LID→telefone da sessão (com cache)
+  const numeroSessao = await resolverLidParaTelefone(digitos)
+  if (numeroSessao) return { numero: numeroSessao, via: 'mapeamento' }
+
+  // 3) Sem correspondência: mantém o que veio do banco
+  return { numero: digitos, via: null }
+}
+
 module.exports = {
   ehLid,
   resolverNumeroAlvo,
+  resolverNumeroDeDigitos,
   resolverLidParaTelefone,
   __definirConsultaSessaoTeste
 }

@@ -20,6 +20,12 @@ const vip = require('../vip')
 
 // Formatação legível dos números (fonte única: ../config — usada também pelo /dono)
 const { formatarNumero } = require('../config')
+// 🪪 Resolução do identificador do BANCO (pode ser LID cru) para o número real
+// — mesma ideia PROOF-LID do /nomecustom, do /corvip e do /darvip. Sem isso o
+// nome custom e a cor nunca aparecem: o VIP é gravado pelo número real e o
+// ranking devolve o `usuario_id` como o bot.js o recebeu do Baileys (LID cru
+// quando o grupo tem LID habilitado). Ver a nota longa no resolverNumeros.
+const { resolverNumeroDeDigitos } = require('../lid')
 
 // 🏛️ O desenho do pergaminho (e a miniatura do preview) vivem num módulo só.
 const { comporPergaminhoRanking, miniaturaDoPergaminho } = require('../pergaminho-ranking')
@@ -33,6 +39,32 @@ function normalizarParticipante(participante) {
       ? participante.id || participante.jid || ''
       : String(participante)
   return idStr.split('@')[0].split(':')[0].replace(/\D/g, '')
+}
+
+// 🪪 resolverNumeros(participantes, ids): mapa idCruDoBanco → número REAL.
+//   ⚠️ ESTE É O CORE DA CORREÇÃO: o `usuario_id` do Mongo vem do `sender` cru
+//   do bot.js (bot.js:460) e o `normalizarId` do database.js só guarda os
+//   dígitos — num grupo com LID habilitado isso é o LID ("175952680210489"),
+//   NÃO o telefone. Como o /darvip, o /nomecustom e o /corvip gravam o
+//   documento de VIP pelo NÚMERO REAL, consultar o VIP com o LID nunca
+//   encontra nada: o nome sai do banco e a cor some (vira tinta padrão).
+//   Aqui os dois lados da comparação passam a usar o mesmo formato.
+//   `resolverNumeroDeDigitos` NUNCA lança; id vazio/sem resposta cai no bruto.
+async function resolverNumeros(participantes, ids) {
+  const mapa = new Map()
+  for (const id of ids) {
+    const alvo = normalizarId(id)
+    if (!alvo || mapa.has(alvo)) continue
+    try {
+      const { numero } = await resolverNumeroDeDigitos(participantes, alvo)
+      mapa.set(alvo, numero || alvo)
+    } catch (err) {
+      // Falhou a resolução? Segue com o identificador do banco (nome padrão).
+      console.error('[ranking] ⚠️ falha ao resolver identificador:', alvo, err?.message || err)
+      mapa.set(alvo, alvo)
+    }
+  }
+  return mapa
 }
 
 // Medalhas para o pódio do TOP 3; depois vira "4º", "5º"...
@@ -92,34 +124,56 @@ module.exports = {
         console.error('Erro ao buscar metadados para o ranking:', err)
       }
 
-      // 5) 🏷️🎨 Nome e cor custom dos VIPs (/nomecustom e /corvip — campos
-      //    `nomeCustom` e `corVip` do documento VIP): UMA consulta só para os
-      //    10 da lista. Quem definiu nome aparece com ele; quem definiu cor
-      //    vê o emoji ANTES do nome ("🔥 João") no texto e o NOME PINTADO na
-      //    cor no pergaminho. Os demais seguem no padrão (pushName do banco
-      //    ou número). Falha do banco de VIPs não derruba o ranking —
-      //    obterEstilosVip nunca lança e devolve mapa vazio.
+      // 5) 🪪 Resolve os identificadores do ranking para o NÚMERO REAL (LID cru
+      //    → telefone) ANTES de consultar os VIPs. Sem isso, em grupo com LID
+      //    habilitado o documento de VIP (gravado pelo /darvip pelo número
+      //    real) nunca é encontrado: o nome sai do banco e a cor do VIP some.
+      //    Detalhes do problema e do porquê em `resolverNumeros`.
+      //    Falha aqui não derruba o ranking — cai no identificador cru.
+      let numeros = new Map()
+      try {
+        numeros = await resolverNumeros(participantes, top.map((i) => i.usuario_id))
+      } catch (errResolucao) {
+        console.error('[ranking] ⚠️ falha ao resolver os identificadores:', errResolucao?.message || errResolucao)
+      }
+
+      // 6) 💠 Estilos dos VIPs entre os 10 do pódio (/nomecustom e /corvip —
+      //    campos `nomeCustom` e `corVip` do documento VIP): UMA consulta só,
+      //    feita com os NÚMEROS REAIS resolvidos acima. Quem definiu nome
+      //    aparece com ele; quem definiu cor vê o emoji ANTES do nome
+      //    ("🔥 João") no texto e o NOME PINTADO na cor no pergaminho. Os
+      //    demais seguem no padrão (pushName do banco ou número). Falha do
+      //    banco de VIPs não derruba o ranking — obterEstilosVip nunca lança
+      //    e devolve mapa vazio.
       let estilos = new Map()
       try {
-        estilos = await vip.obterEstilosVip(top.map((i) => i.usuario_id))
+        estilos = await vip.obterEstilosVip([...new Set(numeros.values())])
       } catch (errEstilo) {
         console.error('[ranking] ⚠️ falha ao ler nomes/cores dos VIPs:', errEstilo?.message || errEstilo)
       }
 
-      // 6) Monta a lista numerada: cada item guarda os dados CRUS (para o
+      // 7) Monta a lista numerada: cada item guarda os dados CRUS (para o
       //    pergaminho) e a linha de texto pronta (para o fallback).
       const itens = top.map((item, indice) => {
         const posicao = MEDALHAS[indice] || `${indice + 1}º`
-        const estilo = estilos.get(normalizarId(item.usuario_id)) || {}
+        // 🔑 A chave do mapa de estilos é o NÚMERO REAL resolvido no passo 5 —
+        //    e não o `usuario_id` cru do banco (que num grupo com LID é o LID
+        //    e nunca casava com o documento de VIP).
+        const idCru = normalizarId(item.usuario_id)
+        const estilo = estilos.get(numeros.get(idCru) || idCru) || {}
         const nome = estilo.nome || item.nome || formatarNumero(item.usuario_id)
         // 🎨 A cor do VIP entra antes do nome; sem cor, o nome fica como sempre.
         const nomeComCor = estilo.cor ? `${estilo.cor} ${nome}` : nome
         const total = item.total
 
-        // Avisa se o usuário já não faz mais parte do grupo
-        const aindaNoGrupo = participantes.some(
-          (p) => normalizarParticipante(p) === item.usuario_id
-        )
+        // Avisa se o usuário já não faz mais parte do grupo. Compara o id cru
+        // E o número real: num grupo com LID cada lado pode estar no outro
+        // formato (participante pelo LID, banco pelo telefone, ou vice-versa).
+        const numeroReal = numeros.get(idCru)
+        const aindaNoGrupo = participantes.some((p) => {
+          const idDoParticipante = normalizarParticipante(p)
+          return idDoParticipante === idCru || (numeroReal && idDoParticipante === numeroReal)
+        })
         const aviso = aindaNoGrupo ? '' : ' *(saiu do grupo)*'
 
         // Plural correto de "mensagem" em português: mensagem -> mensagens
@@ -143,7 +197,7 @@ module.exports = {
         linhas.join('\n\n') +
         '\n\n💤 *"O sono alcança até os mais falantes."*'
 
-      // 7) 🏛️ O pergaminho em imagem. Qualquer tropeço aqui (arte, miniatura
+      // 8) 🏛️ O pergaminho em imagem. Qualquer tropeço aqui (arte, miniatura
       //    ou envio) cai no TEXTO logo abaixo, sem perder a lista.
       const legenda = '🏆 Pergaminho do ranking — os 10 mais ativos do recinto'
       try {
@@ -174,6 +228,7 @@ module.exports = {
   __internos: {
     MEDALHAS,
     normalizarParticipante,
+    resolverNumeros,
     comporPergaminhoRanking,
     miniaturaDoPergaminho
   }

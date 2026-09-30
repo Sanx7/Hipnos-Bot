@@ -57,6 +57,9 @@ module.exports = {
 📊 /checkativo (@membro ou respondendo uma mensagem)
 ➥ Mostra quantas mensagens a pessoa ecoou no recinto (também: /mensagens, /msgs e /ativo).
 
+🕵️ /procurado
+➥ Gera o cartaz de procurado do líder do ranking do grupo, com foto, alcunha e contagem de mensagens (também: /maisativo, /lider e /wanted). Ex.: /procurado
+
 😜 /emojimix 😂😭
 ➥ Mistura dois emojis numa imagem só, igual ao Gboard (também: /mixemoji e /emoji-mix). Ex.: /emojimix 😂😭 — /emojimix fig 😂😭 manda como figurinha.
 

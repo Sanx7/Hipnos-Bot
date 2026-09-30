@@ -430,6 +430,59 @@ async function main() {
     fs.rmSync(tmp, { recursive: true, force: true })
   })
 
+  // ────────────────────────────────────────────────────────────
+  // 🪪 Regressão: autor que chega como "@lid" (grupo com LID habilitado)
+  // ────────────────────────────────────────────────────────────
+  await testar('vip-acesso: o autor "@lid" é resolvido pelo telefone dos metadados', async () => {
+    const { resolverAutorVip } = require('../vip-acesso')
+    // 🚫 Mapeamento LID→telefone da sessão INDISPONÍVEL: é o cenário em que o
+    // documento de VIP (gravado pelo telefone) ficava invisível para os
+    // comandos de figurinha. O único dado que sobra são os metadados.
+    lid.__definirConsultaSessaoTeste(async () => null)
+    try {
+      vips().clear()
+      vips().set(NUM_VIP, { numero: NUM_VIP, expira_em: Date.now() + DOIS_DIAS, assinatura: '@joaovip' })
+
+      // 📉 Linha de base (o bug): com o "@lid" cru o documento NÃO é achado.
+      if ((await vip.obterAssinatura(LID_VIP)) !== null) {
+        throw new Error('o cenário exige que o @lid cru não ache o documento')
+      }
+
+      const { sock } = criarSock()
+      const autor = await resolverAutorVip(sock, JID_GRUPO, mensagem('/s', LID_VIP), 'teste')
+      if (autor.numero !== NUM_VIP) throw new Error('número resolvido: ' + JSON.stringify(autor))
+      if (autor.via !== 'metadados') throw new Error('via esperado "metadados": ' + autor.via)
+
+      // ✍️ É com esse número que o /s e o /figurinha consultam a assinatura.
+      if ((await vip.obterAssinatura(autor.numero)) !== '@joaovip') {
+        throw new Error('a assinatura do número real não foi achada')
+      }
+
+      // 🛡️ Sem metadados e sem mapeamento não inventa número: cai nos dígitos.
+      const orfao = await resolverAutorVip({ groupMetadata: async () => ({ participants: [] }) }, JID_GRUPO, mensagem('/s', LID_VIP), 'teste')
+      if (orfao.numero !== limparNumero(LID_VIP) || orfao.via !== null) {
+        throw new Error('sem resolução deveria devolver os dígitos crus: ' + JSON.stringify(orfao))
+      }
+    } finally {
+      lid.__definirConsultaSessaoTeste(null)
+    }
+  })
+
+  await testar('fonte: /s e /figurinha consultam o VIP pelo autor RESOLVIDO', async () => {
+    for (const arquivo of ['sticker.js', 'figurinha.js']) {
+      const fonte = fs.readFileSync(path.join(__dirname, '..', 'comandos', 'menu-fig', arquivo), 'utf8')
+      if (!/const \{ numero: autorVip \} = await resolverAutorVip\(sock, jid, msg/.test(fonte)) {
+        throw new Error(`${arquivo} não resolve o autor via vip-acesso`)
+      }
+      if (!/obterAssinatura\(autorVip\)/.test(fonte)) {
+        throw new Error(`${arquivo} não consulta a assinatura pelo número resolvido`)
+      }
+      if (/\bobterAssinatura\(autor\)/.test(fonte) || /\bisVip\(autor\)/.test(fonte)) {
+        throw new Error(`${arquivo} voltou a consultar o VIP com o identificador cru`)
+      }
+    }
+  })
+
   console.log(reprovadas === 0 ? '\n🎉 Todos os testes passaram.' : `\n💥 ${reprovadas} teste(s) reprovado(s).`)
   process.exit(reprovadas === 0 ? 0 : 1)
 }

@@ -3,6 +3,13 @@
 // Roda 100% offline: banco de mensagens e VIPs são injetados, nada de rede.
 // Uso (na raiz do projeto):  node scripts/teste-ranking.js
 // ============================================================
+// ⚠️ As URIs do Mongo são zeradas ANTES de qualquer require (mesma razão do
+// teste-nomecustom.js): o /ranking agora resolve o identificador de cada
+// pessoa e, quando ela não está nos metadados do grupo, consulta o mapeamento
+// LID→telefone na sessão. Sem esta linha o teste pegaria o Atlas real da .env
+// da raiz — e este arquivo promete rodar 100% offline.
+process.env.MONGODB_URI = ''
+process.env.MONGO_URI_RPG = ''
 const fs = require('fs')
 const path = require('path')
 const { Jimp, loadFont } = require('jimp')
@@ -17,10 +24,38 @@ database.buscarRanking = async () => rankingFake
 
 // 💠 VIPs FAKE: nenhuma consulta ao Mongo, só o mapa que cada teste montar.
 const vip = require('../vip')
+// ⚠️ O filtro por número abaixo é FIEL ao vip.obterEstilosVip de verdade — e é
+// justamente por isso que ele importa: o banco devolve o `usuario_id` como o
+// Baileys mandou (LID cru num grupo com LID) e o mapa do VIP é indexado pelo
+// NÚMERO REAL. Um mock que devolvesse o mapa inteiro, sem filtrar, esconderia
+// EXATAMENTE o bug que estes testes agora cobrem.
 let estilosFake = new Map()
-vip.obterEstilosVip = async () => estilosFake
+const pedidosDeEstilos = []
+vip.obterEstilosVip = async (numeros) => {
+  const lista = Array.isArray(numeros) ? numeros : []
+  pedidosDeEstilos.push(lista.slice())
+  const mapa = new Map()
+  for (const bruto of lista) {
+    const chave = String(bruto).replace(/\D/g, '')
+    const achado = estilosFake.get(chave)
+    if (achado) mapa.set(chave, achado)
+  }
+  return mapa
+}
+
+// 🪪 Cenário REAL de produção: o ranking traz o identificador do jeito que o
+// bot.js gravou (o `sender` cru, que num grupo com LID habilitado é o LID) e o
+// documento de VIP está no número real — porque /darvip, /nomecustom e /corvip
+// resolvem o LID antes de gravar. É o caso que quebrava a cor no pergaminho.
+const LID_CRUDO = '175952680210489'
+const NUM_REAL = '5541998887777'
+const PARTICIPANTES_LID = [{ id: LID_CRUDO + '@lid', phoneNumber: NUM_REAL + '@s.whatsapp.net' }]
 
 const ranking = require('../comandos/ranking')
+// 🪪 lid.js entra DEPOIS do comando (que já o requireou): é o MESMO objeto de
+// módulo, então o gancho __definirConsultaSessaoTeste abaixo vale para o
+// /ranking de verdade — sem precisar injetar nada no comando.
+const lid = require('../lid')
 const coresVip = require('../dados/cores-vip')
 const pergaminho = require('../pergaminho-ranking')
 const temasVip = require('../temas-vip')
@@ -250,6 +285,93 @@ async function main () {
       I.ROW_NOME_X, I.ROW_INICIO, I.ROW_X1 - I.ROW_RESERVA_TOTAL, I.ROW_INICIO + I.ROW_ALT
     )
     exigir(pintados > 40, 'a cor do VIP nao apareceu no pergaminho (' + pintados + ' px)')
+  })
+
+  // ═══════════════════════════════════════════════════════════════════
+  // 🪪 REGRESSÃO DO LID — o bug real: o `usuario_id` do banco é o que o
+  // bot.js gravou a partir do `sender` cru (num grupo com LID habilitado isso
+  // é o LID, ex.: "175952680210489"), enquanto o documento de VIP fica no
+  // NÚMERO REAL (o /darvip, o /nomecustom e o /corvip resolvem antes). Com
+  // o mock fiel ao vip.js, consultar pelo identificador cru simplesmente não
+  // acha o VIP → nome do banco e tinta padrão. Estes testes travam isso.
+  // ═══════════════════════════════════════════════════════════════════
+  await testar('regressão LID: VIP salvo pelo número real aparece com nome e cor mesmo vindo por LID', async () => {
+    pedidosDeEstilos.length = 0
+    rankingFake = [{ usuario_id: LID_CRUDO, nome: 'NomeVindoDoBanco', total: 1287 }]
+    estilosFake = new Map([[NUM_REAL, { numero: NUM_REAL, nome: 'MeuNomeVip', cor: '🔥', alcunha: null }]])
+    const { sock, enviadas } = criarSock({
+      groupMetadata: async () => ({ subject: 'Recinto LID', participants: PARTICIPANTES_LID })
+    })
+    await ranking.executar(sock, JID_GRUPO, mensagem('/ranking'))
+
+    // 1) A consulta ao banco de VIPs foi feita pelo NÚMERO REAL, não pelo LID
+    const pedido = pedidosDeEstilos[pedidosDeEstilos.length - 1] || []
+    exigir(pedido.includes(NUM_REAL), 'a consulta não usou o numero resolvido: ' + JSON.stringify(pedido))
+    exigir(!pedido.includes(LID_CRUDO), 'a consulta mandou o LID cru: ' + JSON.stringify(pedido))
+
+    // 2) O nome custom (não o do banco) e a cor chegaram no item desenhado
+    let itemTop = null
+    ranking._injetarCapa(async (args) => { itemTop = args.itens[0]; return Buffer.alloc(8) })
+    const { sock: sock2, enviadas: env2 } = criarSock({
+      groupMetadata: async () => ({ subject: 'Recinto LID', participants: PARTICIPANTES_LID })
+    })
+    await ranking.executar(sock2, JID_GRUPO, mensagem('/ranking'))
+    ranking._restaurarCapa()
+
+    exigir(itemTop, 'o desenho nao recebeu nenhum item')
+    exigir(itemTop.nome === 'MeuNomeVip', 'o nome custom nao foi usado: ' + itemTop.nome)
+    exigir(itemTop.cor === '🔥', 'a cor do corVip nao chegou no item: ' + JSON.stringify(itemTop.cor))
+    exigir(itemTop.saiu === false, 'o lider por LID foi marcado como saiu do grupo a toa')
+    // (o composer fake devolve um buffer invalido, entao aqui o comando cai
+    // no fallback em TEXTO — e ele tambem tem que sair com a cor)
+    const txt = textoUnico(env2)
+    exigir(/🔥 MeuNomeVip/.test(txt), 'o fallback em texto perdeu a cor/nome: ' + txt)
+
+    // 3) No pergaminho DE VERDADE a cor é pintada na linha do topo
+    estilosFake = new Map([[NUM_REAL, { numero: NUM_REAL, nome: 'MeuNomeVip', cor: '🔥', alcunha: null }]])
+    const { sock: sock3, enviadas: env3 } = criarSock({
+      groupMetadata: async () => ({ subject: 'Recinto LID', participants: PARTICIPANTES_LID })
+    })
+    await ranking.executar(sock3, JID_GRUPO, mensagem('/ranking'))
+    estilosFake = new Map()
+
+    const envio = imagemEnviada(env3)
+    exigir(envio, 'deveria mandar o pergaminho')
+    const imagem = await Jimp.read(envio.conteudo.image)
+    const pintados = contarCor(
+      imagem, coresVip.corDoEmoji('🔥'),
+      I.ROW_NOME_X, I.ROW_INICIO, I.ROW_X1 - I.ROW_RESERVA_TOTAL, I.ROW_INICIO + I.ROW_ALT
+    )
+    exigir(pintados > 40, 'a cor do corVip NAO apareceu no pergaminho vindo por LID (' + pintados + ' px)')
+  })
+
+  await testar('regressão LID: LID fora dos metadados cai no mapeamento da sessão', async () => {
+    const { resolverNumeros } = ranking.__internos
+    // Sem participante nos metadados → tenta o lid-mapping da Baileys
+    lid.__definirConsultaSessaoTeste(async (lidCru) => (lidCru === LID_CRUDO ? NUM_REAL : null))
+    const mapa = await resolverNumeros([], [LID_CRUDO])
+    exigir(mapa.get(LID_CRUDO) === NUM_REAL, 'o mapeamento da sessao nao resolveu: ' + JSON.stringify([...mapa]))
+    lid.__definirConsultaSessaoTeste(null)
+  })
+
+  await testar('resolverNumeros: número real fica, LID dos metadados vira telefone e o desconhecido fica', async () => {
+    const { resolverNumeros } = ranking.__internos
+    lid.__definirConsultaSessaoTeste(async () => null)
+    const mapa = await resolverNumeros(PARTICIPANTES_LID, [
+      ID_TOP,                       // ja e numero real (esta nos metadados)
+      LID_CRUDO,                    // LID com phoneNumber nos metadados
+      '5511999990000',              // ninguem conhece: segue como veio
+      '',                           // id vazio: ignorado
+      ID_TOP + ':7'                 // com sufixo de dispositivo
+    ])
+    exigir(mapa.get(ID_TOP) === ID_TOP, 'numero real alterado: ' + mapa.get(ID_TOP))
+    exigir(mapa.get(LID_CRUDO) === NUM_REAL, 'LID dos metadados nao virou telefone: ' + mapa.get(LID_CRUDO))
+    exigir(mapa.get('5511999990000') === '5511999990000', 'desconhecido foi inventado: ' + mapa.get('5511999990000'))
+    exigir(!mapa.has(''), 'id vazio entrou no mapa')
+    // A chave é sempre o id NORMALIZADO: "…:7" colapsa em ID_TOP (uma entrada só)
+    exigir(mapa.get(ID_TOP) === ID_TOP, 'sufixo :7 nao colapsou no id certo: ' + mapa.get(ID_TOP))
+    exigir(mapa.size === 3, 'mapa com tamanho inesperado (id duplicado?): ' + JSON.stringify([...mapa]))
+    lid.__definirConsultaSessaoTeste(null)
   })
 
   await testar('sem metadados do grupo o pergaminho sai mesmo assim (com asterisco)', async () => {
