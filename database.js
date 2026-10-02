@@ -177,7 +177,9 @@ async function registrarMensagem(grupoId, usuarioId, nome, extras = {}) {
 // BuscarRanking: retorna os `limite` usuários que MAIS enviaram mensagens
 // no grupo `grupoId`.
 // ⚠️ Filtro obrigatório por grupo_id — cada grupo tem seu próprio ranking.
-// Retorno: [ { usuario_id, nome, total }, ... ] (ordenado do maior p/ menor)
+// Retorno: [ { usuario_id, nome, total, ultimaMensagem, lid }, ... ]
+//   (ordenado do maior p/ menor; `ultimaMensagem` é o carimbo de tempo da
+//   ÚLTIMA mensagem, em ms — é o que o /procurado mostra no cartaz)
 // -------------------------------------------------------------------
 async function buscarRanking(grupoId, limite = 10) {
   try {
@@ -191,10 +193,14 @@ async function buscarRanking(grupoId, limite = 10) {
 
     // Mantém o formato de retorno do SQLite + o lid original, que o /ranking e
     // o /procurado usam para AGRUPAR as linhas da mesma pessoa.
+    // ⚠️ `ultimaMensagem` (ms) é o carimbo gravado por `registrarMensagem`.
+    // Documento antigo, sem o campo, vem como null — quem mostra a data
+    // decide o que fazer com null (o /procurado só desenha a linha se houver).
     return documentos.map((doc) => ({
       usuario_id: doc.usuario_id,
       nome: doc.nome,
       total: doc.total,
+      ultimaMensagem: Number(doc.ultimaMensagem) || null,
       lid: doc.lid || null
     }))
   } catch (err) {

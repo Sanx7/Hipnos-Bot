@@ -22,9 +22,10 @@
 // 🔌 AMBIENTE OFFLINE (precisa vir ANTES de qualquer require do projeto):
 // zerar o MONGODB_URI impede o config.js de puxar o .env da raiz. Sem isso a
 // consulta de assinatura VIP do /figurinha (campo `assinatura` do documento de
-// VIP, para a marca d'água) abriria conexão com o Atlas de verdade; aqui ela
-// devolve null na hora e o cenário segue SEM marca d'água — que é exatamente o
-// comportamento de "usuário sem assinatura" que este teste cobre.
+// VIP, que vira o nome de AUTOR no EXIF) abriria conexão com o Atlas de
+// verdade; aqui ela devolve null na hora e o cenário segue com o autor padrão
+// — que é exatamente o comportamento de "usuário sem assinatura" que este
+// teste cobre.
 process.env.MONGODB_URI = ''
 process.env.MONGO_URI_RPG = ''
 
@@ -267,13 +268,39 @@ async function prepararMidias () {
     retrato: await gerarImagem('retrato.jpg', '300x600', COR_A, { metade: true, corMetade: COR_B }),
     paisagem: await gerarImagem('paisagem.jpg', '600x300', COR_A, { metade: true, corMetade: COR_B }),
     videoRetrato: await gerarVideo('video-retrato.mp4', '300x600', COR_A),
-    // 🖤 Imagem PRETA: qualquer pixel claro que aparecer nela é a marca d'água
-    // (é assim que a PARTE 5 prova que a assinatura VIP foi aplicada).
+    // 🖤 Imagem PRETA: usada na PARTE 5 (o EXIF do VIP é lido de volta para
+    // provar que o nome de autor saiu com a assinatura).
     preta: await gerarImagem('preta.jpg', '512x512', '0x000000')
   }
 }
 
-// 🔎 Conta os pixels CLAROS de um webp (marca d'água branca sobre preto).
+// 🏷️ Lê pack/autor do EXIF de um webp (node-webpmux, tolerante ao lixo
+// binário que antecede o JSON — ver scripts/teste-assinatura.js).
+async function lerExifWebp(buffer) {
+  const { Image } = require('node-webpmux')
+  const img = new Image()
+  await img.load(buffer)
+  const bruto = (img.exif || Buffer.from('')).toString('utf-8')
+  let melhor = null
+  let inicio = -1
+  while (true) {
+    inicio = bruto.indexOf('{', inicio + 1)
+    if (inicio === -1) break
+    const fim = bruto.lastIndexOf('}')
+    if (fim <= inicio) continue
+    try {
+      const candidato = JSON.parse(bruto.slice(inicio, fim + 1))
+      if (candidato && candidato['sticker-pack-name']) return { pack: candidato['sticker-pack-name'] || null, autor: candidato['sticker-pack-publisher'] || null }
+      if (!melhor) melhor = candidato
+    } catch (err) { /* tenta a próxima chave */ }
+  }
+  if (!melhor) throw new Error('EXIF sem JSON legivel')
+  return { pack: melhor['sticker-pack-name'] || null, autor: melhor['sticker-pack-publisher'] || null }
+}
+
+// 🔎 Conta os pixels CLAROS de um webp (legado da época da marca d'água —
+// mantido porque outros cenários ainda importam o helper; a PARTE 5 agora
+// prova a assinatura lendo o EXIF, não contando pixels).
 async function contarClaros (buffer, marca) {
   const entrada = path.join(tmp, `claros-${marca}.webp`)
   const saida = path.join(tmp, `claros-${marca}.gray`)
@@ -499,7 +526,8 @@ async function main () {
   // O documento de VIP é indexado pelo TELEFONE. Com o mapeamento LID→telefone
   // da sessão INDISPONÍVEL (injetado assim aqui), consultar o documento com o
   // "@lid" cru não acha nada — era exatamente assim que a assinatura sumia. O
-  // comando resolve o autor por vip-acesso.js (metadados do grupo primeiro).
+  // comando resolve o autor por vip-acesso.js (metadados do grupo primeiro) e
+  // grava a assinatura como nome de AUTOR no EXIF (pack fixo "Hipnos Bot").
   lid.__definirConsultaSessaoTeste(async () => null)
   bufferAtual = midias.preta.buffer
 
@@ -510,15 +538,16 @@ async function main () {
 
   r = await rodarComando(msgDireta(foto), LID_VIP)
   sticker = rotulo(r)
-  const clarosDoVip = sticker?.sticker ? await contarClaros(sticker.sticker, 'vip') : 0
-  checar('VIP em "@lid": a figurinha sai com a assinatura (marca visível na imagem preta)',
-    clarosDoVip > 0, `${clarosDoVip} pixel(s) claro(s)`)
+  const exifVip = sticker?.sticker ? await lerExifWebp(sticker.sticker) : null
+  checar('VIP em "@lid": o EXIF sai com o autor = assinatura (pack fixo)',
+    exifVip?.autor === '@joaovip' && exifVip?.pack === 'Hipnos Bot', JSON.stringify(exifVip))
 
   r = await rodarComando(msgDireta(foto), AUTOR) // mortal comum
-  const semMarca = rotulo(r)
-  const clarosDoComum = semMarca?.sticker ? await contarClaros(semMarca.sticker, 'comum') : 0
-  checar('mortal comum: nenhuma marca d\'água (a assinatura é exclusiva do VIP)',
-    Boolean(semMarca?.sticker) && clarosDoComum === 0, `${clarosDoComum} pixel(s) claro(s)`)
+  const semAssinatura = rotulo(r)
+  const exifComum = semAssinatura?.sticker ? await lerExifWebp(semAssinatura.sticker) : null
+  checar('mortal comum: EXIF com o autor padrão (a assinatura é exclusiva do VIP)',
+    Boolean(semAssinatura?.sticker) && exifComum?.autor === 'Sombras do Limbo' && exifComum?.pack === 'Hipnos Bot',
+    JSON.stringify(exifComum))
 
   lid.__definirConsultaSessaoTeste(null)
 

@@ -1,8 +1,8 @@
 // ============================================================
-// ✍️ ASSINATURA (/assinatura, alias /assinaturavip) — marca d'água
+// ✍️ ASSINATURA (/assinatura, alias /assinaturavip) — nome de autor (EXIF)
 // ============================================================
 // Uso:
-//   /assinatura @joaovip  -> define a assinatura (até 15 caracteres)
+//   /assinatura @joaovip  -> define a assinatura (até 35 caracteres, emoji ok)
 //   /assinatura          -> mostra a atual
 //   /assinatura remover  -> desliga (também /reset)
 //
@@ -14,13 +14,13 @@
 // (collection "vips", gerida pelo vip.js), com o LID resolvido p/ o número
 // real antes de gravar — igual ao /nomecustom e ao /darvip.
 //
-// 📐 Regras (validadas no vip.js): até 15 caracteres, sem quebra de linha
-// nem caracteres invisíveis e SEM EMOJI (o drawtext do ffmpeg escreve com
-// fonte TTF comum e um emoji sairia como quadradinho vazio na figurinha).
+// 📐 Regras (validadas no vip.js): até 35 caracteres, sem quebra de linha
+// nem caracteres invisíveis; emoji PERMITIDO (o EXIF grava UTF-8 puro).
 //
-// 📍 Onde a assinatura aparece: nas figurinhas criadas com /s e /figurinha,
-// no canto inferior direito, fonte pequena com leve contorno. Sem assinatura
-// (ou sem VIP) o comportamento dos dois comandos é EXATAMENTE o de hoje.
+// 📍 Onde a assinatura aparece: NO EXIF das figurinhas criadas com /s e
+// /figurinha — pack fixo "Hipnos Bot" + autor = assinatura (ou "Sombras do
+// Limbo" quando não há). É o "pack • autor" que o WhatsApp mostra ao
+// segurar a figurinha. Sem assinatura (ou sem VIP) o EXIF segue o padrão.
 // ============================================================
 
 const vip = require('../../vip')
@@ -44,11 +44,7 @@ const AVISO_SEM_PERMISSAO =
 
 const AVISO_LIMITE =
   `⚠️ *Assinatura muito longa.*\n\n` +
-  `A figurinha é pequena (512×512): use até *${vip.ASSINATURA_MAX}* caracteres, sem quebra de linha.`
-
-const AVISO_EMOJI =
-  '⚠️ *Sem emoji na assinatura.*\n\n' +
-  'A marca é escrita com fonte comum e um emoji sairia como quadradinho vazio na figurinha. Use só texto (ex.: */assinatura @joaovip*).'
+  `O nome de autor aceita até *${vip.ASSINATURA_MAX}* caracteres, sem quebra de linha.`
 
 const AVISO_VAZIA = '⚠️ *Assinatura vazia.* Escreva o texto depois do comando (ex.: */assinatura @joaovip*).'
 
@@ -63,7 +59,8 @@ const AVISO_SEM_VIP_ATIVO =
 function avisoDoMotivo(motivo) {
   if (motivo === 'sem-vip') return AVISO_SEM_VIP_ATIVO
   if (motivo === 'longo') return AVISO_LIMITE
-  if (motivo === 'emoji') return AVISO_EMOJI
+  // Motivo legado 'emoji' (assinaturas antigas recusavam emoji): hoje o
+  // emoji é permitido, então cai no genérico sem quebrar o comando.
   if (motivo === 'vazio') return AVISO_VAZIA
   return AVISO_INDISPONIVEL
 }
@@ -71,7 +68,7 @@ function avisoDoMotivo(motivo) {
 module.exports = {
   nome: 'assinatura',
   aliases: ['assinaturavip'],
-  descricao: "Define a marca d'água que aparece nas suas figurinhas (/s e /figurinha) — exclusivo para VIPs.",
+  descricao: "Define o nome de autor das suas figurinhas (/s e /figurinha) — o que aparece no EXIF como 'pack • autor'. Exclusivo para VIPs.",
   categoria: 'vip',
 
   async executar(sock, jid, msg, text) {
@@ -91,30 +88,31 @@ module.exports = {
         const atual = await vip.obterAssinatura(alvo)
         const resposta = atual
           ? '✍️ *SUA ASSINATURA* ✍️\n\n' +
-            `Suas figurinhas do /s e do /figurinha saem marcadas como: *${atual}*\n\n` +
+            `Suas figurinhas do /s e do /figurinha saem com o autor: *${atual}*\n` +
+            '(pack "Hipnos Bot" • o autor aparece ao segurar a figurinha)\n\n' +
             '✏️ Trocar: */assinatura <texto>*\n' +
             '🧹 Desligar: */assinatura remover*'
           : '✍️ *Você ainda não tem assinatura.*\n\n' +
-            `Use */assinatura <texto>* (até ${vip.ASSINATURA_MAX} caracteres, sem emoji) para marcar suas figurinhas do /s e do /figurinha.`
+            `Use */assinatura <texto>* (até ${vip.ASSINATURA_MAX} caracteres, emoji liberado) para personalizar o nome de autor das suas figurinhas do /s e do /figurinha.`
 
         return await sock.sendMessage(jid, { text: resposta }, { quoted: msg }).catch(() => {})
       }
 
-      // 4) "remover" / "reset" → desliga a marca d'água
+      // 4) "remover" / "reset" → desliga a assinatura (o EXIF volta ao padrão)
       if (/^(remover|reset)$/i.test(pedido)) {
         const resultado = await vip.removerAssinatura(alvo)
         if (!resultado.ok) {
           return await sock.sendMessage(jid, { text: avisoDoMotivo(resultado.motivo) }, { quoted: msg }).catch(() => {})
         }
         const resposta = resultado.tinha
-          ? "🧹 *Assinatura removida.*\n\nSuas figurinhas voltam a sair sem marca d'água."
-          : "✍️ Você não tinha assinatura definida — suas figurinhas seguem sem marca d'água."
+          ? '🧹 *Assinatura removida.*\n\nSuas figurinhas voltam a sair com o autor padrão.'
+          : '✍️ Você não tinha assinatura definida — suas figurinhas seguem com o autor padrão.'
 
         return await sock.sendMessage(jid, { text: resposta }, { quoted: msg }).catch(() => {})
       }
 
-      // 5) Caso geral: definir (limite de tamanho, saneamento e recusa de emoji
-      //    ficam no vip.js, junto com o registro no Mongo).
+      // 5) Caso geral: definir (limite de tamanho e saneamento ficam no
+      //    vip.js, junto com o registro no Mongo). Emoji é permitido.
       const resultado = await vip.definirAssinatura(alvo, pedido)
       if (!resultado.ok) {
         return await sock.sendMessage(jid, { text: avisoDoMotivo(resultado.motivo) }, { quoted: msg }).catch(() => {})
@@ -124,7 +122,7 @@ module.exports = {
       await sock.sendMessage(jid, {
         text:
           '✍️💠 *ASSINATURA DEFINIDA* 💠✍️\n\n' +
-          `A partir de agora suas figurinhas do /s e do /figurinha saem marcadas como *${resultado.assinatura}*.\n\n` +
+          `A partir de agora suas figurinhas do /s e do /figurinha saem com o autor *${resultado.assinatura}* (pack "Hipnos Bot").\n\n` +
           '🧹 Para desligar: */assinatura remover*'
       }, { quoted: msg }).catch(() => {})
     } catch (err) {
@@ -143,7 +141,6 @@ module.exports = {
     avisoDoMotivo,
     AVISO_SEM_PERMISSAO,
     AVISO_LIMITE,
-    AVISO_EMOJI,
     AVISO_VAZIA,
     AVISO_INDISPONIVEL,
     AVISO_SEM_VIP_ATIVO,

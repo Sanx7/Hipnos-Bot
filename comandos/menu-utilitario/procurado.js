@@ -13,12 +13,17 @@
 // PADRÃO do número (dados/alcunhas.js, hash FNV-1a) — determinística, não
 // muda sozinha e vale para qualquer pessoa, VIP ou não.
 //
-// 📅 "no topo desde": ⚠️ SIMPLIFICAÇÃO DELIBERADA. O banco de mensagens
-// (database.js) guarda só o total acumulado por usuário — não existe
-// histórico de "desde quando essa pessoa está no topo". Então a data
-// impressa é a de HOJE, no fuso de São Paulo. Quando (e se) existir o
-// histórico, é só trocar `dataDeHoje()` pela leitura dele; o resto do
-// desenho não muda.
+// 📅 "última mensagem": o banco de mensagens (database.js) grava em cada
+// documento o carimbo de tempo da ÚLTIMA mensagem (`ultimaMensagem`), e o
+// `agruparPorNumero` já devolve o MAIS NOVO entre as linhas da mesma pessoa
+// (LID + telefone). O cartaz mostra essa data REAL (fuso de São Paulo) e, sem
+// carimbo (documento antigo), a linha simplesmente não é desenhada.
+//
+// 🗓️ "no topo desde": ⚠️ SIMPLIFICAÇÃO DELIBERADA, mantida só no fallback em
+// TEXTO. O banco guarda o total acumulado por usuário — não existe histórico
+// de "desde quando essa pessoa está no topo". Então essa data é a de HOJE, no
+// fuso de São Paulo. É por isso que ela saiu do cartaz: no desenho, a linha
+// honesta é a da última mensagem.
 //
 // 🛟 Se a imagem falhar por qualquer motivo (moldura ausente, Jimp, download
 // da foto, envio), o comando cai no TEXTO de sempre com a mesma informação —
@@ -91,6 +96,17 @@ function dataDeHoje (agora) {
   return `${valor('day')}/${valor('month')}/${valor('year')}`
 }
 
+// 📅 A data da ÚLTIMA MENSAGEM do líder, a partir do carimbo de tempo em ms que
+// o ranking guarda (o `agruparPorNumero` já devolve o MAIS NOVO entre LID e
+// telefone). Devolve null quando não há carimbo válido (documento antigo, sem
+// o campo) — e aí o cartaz simplesmente não desenha a linha, em vez de
+// inventar uma data.
+function dataDaUltimaMensagem (carimbo) {
+  const ms = Number(carimbo)
+  if (!Number.isFinite(ms) || ms <= 0) return null
+  return dataDeHoje(new Date(ms))
+}
+
 // Normaliza um participante (objeto ou JID) para comparar com o banco.
 function normalizarParticipante (participante) {
   if (!participante) return ''
@@ -141,12 +157,16 @@ async function buscarFotoDoLider (sock, numero) {
 
 // 💬 Fallback em TEXTO: mesmas informações do cartaz, sem imagem. É o que
 // salva o comando quando a arte (ou o envio) falha.
-function respostaEmTexto ({ nome, alcunha, total, palavra, desde, saiu }) {
+// ⚠️ A linha "última mensagem" só entra com data válida (mesma regra do
+// cartaz); o "no topo desde" continua aqui porque no texto cabe e é a
+// informação do momento em que o comando rodou.
+function respostaEmTexto ({ nome, alcunha, total, palavra, desde, ultimaMensagem, saiu }) {
   return (
     '🕵️ *PROCURADO* 🕵️\n\n' +
     `👤 *${nome}*${saiu ? ' *(saiu do grupo)*' : ''}\n` +
     `⚔️ *"${alcunha}"*\n\n` +
     `💬 *${total}* ${palavra} no ranking do grupo\n` +
+    (ultimaMensagem ? `📩 última mensagem: ${ultimaMensagem}\n` : '') +
     `📅 no topo desde: ${desde}`
   )
 }
@@ -239,9 +259,13 @@ module.exports = {
         console.error('[procurado] ⚠️ falha ao ler o estilo do VIP (seguindo no padrão):', errEstilo?.message || errEstilo)
       }
 
-      // 6) O "desde" é a data de hoje (ver a nota de simplificação no topo).
+      // 6) 📅 O "desde" é a data de hoje (ver a nota de simplificação no topo).
       //    O total é a SOMA do grupo (LID + telefone da mesma pessoa).
+      //    A `ultimaMensagem` é a data REAL da última mensagem do líder (vem do
+      //    carimbo de tempo do ranking) e é o que o cartaz mostra na linha
+      //    "última mensagem" — no lugar do antigo "no topo desde".
       const desde = dataDeHoje()
+      const ultimaMensagem = dataDaUltimaMensagem(lider.ultimaMensagem)
       const total = lider.total
       const palavra = total > 1 ? 'mensagens' : 'mensagem'
       // ⚠️ Sem metadados não dá para saber quem saiu: NÃO marca (a rede não pune).
@@ -259,6 +283,7 @@ module.exports = {
           total,
           palavra,
           desde,
+          ultimaMensagem,
           rodape: RODAPE_CARTAZ,
           foto
         })
@@ -268,7 +293,7 @@ module.exports = {
         await sock.sendMessage(jid, payload, { quoted: msg })
       } catch (errCartaz) {
         console.error('[procurado] ⚠️ cartaz falhou, segue em texto:', errCartaz?.message || errCartaz)
-        await sock.sendMessage(jid, { text: respostaEmTexto({ nome, alcunha, total, palavra, desde, saiu }) }, { quoted: msg })
+        await sock.sendMessage(jid, { text: respostaEmTexto({ nome, alcunha, total, palavra, desde, ultimaMensagem, saiu }) }, { quoted: msg })
       }
     } catch (err) {
       console.error('Erro no comando procurado:', err)
@@ -285,6 +310,7 @@ module.exports = {
   __internos: {
     RODAPE_CARTAZ,
     dataDeHoje,
+    dataDaUltimaMensagem,
     normalizarParticipante,
     aindaNoGrupo,
     baixarFoto,

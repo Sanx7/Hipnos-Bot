@@ -34,7 +34,7 @@ enfrentam o julgamento das sombras."
 ➥ Exibe este pergaminho.
 
 🏆 /ranking
-➥ Mostra os 10 membros mais ativos do grupo num pergaminho ilustrado (mais mensagens enviadas).
+➥ Mostra os 7 membros mais ativos do grupo num quadro ilustrado (mais mensagens enviadas).
 
 👤 /perfil
 ➥ Mostra o perfil do autor (ou de um @mencionado): foto, número, cargo e posição no ranking do grupo.

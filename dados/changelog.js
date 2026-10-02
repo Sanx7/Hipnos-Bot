@@ -18,6 +18,11 @@
 
 module.exports = [
   {
+    data: '2026-10-02',
+    titulo: '/ranking agora é um quadro grego com o top 7',
+    detalhes: 'O /ranking mudou de cara: o pergaminho desenhado por código virou um quadro fixo (moldura grega, rolos dourados, templo no topo) com as 7 posições do pódio prontas. Agora cada linha traz o nome na cor do seu /corvip e a contagem de mensagens, e o quadro mostra os 7 primeiros colocados. Se a imagem falhar, a lista em texto continua sendo enviada.'
+  },
+  {
     data: '2026-09-30',
     titulo: 'Correção: cor do VIP, assinatura e tema agora aparecem sempre',
     detalhes: 'A cor do /corvip podia não pintar o nome no /ranking, a assinatura do /assinatura podia não sair na figurinha (/s e /figurinha) e o tema do /temavip podia não colorir os cards de /kiss e /ship. O bot passou a reconhecer o autor pelo número real antes de buscar esses dados.'
@@ -26,11 +31,6 @@ module.exports = [
     data: '2026-09-30',
     titulo: '/procurado — o líder do ranking ganha um cartaz com foto',
     detalhes: 'Use /procurado no grupo para gerar o cartaz do quem mais mandou mensagem: foto, nome, alcunha, contagem e a data. Todo mundo já tem uma alcunha — os VIPs podem trocar a delas com /alcunha.'
-  },
-  {
-    data: '2026-09-30',
-    titulo: '/ranking agora é um pergaminho grego ilustrado',
-    detalhes: 'O /ranking virou imagem: pergaminho envelhecido, frisco grego dourado, rolos de ouro no topo e na base e o seu nome pintado com a cor do seu /corvip. Se a imagem falhar, a lista em texto continua sendo enviada.'
   },
   {
     data: '2026-09-30',

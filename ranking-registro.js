@@ -16,7 +16,7 @@
 //      Mesmo com a gravação corrigida, o banco ainda tem documentos antigos sob
 //      chave-LID (ver scripts/migrar-ranking-lid.js). O /ranking e o /procurado
 //      agrupam as linhas pelo NÚMERO RESOLVIDO: a pessoa aparece UMA vez, com a
-//      SOMA. Por isso os comandos buscam mais linhas do que as 10 exibidas
+//      SOMA. Por isso os comandos buscam mais linhas do que as 7 exibidas
 //      (LIMITE_BUSCA_AGRUPAMENTO) e só cortam o top DEPOIS de agrupar: cortar
 //      antes jogaria fora o documento-telefone (que pode estar na 11ª posição)
 //      e a soma sairia errada.
@@ -42,9 +42,9 @@ const lid = require('./lid')
 const database = require('./database')
 
 // Quantas linhas do banco os comandos devem buscar ANTES de agrupar por
-// número. O top exibido é 10; buscamos 40 para que o agrupamento (LID +
+// número. O top exibido é 7; buscamos 40 para que o agrupamento (LID +
 // telefone da MESMA pessoa) consiga somar mesmo quando um dos documentos está
-// fora das 10 primeiras posições.
+// fora das 7 primeiras posições.
 const LIMITE_BUSCA_AGRUPAMENTO = 40
 
 // -------------------------------------------------------------------

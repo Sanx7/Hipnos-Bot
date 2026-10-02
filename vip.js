@@ -38,8 +38,8 @@
 //      obterCorVip/obterCoresVip/obterEstilosVip leem o campo sem nunca lançar
 //      (obterEstilosVip devolve nome E cor numa consulta só — é o do /ranking).
 //  10. validarAssinatura/definirAssinatura/removerAssinatura — campo
-//      `assinatura`: marca d'água de até ASSINATURA_MAX (15) caracteres, sem
-//      emoji, que o /s e o /figurinha gravam na figurinha via ffmpeg;
+//      `assinatura`: nome de AUTOR de até ASSINATURA_MAX (35) caracteres
+//      (emoji permitido), que o /s e o /figurinha gravam no EXIF da figurinha;
 //      obterAssinatura(numero) devolve null (sem lançar) quando não há.
 //  11. validarTemaVip/definirTemaVip/removerTemaVip — campo `temaVip`: nome
 //      do esquema de cor (padrao/neon/pastel/escuro/dourado, catálogo no
@@ -65,8 +65,8 @@
 //                                      // bot exibe no /perfil e no /ranking
 //     corVip:        "🔥"              // OPCIONAL (/corvip) — 1 emoji que
 //                                      // aparece antes do nome no /ranking
-//     assinatura:    "@joaovip"         // OPCIONAL (/assinatura) — marca
-//                                      // d'água nas figurinhas do /s
+//     assinatura:    "@joaovip"         // OPCIONAL (/assinatura) — nome de
+//                                      // autor no EXIF das figurinhas do /s
 //     temaVip:       "neon"            // OPCIONAL (/temavip) — esquema de
 //                                      // cor dos cards (catálogo temas-vip)
 //     alcunhaCustom: "Punho de Zeus"   // OPCIONAL (/alcunha) — apelido de
@@ -534,21 +534,22 @@ async function removerCorVip(numeroBruto) {
 // -------------------------------------------------------------------
 // ✍️ ASSINATURA (campo `assinatura` do MESMO documento de VIP) — /assinatura
 // -------------------------------------------------------------------
-// Marca d'água curta que o VIP manda gravar nas figurinhas que cria com o
-// /s e o /figurinha (canto inferior direito, fonte pequena com contorno).
+// Nome de AUTOR que o VIP manda gravar nos metadados EXIF das figurinhas que
+// cria com o /s e o /figurinha (o "pack • autor" que o WhatsApp mostra ao
+// segurar a figurinha). Não é mais marca d'água desenhada: é só texto em
+// metadado, então não há problema de espaço visual, fonte TTF ou emoji.
 // Onde vive: campo `assinatura` do documento de VIP — nada de collection nova.
 //
 // Regras (o /assinatura traduz cada motivo em mensagem):
-//   - até ASSINATURA_MAX (15) caracteres: a figurinha é 512×512 e não sobra
-//     espaço visual para mais que isso;
+//   - até ASSINATURA_MAX (35) caracteres: limite generoso de metadado (a
+//     figurinha é só o veículo — o texto aparece no balão de info);
 //   - sem quebra de linha nem caracteres de controle/zero-width (o mesmo
 //     saneamento do nome custom);
-//   - SEM EMOJI: o drawtext do ffmpeg escreve com uma fonte TTF comum e um
-//     emoji sai como quadradinho/bolha vazia (verificado no ffmpeg embutido).
-// Motivos de recusa: 'vazio' | 'longo' | 'emoji' (e, na gravação, os mesmos
+//   - emoji PERMITIDO: o EXIF aceita UTF-8 puro, sem depender de fonte.
+// Motivos de recusa: 'vazio' | 'longo' (e, na gravação, os mesmos
 // 'sem-vip' | 'infra' | 'falha' dos outros campos).
 // -------------------------------------------------------------------
-const ASSINATURA_MAX = 15
+const ASSINATURA_MAX = 35
 
 // 🧼 Normalizador do campo `assinatura`: sem controle/invisível, sem espaço
 // duplicado, sem pontas. Não julga tamanho (quem julga é validarAssinatura).
@@ -561,6 +562,7 @@ function normalizarAssinatura(textoBruto) {
 }
 
 // ✅ validarAssinatura(texto): { ok: true, assinatura } | { ok: false, motivo }
+// Emoji é PERMITIDO (o EXIF grava UTF-8 puro, sem fonte TTF no caminho).
 async function validarAssinatura(textoBruto) {
   const assinatura = normalizarAssinatura(textoBruto)
   if (!assinatura) return { ok: false, motivo: 'vazio' }
@@ -568,18 +570,6 @@ async function validarAssinatura(textoBruto) {
   const tamanho = [...assinatura].length
   if (tamanho > ASSINATURA_MAX) {
     return { ok: false, motivo: 'longo', assinatura, tamanho }
-  }
-
-  // 🚫 Emoji não renderiza na fonte do drawtext (fica tofu/bolha vazia)
-  try {
-    const regex = await criarRegexEmoji()
-    if ((assinatura.match(regex) || []).length > 0) {
-      return { ok: false, motivo: 'emoji', assinatura, tamanho }
-    }
-  } catch (err) {
-    // Falha da lib NÃO bloqueia: a validação de tamanho já passou e o
-    // drawtext ignora o que não souber desenhar.
-    console.error('⚠️ [vip] falha ao checar emoji na assinatura:', err?.message || err)
   }
 
   return { ok: true, assinatura, tamanho }
@@ -598,7 +588,7 @@ async function definirAssinatura(numeroBruto, textoBruto) {
 }
 
 // 🧹 removerAssinatura(numeroBruto): apaga a assinatura (a figurinha volta a
-// sair sem marca d'água). { ok: true, tinha } | { ok: false, motivo }.
+// sair com o autor padrão "Sombras do Limbo"). { ok: true, tinha } | { ok: false, motivo }.
 async function removerAssinatura(numeroBruto) {
   const resultado = await removerCampoDeVipAtivo(numeroBruto, 'assinatura', normalizarAssinatura)
   if (resultado.ok) console.log(`[vip] 🧹 assinatura removida de ${resultado.numero}`)
@@ -841,9 +831,9 @@ async function obterCorVip(numeroBruto) {
 }
 
 // ✍️ obterAssinatura(numeroBruto): assinatura do VIP ATIVO (ou null). NUNCA
-// lança — é usada pelo /s e pelo /figurinha, que NUNCA podem quebrar por causa
-// de uma assinatura (sem banco, VIP sem assinatura ou registro vencido = null,
-// e a figurinha sai exatamente como hoje).
+// lança — é usada pelo /s e pelo /figurinha como nome de AUTOR do EXIF, que
+// NUNCA podem quebrar por causa de uma assinatura (sem banco, VIP sem
+// assinatura ou registro vencido = null, e a figurinha sai com o autor padrão).
 async function obterAssinatura(numeroBruto) {
   try {
     const lido = await lerCamposDeVipAtivo(numeroBruto, { assinatura: normalizarAssinatura })

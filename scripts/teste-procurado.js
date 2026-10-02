@@ -14,15 +14,17 @@
 // Cobre: metadados do comando, grupo obrigatório, grupo sem mensagens,
 // cartaz gerado (com/sem foto, com alcunha custom/padrão, líder que saiu),
 // detecção do círculo (alfa e mancha clara), recorte circular da foto,
-// texto longo cortado, título/nome/contagem/"desde" pintados, miniatura e
-// o fallback em texto quando a arte falha.
+// texto longo cortado, escada de tamanho do NOME, título dentro da faixa e
+// centralizado, rodapé legível, linha "última mensagem" (quando o ranking
+// tem carimbo de tempo e quando não tem), formatação da data no fuso de São
+// Paulo, miniatura e o fallback em texto quando a arte falha.
 // Uso: node scripts/teste-procurado.js
 // ============================================
 
 process.env.MONGODB_URI = ''
 
 const { Jimp, JimpMime, loadFont } = require('jimp')
-const { SANS_16_WHITE, SANS_32_WHITE } = require('jimp/fonts')
+const { SANS_32_WHITE, SANS_64_WHITE } = require('jimp/fonts')
 
 // 🗄️ database FAKE — instalado ANTES do require do comando (destructuring).
 const database = require('../database')
@@ -109,6 +111,45 @@ function contarCor (imagem, hex, x0, y0, x1, y1) {
   return total
 }
 
+// 📏 As FAIXAS de uma cor na região (cada faixa = uma linha de texto).
+// Separa por linhas com mais de `tolerancia` px SEM a cor no meio: o valor é
+// generoso de propósito (o espaço entre palavras de uma mesma linha tem ~20 px
+// e não pode virar "linha nova"), mas menor que o respiro entre as linhas do
+// miolo (≈ 44 px), que é o que separa uma linha da outra.
+function faixasDeCor (imagem, hex, x0, y0, x1, y1, tolerancia = 25) {
+  const n = parseInt(hex.replace('#', ''), 16)
+  const alvo = [n >> 16, (n >> 8) & 0xff, n & 0xff]
+  const d = imagem.bitmap.data
+  const W = imagem.bitmap.width
+  const achadas = []
+  let atual = null
+  for (let y = Math.max(0, y0); y < Math.min(imagem.bitmap.height, y1); y += 1) {
+    let minX = Infinity
+    let maxX = -Infinity
+    for (let x = Math.max(0, x0); x < Math.min(W, x1); x += 1) {
+      const j = (y * W + x) * 4
+      if (d[j] === alvo[0] && d[j + 1] === alvo[1] && d[j + 2] === alvo[2]) {
+        if (x < minX) minX = x
+        if (x > maxX) maxX = x
+      }
+    }
+    if (maxX < minX) continue // linha sem a cor
+    if (atual && y - atual.y1 <= tolerancia) {
+      atual.y1 = y
+      atual.x0 = Math.min(atual.x0, minX)
+      atual.x1 = Math.max(atual.x1, maxX)
+    } else {
+      atual = { y0: y, y1: y, x0: minX, x1: maxX }
+      achadas.push(atual)
+    }
+  }
+  return achadas.map((f) => ({
+    x0: f.x0, x1: f.x1, y0: f.y0, y1: f.y1,
+    altura: f.y1 - f.y0 + 1,
+    largura: f.x1 - f.x0 + 1
+  }))
+}
+
 // 📸 Foto sintética para exercitar o recorte circular sem rede.
 // ⚠️ AZUL DOMINANTE EM TODO O DISCO (b > r sempre): o teste prova que a foto
 // entrou comparando o canal B com o R no centro do círculo. Um gradiente
@@ -129,14 +170,64 @@ async function fotoSintetica (w = 240, h = 240) {
   return foto.getBuffer(JimpMime.png)
 }
 
+// 📏 Bandas de uma cor que têm pelo menos `minimo` pixels NA MESMA LINHA
+// (o filete tem 484 px de uma vez; o granulado da moldura tem 1). É o que
+// separa o filete de verdade do barulho de fundo da moldura — a tolerância de
+// linhas do `faixasDeCor` não daria conta do losango e dos pixels soltos.
+// Uma linha fora do mínimo CORTA a banda (o losango fica de fora).
+function faixasRobustas (imagem, hex, x0, y0, x1, y1, minimo) {
+  const n = parseInt(hex.replace('#', ''), 16)
+  const alvo = [n >> 16, (n >> 8) & 0xff, n & 0xff]
+  const d = imagem.bitmap.data
+  const W = imagem.bitmap.width
+  const bandas = []
+  let atual = null
+  for (let y = Math.max(0, y0); y < Math.min(imagem.bitmap.height, y1); y += 1) {
+    let minX = Infinity
+    let maxX = -Infinity
+    for (let x = Math.max(0, x0); x < Math.min(W, x1); x += 1) {
+      const j = (y * W + x) * 4
+      if (d[j] === alvo[0] && d[j + 1] === alvo[1] && d[j + 2] === alvo[2]) {
+        if (x < minX) minX = x
+        if (x > maxX) maxX = x
+      }
+    }
+    const larga = maxX - minX + 1
+    if (larga < minimo) {
+      if (atual) { bandas.push(atual); atual = null }
+      continue
+    }
+    if (!atual) atual = { y0: y, y1: y, x0: minX, x1: maxX }
+    else { atual.y1 = y; atual.x0 = Math.min(atual.x0, minX); atual.x1 = Math.max(atual.x1, maxX) }
+  }
+  if (atual) bandas.push(atual)
+  return bandas.map((b) => ({
+    x0: b.x0, x1: b.x1, y0: b.y0, y1: b.y1,
+    altura: b.y1 - b.y0 + 1,
+    largura: b.x1 - b.x0 + 1
+  }))
+}
+
+// 📐 Altura de tinta da linha que o `escolher` devolveu (tamanho real na tela).
+function alturaDaTintaDe (escolhido) {
+  return I.alturaDaTinta(escolhido.font, escolhido.texto, 0, escolhido.escala)
+}
+
 // ─── 🎨 Dados fixos do cartaz usado nos testes ───
 const LIDER_TESTE = { usuario_id: NUM_LIDER, nome: 'João da Silva', total: 1287 }
+// 📅 Carimbo de tempo fixo (2026-01-01 12:00 UTC = 09:00 em São Paulo) para
+// os testes da data: a data só é previsível se o fuso estiver certo.
+const CARIMBO_1 = Date.parse('2026-01-01T12:00:00Z')
+const CARIMBO_ANTIGO = Date.parse('2025-12-31T12:00:00Z')
+const DATA_1 = '01/01/2026'
+const DATA_ANTIGA = '31/12/2025'
 const DADOS_CARTAZ = {
   nome: 'João da Silva',
   alcunha: 'Devorador de Deuses',
   total: 1287,
   palavra: 'mensagens',
   desde: '30/09/2026',
+  ultimaMensagem: '30/09/2026',
   rodape: 'Quem linger mais no chat, mais aparece aqui.'
 }
 
@@ -227,17 +318,140 @@ async function main () {
     exigir(n > 200, 'o título não foi pintado na faixa (' + n + ' px)')
   })
 
-  await testar('composição: NOME, ALCUNHA, CONTAGEM e "desde" no miolo de papel', async () => {
+  await testar('composição: NOME, ALCUNHA, CONTAGEM e rodapé no miolo de papel', async () => {
     const { imagem } = await cartazDosTestes(false)
     const t = cartaz.CAIXA_TEXTO
-    // Tinta do nome (#2b1d10) e da alcunha (#8f2d1e) no miolo de papel.
+    // Tinta do nome (#2b1d10) e da alcunha (vermelho escuro) no miolo.
     const nome = contarCor(imagem, I.TINTA, t.x, t.y, t.x + t.largura, t.y + 300)
     const alcunha = contarCor(imagem, I.FITA, t.x, t.y, t.x + t.largura, t.y + 300)
     exigir(nome > 300, 'o nome não foi pintado (' + nome + ' px)')
     exigir(alcunha > 100, 'a alcunha não foi pintada (' + alcunha + ' px)')
-    // Tinta suave (#5c452c) = "desde" e rodapé, mais abaixo no papel.
-    const suave = contarCor(imagem, I.TINTA_SUAVE, t.x, t.y + 300, t.x + t.largura, t.y + t.altura)
-    exigir(suave > 100, 'o "desde"/rodapé não foi pintado (' + suave + ' px)')
+    // Tinta suave (#5c452c) só nos FILETES agora. A DATA e o rodapé NÃO podem
+    // mais usar essa cor: era ela que sumia no papel envelhecido.
+    const suave = contarCor(imagem, I.TINTA_SUAVE, t.x, t.y, t.x + t.largura, t.y + t.altura)
+    exigir(suave > 100, 'os filetes não foram pintados (' + suave + ' px)')
+    // 🔇 Regressão de um bug SILENCIOSO: os dois filetes desapareciam porque o
+    // cursor do layout é fracionário (gap = sobra / nº de linhas) e um índice
+    // fracionário em TypedArray é ignorado sem erro nenhum. Aqui exigimos as
+    // DUAS linhas de filete, com 3 px de altura e mais de 400 px de largura.
+    const filetes = faixasRobustas(imagem, I.TINTA_SUAVE, t.x, t.y, t.x + t.largura, I.FUNDO_MIOLO, 400)
+    exigir(filetes.length === 2, 'esperava 2 filetes, achei ' + filetes.length + ': ' + JSON.stringify(filetes))
+    for (const f of filetes) {
+      exigir(f.altura === 3, 'o filete não tem 3 px de espessura: ' + f.altura)
+      exigir(f.largura > 400, 'o filete saiu curto demais: ' + f.largura)
+      exigir(f.x0 >= t.x + 150 && f.x1 <= t.x + t.largura - 150, 'o filete saiu da margem: ' + JSON.stringify(f))
+    }
+  })
+
+  await testar('composição: o TÍTULO fica DENTRO da faixa escura e centralizado', async () => {
+    const { imagem } = await cartazDosTestes(false)
+    const cx = Math.round(imagem.bitmap.width / 2)
+    const t = cartaz.CAIXA_TITULO
+    // O ouro do título (#d9a520) — o filete da faixa usa OURO (#c9a227), então
+    // a cor separa o texto do ornamento.
+    const faixas = faixasDeCor(imagem, '#d9a520', t.x, t.y, t.x + t.largura, t.y + t.altura)
+    exigir(faixas.length === 1, 'o título não virou uma linha só: ' + faixas.length + ' faixa(s)')
+    const r = faixas[0]
+    exigir(r.y0 >= t.y && r.y1 < t.y + t.altura, 'o título vazou da faixa: ' + JSON.stringify(r))
+    exigir(r.x0 >= t.x && r.x1 <= t.x + t.largura, 'o título estourou a largura da faixa: ' + JSON.stringify(r))
+    const meio = (r.x0 + r.x1) / 2
+    exigir(Math.abs(meio - cx) <= 2, 'o título não está centralizado (meio ' + meio + ', centro ' + cx + ')')
+    // A 1,5× o título é bem maior do que a fonte de 64 px crua.
+    exigir(r.altura >= 60, 'o título continua pequeno (' + r.altura + ' px de tinta)')
+  })
+
+  await testar('composição: o NOME é a maior linha do miolo e cabe na caixa', async () => {
+    const { imagem } = await cartazDosTestes(false)
+    const t = cartaz.CAIXA_TEXTO
+    const faixas = faixasDeCor(imagem, I.TINTA, t.x, t.y, t.x + t.largura, I.FUNDO_MIOLO)
+    exigir(faixas.length >= 4, 'faltaram linhas de tinta no miolo: ' + faixas.length)
+    const nome = faixas[0]
+    // O nome vem no topo da escada (1,5×) — 72 px de tinta contra os ~30 px
+    // das linhas de baixo. Era essa a queixa: nome miúdo, cartaz vazio.
+    exigir(nome.altura >= 60, 'o nome continua pequeno: ' + nome.altura + ' px de tinta')
+    // A primeira linha de tinta começa logo abaixo do respiro do círculo (a
+    // folga de 2 px cobre a borda suavizada da amostragem em escala).
+    exigir(nome.y0 <= t.y + I.TOPO_MIOLO + 4, 'o nome não começa colado no respiro do círculo: ' + nome.y0)
+    exigir(nome.x0 >= t.x && nome.x1 <= t.x + t.largura, 'o nome estourou a caixa: ' + JSON.stringify(nome))
+    // Respiro uniforme: nenhuma das linhas encosta na outra.
+    for (let i = 1; i < faixas.length; i += 1) {
+      const folga = faixas[i].y0 - faixas[i - 1].y1 - 1
+      exigir(folga >= 20, 'as linhas se colaram (folga de ' + folga + ' px antes da ' + (i + 1) + 'ª)')
+    }
+  })
+
+  await testar('composição: a linha "última mensagem" SÓ existe com a data do ranking', async () => {
+    const t = cartaz.CAIXA_TEXTO
+    const comData = faixasDeCor(
+      (await cartazDosTestes(false)).imagem, I.TINTA, t.x, t.y, t.x + t.largura, I.FUNDO_MIOLO
+    )
+    const semData = faixasDeCor(
+      await Jimp.read(await cartaz.comporCartazProcurado({ ...DADOS_CARTAZ, ultimaMensagem: null })),
+      I.TINTA, t.x, t.y, t.x + t.largura, I.FUNDO_MIOLO
+    )
+    // Com a data são 5 linhas de tinta (nome, alcunha, contagem, última, rodapé);
+    // sem ela, uma a menos. A contagem de faixas é a prova de que a linha
+    // entra e sai junto com o dado — sem depender de ler glifo a glifo.
+    exigir(comData.length === semData.length + 1,
+      'a linha da última mensagem não entrou/saiu: ' + comData.length + ' com / ' + semData.length + ' sem')
+    // Com a data, a penúltima linha (antes do rodapé) é a da última mensagem.
+    exigir(comData[comData.length - 2].altura >= 20, 'a linha da última mensagem saiu pequena demais')
+  })
+
+  await testar('composição: o RODAPÉ é tinta escura e legível (não é a tinta lavada)', async () => {
+    const t = cartaz.CAIXA_TEXTO
+    const { imagem } = await cartazDosTestes(false)
+    const ultima = faixasDeCor(imagem, I.TINTA, t.x, t.y, t.x + t.largura, I.FUNDO_MIOLO)
+    const rodape = ultima[ultima.length - 1]
+    // A tinta antiga do rodapé (#5c452c a 16 px) sumia no papel envelhecido:
+    // 15 px de tinta e contraste ~2,7. Agora é TINTA cheia com 25 px.
+    exigir(rodape.altura >= 20, 'o rodapé continua pequeno: ' + rodape.altura + ' px de tinta')
+    const tintaCheia = contarCor(imagem, I.TINTA, t.x, rodape.y0 - 2, t.x + t.largura, rodape.y1 + 2)
+    const suaveNoRodape = contarCor(imagem, I.TINTA_SUAVE, t.x, rodape.y0 - 2, t.x + t.largura, rodape.y1 + 2)
+    exigir(tintaCheia > 600, 'o rodapé não está na tinta escura (' + tintaCheia + ' px)')
+    // Tolerância de 10 px: a moldura tem granulado e um pixel dela pode cair
+    // por acaso exatamente na cor da tinta lavada.
+    exigir(suaveNoRodape <= 10, 'o rodapé ainda usa a tinta lavada (' + suaveNoRodape + ' px)')
+    exigir(rodape.y1 <= I.FUNDO_MIOLO, 'o rodapé desceu sobre o ornamento: ' + rodape.y1)
+    // E o miolo inteiro fica acima da moldura de baixo: abaixo disso, o pixel
+    // tem que ser a moldura INTACTA (nada de tinta vazando na decoração).
+    const moldura = await Jimp.read(cartaz.CAMINHO_MOLDURA)
+    const px = (img, x, y) => { const i = (y * img.bitmap.width + x) * 4; return img.bitmap.data.slice(i, i + 3).join(',') }
+    for (const y of [I.FUNDO_MIOLO + 1, I.FUNDO_MIOLO + 25, 1445, 1500]) {
+      for (const x of [130, 511, 890]) {
+        exigir(px(moldura, x, y) === px(imagem, x, y), 'a moldura foi alterada em (' + x + ',' + y + ')')
+      }
+    }
+  })
+
+  await testar('escolher: o maior que cabe inteiro vence; ninguém cabe vira reticências', async () => {
+    const f64 = await loadFont(SANS_64_WHITE)
+    const f32 = await loadFont(SANS_32_WHITE)
+    // A MESMA escada que o `desenharTexto` monta.
+    const candidatos = I.ESCADARIA_NOME.map((escala) => ({ font: f64, escala }))
+      .concat([{ font: f32, escala: 1.4 }, { font: f32, escala: 1.2 }])
+    const largura = cartaz.CAIXA_TEXTO.largura
+    const conferir = (rotulo, nome) => {
+      const escolhido = I.escolher(candidatos, nome, largura)
+      exigir(escolhido, 'nada foi escolhido para ' + rotulo)
+      exigir(I.medir(escolhido.font, escolhido.texto, escolhido.escala) <= largura,
+        rotulo + ' estourou a caixa: ' + I.medir(escolhido.font, escolhido.texto, escolhido.escala))
+      exigir(alturaDaTintaDe(escolhido) >= 25, rotulo + ' saiu pequeno demais')
+      return escolhido
+    }
+    const curto = conferir('nome curto', 'João da Silva')
+    exigir(curto.escala === 1.5 && !curto.cortado, 'o nome curto deveria ficar no topo da escada: ' + curto.escala)
+    // Nome de 26 letras: cabe INTEIRO num degrau menor — vale mais que meio
+    // nome gigante com reticências.
+    const medio = conferir('nome de 26 letras', 'Maria Fernanda de Oliveira')
+    exigir(!medio.cortado, 'o nome de 26 letras foi cortado à toa: ' + medio.texto)
+    // Ninguém cabe: o maior que ainda mostra MIN_VISIVEL_NOME letras.
+    const enorme = conferir('nome gigante', 'Ana Beatriz Cavalcanti do Nascimento Albuquerque de Jesus')
+    exigir(enorme.cortado, 'o nome gigante não foi cortado: ' + enorme.texto)
+    exigir(enorme.texto.endsWith('...'), 'sem reticências: ' + enorme.texto)
+    exigir(enorme.texto.replace(/\.\.\.$/, '').length >= I.MIN_VISIVEL_NOME,
+      'o corte escondeu o nome: ' + enorme.texto)
+    exigir(I.escolher(candidatos, '', largura) === null, 'texto vazio não devolve escolha')
   })
 
   await testar('composição: sem foto, o disco vira o círculo dourado (não fica branco)', async () => {
@@ -393,6 +607,55 @@ async function main () {
     })
   })
 
+  await testar('comando: o CARTAZ recebe a data real da ÚLTIMA MENSAGEM do líder', async () => {
+    definirRanking([{ usuario_id: NUM_LIDER, nome: 'Fulano', total: 1287, ultimaMensagem: CARIMBO_1 }])
+    definirEstilos(new Map())
+    await comCartazFalso(async (dados) => {
+      const { sock } = criarSock()
+      await comando.executar(sock, JID_GRUPO, mensagem())
+      const d = dados()
+      exigir(d.ultimaMensagem === DATA_1, 'a data da última mensagem não é a do ranking: ' + d.ultimaMensagem)
+      // O "desde" continua no payload (o comando usa no fallback em texto),
+      // mas o cartaz não desenha mais essa linha.
+      exigir(/^\d{2}\/\d{2}\/\d{4}$/.test(d.desde), 'data "desde" mal formatada: ' + d.desde)
+    })
+  })
+
+  await testar('comando: ranking SEM carimbo de tempo manda null (cartaz sai sem a linha)', async () => {
+    // Documento antigo: o `ultimaMensagem` não existe no banco.
+    definirRanking([{ usuario_id: NUM_LIDER, nome: 'Fulano', total: 1287 }])
+    definirEstilos(new Map())
+    await comCartazFalso(async (dados) => {
+      const { sock } = criarSock()
+      await comando.executar(sock, JID_GRUPO, mensagem())
+      const d = dados()
+      exigir(d.ultimaMensagem === null, 'inventou uma data sem carimbo de tempo: ' + d.ultimaMensagem)
+    })
+  })
+
+  await testar('dataDaUltimaMensagem: data no fuso de São Paulo (e null sem carimbo)', async () => {
+    const f = comando.__internos.dataDaUltimaMensagem
+    exigir(f(CARIMBO_1) === DATA_1, 'não formatou a data: ' + f(CARIMBO_1))
+    exigir(f(CARIMBO_ANTIGO) === DATA_ANTIGA, 'virou o dia errado: ' + f(CARIMBO_ANTIGO))
+    // 02:00 UTC do dia 2 AINDA é o dia 1 em São Paulo (UTC-3): sem o fuso,
+    // o cartaz mostraria a data de amanhã para quem mandou de madrugada.
+    const madrugada = Date.parse('2026-01-02T02:00:00Z')
+    exigir(f(madrugada) === DATA_1, 'ignorou o fuso de São Paulo: ' + f(madrugada))
+    for (const ruim of [0, null, undefined, NaN, 'ontem', -5, {}]) {
+      exigir(f(ruim) === null, 'aceitou um carimbo inválido (' + JSON.stringify(ruim) + '): ' + f(ruim))
+    }
+  })
+
+  await testar('respostaEmTexto (fallback): a última mensagem só sai com data', async () => {
+    const r = comando.__internos.respostaEmTexto
+    const base = { nome: 'A', alcunha: 'B', total: 1, palavra: 'mensagem', desde: '30/09/2026', saiu: false }
+    const comData = r({ ...base, ultimaMensagem: DATA_1 })
+    exigir(comData.includes('última mensagem: ' + DATA_1), 'fallback sem a data: ' + comData)
+    const semData = r({ ...base, ultimaMensagem: null })
+    exigir(!semData.includes('última mensagem'), 'fallback inventou a data: ' + semData)
+    exigir(/no topo desde: \d{2}\/\d{2}\/\d{4}/.test(semData), 'fallback perdeu o "desde": ' + semData)
+  })
+
   await testar('comando: banco de VIPs quebrado NÃO derruba o cartaz', async () => {
     definirRanking([LIDER_TESTE])
     estilosFalha = new Error('mongo em chamas')
@@ -483,8 +746,10 @@ async function main () {
 
   await testar('LID: LID + telefone da MESMA pessoa viram UM cartaz com a SOMA', async () => {
     definirRanking([
-      { usuario_id: LID_LIDER, nome: 'Nome do Banco', total: 900 },
-      { usuario_id: TELEFONE_LIDER, nome: 'Nome do Banco', total: 387 }
+      // A mesma pessoa em dois documentos: a data válida é a MAIS NOVA entre
+      // os dois (é o que o `agruparPorNumero` promete).
+      { usuario_id: LID_LIDER, nome: 'Nome do Banco', total: 900, ultimaMensagem: CARIMBO_ANTIGO },
+      { usuario_id: TELEFONE_LIDER, nome: 'Nome do Banco', total: 387, ultimaMensagem: CARIMBO_1 }
     ])
     definirEstilos(new Map([[TELEFONE_LIDER, { nome: 'NomeDoVip', alcunha: 'Punho de Zeus', cor: '' }]]))
     await comCartazFalso(async (dados) => {
@@ -498,6 +763,7 @@ async function main () {
       exigir(d.total === 1287, 'os totais não foram somados: ' + d.total)
       exigir(d.nome === 'NomeDoVip', 'o VIP do número real não foi usado: ' + d.nome)
       exigir(d.alcunha === 'Punho de Zeus', 'não usou a alcunha custom: ' + d.alcunha)
+      exigir(d.ultimaMensagem === DATA_1, 'não valeu a data mais nova dos dois documentos: ' + d.ultimaMensagem)
       exigir(!img.conteudo.caption.includes('saiu do grupo'), 'marcou "saiu" para quem está no grupo')
     })
   })

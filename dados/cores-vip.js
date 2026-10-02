@@ -2,8 +2,9 @@
 // 🎨 CORES-VIP — o emoji do /corvip traduzido para uma cor de verdade
 // ============================================================
 // O campo `corVip` (vip.js) guarda UM emoji escolhido pelo VIP. Onde não dá
-// para desenhar emoji — o pergaminho do /ranking, feito com Jimp — esse emoji
-// vira a COR do nome: mesma informação, sem depender de glifo.
+// para desenhar emoji — o quadro do /ranking e o cartaz do /procurado, feitos
+// com Jimp — esse emoji vira a COR do nome: mesma informação, sem depender de
+// glifo.
 //
 //   • os 10 emojis que o `/corvip lista` sugere têm cor FIXA (MAPA_COR_VIP);
 //   • qualquer outro emoji válido cai na PALETA_AUXILIAR, escolhida por hash

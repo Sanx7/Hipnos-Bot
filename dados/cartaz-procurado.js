@@ -57,8 +57,31 @@ const OURO_CLARO = '#e8d38a'
 const OURO_TITULO = '#d9a520'
 const PAPEL = '#e6d7b8'
 const PAPEL_ESCURO = '#d4bf98'
-const FITA = '#8f2d1e'
+// 🔴 Vermelho ESCURO de fita: o #8f2d1e antigo lavava no papel bege e a
+// alcunha (a linha mais lida depois do nome) sumia. Com o contorno de tinta
+// (ver `escrever`) e este tom, o apelido ganha peso sem virar vinho novo.
+const FITA = '#7a2413'
 const FITA_CLARA = '#b8472f'
+
+// -------------------------------------------------------------------
+// 📐 LAYOUT DO MIOLO — medido em PIXELS sobre a moldura atual.
+//   • TOPO_MIOLO  : respiro entre o círculo (acaba em y ≈ 840) e a 1ª linha;
+//   • FUNDO_MIOLO : a última linha não passa daqui (a moldura ornamentada
+//     começa embaixo em y ≈ 1440 — o texto nunca encosta nela);
+//   • ESCALA_*    : as fontes bitmap do Jimp só existem em 16/32/64/128 px,
+//     então o tamanho fino sai de ESCALA com amostragem bilinear
+//     (`coberturaEm`). É o que permite o nome grande sem virar letra gigante
+//     de 64 px em cima de um nome curto.
+// -------------------------------------------------------------------
+const TOPO_MIOLO = 24
+const FUNDO_MIOLO = 1400
+const ESCALA_TITULO = 1.5 // TITULO_CARTAZ: 416 px × 1,5 = 624 px (caixa: 724)
+const ESCALA_ALCUNHA = 1.2
+const ESCALA_RODAPE = 0.85
+// 🪜 A escada do NOME, do MAIOR para o menor: o primeiro que couber inteiro
+// vence. Nenhum cabe? Ver `escolher` (largura mínima visível).
+const ESCADARIA_NOME = [1.5, 1.3, 1.1, 1]
+const MIN_VISIVEL_NOME = 16
 
 // 🔎 Detecção do círculo.
 const ALFA_CORTADA = 8 // alpha < 8 conta como "buraco" (PNG com furo real)
@@ -198,15 +221,17 @@ function limparParaFonte (font, texto) {
   return saida.replace(/\s+/g, ' ').trim()
 }
 
-// Largura = soma dos avanços dos glifos (a MESMA conta que o desenhador faz).
-function medir (font, texto) {
+// Largura = soma dos avanços dos glifos (a MESMA conta que o desenhador faz),
+// já com a ESCALA aplicada (1 = tamanho natural da fonte bitmap).
+function medir (font, texto, escala = 1) {
   const mapa = glifos(font)
+  const e = Number(escala) > 0 ? Number(escala) : 1
   let largura = 0
   for (const ch of String(texto ?? '')) {
     const glifo = mapa.get(ch.codePointAt(0))
-    if (glifo) largura += glifo.xadvance
+    if (glifo) largura += glifo.xadvance * e
   }
-  return largura
+  return Math.round(largura)
 }
 
 function tintaVertical (font, texto) {
@@ -223,34 +248,183 @@ function tintaVertical (font, texto) {
   return { topo, base }
 }
 
-function yParaCentrar (font, texto, centro) {
+function yParaCentrar (font, texto, centro, escala = 1) {
   const { topo, base } = tintaVertical(font, texto)
-  return Math.round(centro - (topo + base) / 2)
+  const e = Number(escala) > 0 ? Number(escala) : 1
+  return Math.round(centro - (topo + base) * e / 2)
 }
 
 // Altura REAL da tinta de um texto (com um piso, para linha vazia não virar
 // altura zero e as linhas se colarem). É o que faz o layout andar linha a
 // linha em vez de somar a largura.
-function alturaDaTinta (font, texto, minimo = 0) {
+function alturaDaTinta (font, texto, minimo = 0, escala = 1) {
   const { topo, base } = tintaVertical(font, texto)
   if (topo === Infinity) return minimo
-  return Math.max(minimo, base - topo)
+  const e = Number(escala) > 0 ? Number(escala) : 1
+  return Math.max(minimo, Math.round((base - topo) * e))
 }
 
 // Corta com "..." até caber em `larguraMax` — nunca estoura a caixa.
-function cortarParaCaber (font, texto, larguraMax) {
+function cortarParaCaber (font, texto, larguraMax, escala = 1) {
   const limpo = String(texto ?? '')
-  if (medir(font, limpo) <= larguraMax) return limpo
+  if (medir(font, limpo, escala) <= larguraMax) return limpo
   let corte = limpo
-  while (corte.length > 1 && medir(font, corte + '...') > larguraMax) corte = corte.slice(0, -1)
+  while (corte.length > 1 && medir(font, corte + '...', escala) > larguraMax) corte = corte.slice(0, -1)
   return corte.length <= 1 ? '...' : corte.replace(/\s+$/, '') + '...'
+}
+
+// ─── 🪜 escolher(candidatos, texto, larguraMax, minimoVisivel) ───
+// `candidatos` vem do MAIOR para o menor: [{ font, escala }, ...].
+//   1) 1ª passada: o MAIOR que couber INTEIRO vence — mesmo que desça um
+//      degrau, o nome inteiro é mais útil que meia palavra gigante;
+//   2) 2ª passada (só se ninguém coube inteiro): vale o MAIOR que ainda
+//      MOSTRA `minimoVisivel` letras cortadas — "Ana Beatriz Cavalc..." numa
+//      letra grande é melhor do que o nome todo numa letra ilegível;
+//   3) nem isso? fica o maior cortado (plano B), sempre dentro da largura.
+function escolher (candidatos, texto, larguraMax, minimoVisivel = MIN_VISIVEL_NOME) {
+  const limpo = String(texto ?? '')
+  if (!limpo) return null
+
+  for (const cand of candidatos) {
+    const escala = cand.escala || 1
+    if (medir(cand.font, limpo, escala) <= larguraMax) {
+      return { font: cand.font, escala, texto: limpo, cortado: false }
+    }
+  }
+
+  let reserva = null
+  for (const cand of candidatos) {
+    const escala = cand.escala || 1
+    const cortado = cortarParaCaber(cand.font, limpo, larguraMax, escala)
+    const visiveis = cortado.replace(/\.{3}$/, '').length
+    if (!reserva) reserva = { font: cand.font, escala, texto: cortado, cortado: true }
+    if (visiveis >= Math.min(minimoVisivel, limpo.length)) {
+      return { font: cand.font, escala, texto: cortado, cortado: true }
+    }
+  }
+  return reserva
+}
+
+// 📐 Amostra BILINEAR da cobertura (alfa) da textura da fonte no ponto
+// fracionário (fx, fy). É o que permite desenhar a fonte bitmap em ESCALA
+// (1,5× no título, 1,2× na alcunha…) com a borda suave de impressão antiga,
+// em vez do serrilhado de vizinho-mais-próximo.
+function coberturaEm (pagina, fx, fy) {
+  const w = pagina.bitmap.width
+  const h = pagina.bitmap.height
+  const x0 = Math.floor(fx)
+  const y0 = Math.floor(fy)
+  const tx = fx - x0
+  const ty = fy - y0
+  const ler = (x, y) => (x < 0 || y < 0 || x >= w || y >= h)
+    ? 0
+    : (pagina.getPixelColor(x, y) & 0xff) / 255
+  const a = ler(x0, y0)
+  const b = ler(x0 + 1, y0)
+  const c = ler(x0, y0 + 1)
+  const d = ler(x0 + 1, y0 + 1)
+  return (a + (b - a) * tx) * (1 - ty) + (c + (d - c) * tx) * ty
+}
+
+// 📐 GRADE de cobertura de uma linha INTEIRA (escala já aplicada).
+// Desenhar em grade (e não glifo a glifo) deixa o CONTORNO sair de uma
+// dilatação barata, em vez de repetir a varredura da linha 8 vezes.
+// A linha 0 da grade é o TOPO DA TINTA (mesma referência do `yParaCentrar`).
+function gradeDaLinha (font, texto, escala = 1) {
+  const limpo = String(texto ?? '')
+  const e = Number(escala) > 0 ? Number(escala) : 1
+  const { topo, base } = tintaVertical(font, limpo)
+  const largura = Math.max(1, medir(font, limpo, e))
+  const altura = Math.max(1, Math.round((base - topo) * e))
+  const grade = new Float32Array(largura * altura)
+  const topoEscalado = Math.round(topo * e)
+  const pagina = font.pages && font.pages[0]
+  if (!pagina) return { grade, largura, altura, topo: topoEscalado }
+  const mapa = glifos(font)
+  let avanco = 0
+  for (const ch of limpo) {
+    const glifo = mapa.get(ch.codePointAt(0))
+    if (!glifo) continue
+    const dl = Math.max(1, Math.round(glifo.width * e))
+    const da = Math.max(1, Math.round(glifo.height * e))
+    const ox = Math.round(avanco + glifo.xoffset * e)
+    const oy = Math.round((glifo.yoffset - topo) * e)
+    for (let dy = 0; dy < da; dy += 1) {
+      const gy = oy + dy
+      if (gy < 0 || gy >= altura) continue
+      const fy = glifo.y + (dy + 0.5) / e - 0.5
+      for (let dx = 0; dx < dl; dx += 1) {
+        const gx = ox + dx
+        if (gx < 0 || gx >= largura) continue
+        const fx = glifo.x + (dx + 0.5) / e - 0.5
+        grade[gy * largura + gx] = coberturaEm(pagina, fx, fy)
+      }
+    }
+    avanco += glifo.xadvance * e
+  }
+  return { grade, largura, altura, topo: topoEscalado }
+}
+
+// 🖌️ Pinta uma grade na imagem (mistura pelo alfa, direto no bitmap.data).
+// `corContorno`: quando existe, a letra ganha 1 px dilatado dessa cor em
+// volta — é o "peso" da alcunha vermelha, que sozinha ficava lavada no papel.
+function pintarGrade (imagem, linha, x, y, cor, corContorno) {
+  const { grade, largura, altura, topo } = linha
+  const x0 = Math.round(x)
+  const y0 = Math.round(y + topo)
+  const solido = 0.5
+  if (corContorno) {
+    const [cr, cg, cb] = canais(corContorno)
+    for (let gy = 0; gy < altura; gy += 1) {
+      for (let gx = 0; gx < largura; gx += 1) {
+        if (grade[gy * largura + gx] < solido) continue
+        for (let ny = -1; ny <= 1; ny += 1) {
+          for (let nx = -1; nx <= 1; nx += 1) {
+            const jx = gx + nx
+            const jy = gy + ny
+            if (jx < 0 || jy < 0 || jx >= largura || jy >= altura) continue
+            if (grade[jy * largura + jx] >= solido) continue
+            pintarPixel(imagem, x0 + jx, y0 + jy, cr, cg, cb)
+          }
+        }
+      }
+    }
+  }
+  const [r, g, b] = canais(cor)
+  const { width, height, data } = imagem.bitmap
+  for (let gy = 0; gy < altura; gy += 1) {
+    const py = y0 + gy
+    if (py < 0 || py >= height) continue
+    for (let gx = 0; gx < largura; gx += 1) {
+      const cobertura = grade[gy * largura + gx]
+      if (cobertura <= 0.02) continue
+      const px = x0 + gx
+      if (px < 0 || px >= width) continue
+      // ⚠️ Mistura lendo o fundo DIRETO do data ([R,G,B,A]) — ver a nota
+      // longa logo abaixo, sobre o deslocamento de canal do setPixelColor.
+      const k = (py * width + px) * 4
+      pintarPixel(imagem, px, py,
+        Math.round(data[k] + (r - data[k]) * cobertura),
+        Math.round(data[k + 1] + (g - data[k + 1]) * cobertura),
+        Math.round(data[k + 2] + (b - data[k + 2]) * cobertura))
+    }
+  }
 }
 
 // Escreve o texto NA COR pedida misturando cada pixel do glifo com o fundo
 // pelo alfa da textura. Devolve a largura usada.
-function escrever (imagem, font, x, y, texto, cor) {
+// `escala` (padrão 1) = tamanho natural da fonte bitmap; `contorno` = cor do
+// contorno de 1 px (opcional). Em escala 1 e sem contorno o caminho é o
+// rápido de sempre (glifo a glifo, sem grade).
+function escrever (imagem, font, x, y, texto, cor, escala = 1, contorno = null) {
   const limpo = String(texto ?? '')
   if (!limpo) return 0
+  const e = Number(escala) > 0 ? Number(escala) : 1
+  if (e !== 1 || contorno) {
+    const linha = gradeDaLinha(font, limpo, e)
+    pintarGrade(imagem, linha, x, y, cor, contorno)
+    return linha.largura
+  }
   const mapa = glifos(font)
   const pagina = font.pages && font.pages[0]
   if (!pagina) return 0
@@ -287,10 +461,10 @@ function escrever (imagem, font, x, y, texto, cor) {
   return avanco
 }
 
-function escreverCentrado (imagem, font, centro, y, texto, cor) {
+function escreverCentrado (imagem, font, centro, y, texto, cor, escala = 1, contorno = null) {
   const limpo = String(texto ?? '')
   if (!limpo) return 0
-  return escrever(imagem, font, Math.round(centro - medir(font, limpo) / 2), y, limpo, cor)
+  return escrever(imagem, font, Math.round(centro - medir(font, limpo, escala) / 2), y, limpo, cor, escala, contorno)
 }
 
 // ─── 🧰 Desenho — ESCRITA DIRETA NO bitmap.data ───
@@ -337,10 +511,13 @@ function lerPixel (data, indicePixel) {
 
 function pintarReto (imagem, x, y, w, h, cor) {
   const [r, g, b] = canais(cor)
-  const x0 = Math.max(0, x)
-  const y0 = Math.max(0, y)
-  const x1 = Math.min(imagem.bitmap.width, x + w)
-  const y1 = Math.min(imagem.bitmap.height, y + h)
+  // ⚠️ ARREDONDA as coordenadas: `pintarElipse` calcula meia-largura com raiz
+  // quadrada, então ela chega aqui fracionária — e um índice fracionário em
+  // TypedArray é IGNORADO EM SILÊNCIO (o pixel simplesmente não aparece).
+  const x0 = Math.max(0, Math.round(x))
+  const y0 = Math.max(0, Math.round(y))
+  const x1 = Math.min(imagem.bitmap.width, Math.round(x + w))
+  const y1 = Math.min(imagem.bitmap.height, Math.round(y + h))
   for (let py = y0; py < y1; py += 1) {
     for (let px = x0; px < x1; px += 1) pintarPixel(imagem, px, py, r, g, b)
   }
@@ -418,76 +595,133 @@ function realce (_data, _i, r0, g0, b0) {
 // ─── 📜 composição ───
 // 📐 desenharTitulo: a faixa escura do topo (CAIXA_TITULO) recebe o
 // TITULO_CARTAZ em dourado, com sombra e um filete embaixo.
+// O título é CENTRADO na ALTURA DA TINTA (yParaCentrar) e cresce por ESCALA:
+// a fonte bitmap só existe em 64 px e o TITULO_CARTAZ a 1,5× ocupa 624 dos
+// 724 px da caixa — bem mais presença de cartaz sem estourar a faixa.
 function desenharTitulo (imagem, font) {
   const cx = Math.round(imagem.bitmap.width / 2)
   const centro = CAIXA_TITULO.y + Math.round(CAIXA_TITULO.altura / 2)
   const titulo = limparParaFonte(font, TITULO_CARTAZ)
-  const y = yParaCentrar(font, titulo, centro)
+  const y = yParaCentrar(font, titulo, centro, ESCALA_TITULO)
   // Sombra preta embaixo do dourado: dá o relevo de cartaz pintado à mão.
-  escreverCentrado(imagem, font, cx, y + 5, titulo, TINTA)
-  escreverCentrado(imagem, font, cx, y, titulo, OURO_TITULO)
+  escreverCentrado(imagem, font, cx, y + 6, titulo, TINTA, ESCALA_TITULO)
+  escreverCentrado(imagem, font, cx, y, titulo, OURO_TITULO, ESCALA_TITULO)
   fio(imagem, CAIXA_TITULO.x, CAIXA_TITULO.x + CAIXA_TITULO.largura, CAIXA_TITULO.y + CAIXA_TITULO.altura, 4, OURO)
 }
 
-// 📐 desenharTexto: o miolo de papel (CAIXA_TEXTO) com nome, contagem,
-// alcunha e a data "desde". Tudo cortado com "..." para nunca estourar.
-// ⚠️ A posição avança pela ALTURA DA TINTA (`tintaVertical`), nunca pela
-// largura que o `escrever` devolve — somar a largura faria cada linha pular
-// hundreds de pixels e o cartaz saía com o texto todo espalhado.
-function desenharTexto (imagem, fontMedia, fontPequena, dados) {
+// 📐 desenharTexto: o miolo de papel (CAIXA_TEXTO) com o NOME grande, a
+// alcunha, a contagem, a data da última mensagem e o rodapé do bot.
+//
+// ⚠️ O layout NÃO usa espaçamento chutado linha a linha: mede a ALTURA DE
+// TINTA de cada linha (nunca a largura que o `escrever` devolve — somar a
+// largura faria cada linha pular centenas de pixels) e divide a sobra em
+// GAPS IGUAIS entre TOPO_MIOLO e FUNDO_MIOLO. É o mesmo respiro entre o
+// círculo e a moldura de baixo, e o texto nunca encosta no ornamento.
+function desenharTexto (imagem, fontes, dados) {
   const x = CAIXA_TEXTO.x
   const largura = CAIXA_TEXTO.largura
   const centro = Math.round(imagem.bitmap.width / 2)
-  let y = CAIXA_TEXTO.y + 10
 
-  // 1) NOME — a maior linha do cartaz, em tinta cheia.
-  const nome = cortarParaCaber(fontMedia, limparParaFonte(fontMedia, dados.nome), largura)
-  const alturaNome = alturaDaTinta(fontMedia, nome, 32)
-  escreverCentrado(imagem, fontMedia, centro, yParaCentrar(fontMedia, nome, y + alturaNome / 2), nome, TINTA)
-  y += alturaNome + 26
+  // 1) 🪜 NOME — a maior linha do cartaz. A escada tenta 1,5× → 1× na fonte
+  //    de 64 px e só desce para a de 32 px (nunca abaixo do tamanho das
+  //    outras linhas, senão o nome vira a menor coisa do cartaz).
+  const nome = escolher(
+    ESCADARIA_NOME.map((escala) => ({ font: fontes.titulo, escala })).concat([
+      { font: fontes.media, escala: 1.4 },
+      { font: fontes.media, escala: 1.2 }
+    ]),
+    limparParaFonte(fontes.titulo, dados.nome),
+    largura
+  ) || { font: fontes.media, escala: 1, texto: '' }
 
-  // 2) ALCUNHA — entre aspas e em tinta vermelha (é o apelido, o nome é o nome).
-  const alcunha = cortarParaCaber(fontMedia, limparParaFonte(fontMedia, '"' + dados.alcunha + '"'), largura - 60)
-  const alturaAlcunha = alturaDaTinta(fontMedia, alcunha, 24)
-  escreverCentrado(imagem, fontMedia, centro, yParaCentrar(fontMedia, alcunha, y + alturaAlcunha / 2), alcunha, FITA)
-  y += alturaAlcunha + 34
+  // 📝 As LINHAS do miolo, na ordem de leitura.
+  const linhas = [
+    { texto: nome.texto, font: nome.font, escala: nome.escala, cor: TINTA },
+    {
+      // 2) ALCUNHA — entre aspas, em vermelho escuro e com CONTORNO de tinta
+      //    (sem o contorno o vermelho lavava no papel bege).
+      texto: limparParaFonte(fontes.media, '"' + dados.alcunha + '"'),
+      font: fontes.media,
+      escala: ESCALA_ALCUNHA,
+      cor: FITA,
+      contorno: TINTA
+    },
+    { fio: 3 },
+    {
+      // 3) CONTAGEM de mensagens.
+      texto: limparParaFonte(fontes.media, dados.total + ' ' + dados.palavra + ' no ranking do grupo'),
+      font: fontes.media,
+      escala: 1,
+      cor: TINTA
+    }
+  ]
 
-  // 3) FILete separando o nome da contagem.
-  fio(imagem, x + 150, x + largura - 150, y, 3, TINTA_SUAVE)
-  y += 44
+  // 4) ÚLTIMA MENSAGEM — a linha que substituiu o "NO TOPO DESDE" do cartaz
+  //    antigo. Só sai quando o banco tem o carimbo de tempo (linha de banco
+  //    antigo, sem o campo, simplesmente não ganha a linha).
+  if (dados.ultimaMensagem) {
+    linhas.push({
+      texto: limparParaFonte(fontes.media, 'última mensagem: ' + dados.ultimaMensagem),
+      font: fontes.media,
+      escala: 1,
+      cor: TINTA
+    })
+  }
 
-  // 4) CONTAGEM de mensagens.
-  const contagem = cortarParaCaber(fontPequena, limparParaFonte(fontPequena, dados.total + ' ' + dados.palavra + ' no ranking do grupo'), largura)
-  const alturaContagem = alturaDaTinta(fontPequena, contagem, 16)
-  escreverCentrado(imagem, fontPequena, centro, yParaCentrar(fontPequena, contagem, y + alturaContagem / 2), contagem, TINTA)
-  y += alturaContagem + 30
+  // 5) FILete final + a frase de rodapé do bot: fecha a folha e dá o peso de
+  //    "cartaz antigo" que o miolo de papel pede.
+  linhas.push({ fio: 3 })
+  linhas.push({
+    texto: limparParaFonte(fontes.media, dados.rodape || ''),
+    font: fontes.media,
+    escala: ESCALA_RODAPE,
+    cor: TINTA
+  })
 
-  // 5) DESDE — a data em que essa pessoa está no topo.
-  const desde = cortarParaCaber(fontPequena, limparParaFonte(fontPequena, 'no topo desde: ' + dados.desde), largura)
-  const alturaDesde = alturaDaTinta(fontPequena, desde, 16)
-  escreverCentrado(imagem, fontPequena, centro, yParaCentrar(fontPequena, desde, y + alturaDesde / 2), desde, TINTA_SUAVE)
-  y += alturaDesde + 46
+  // ✂️ Corta cada linha (nunca estoura a caixa) e mede a altura da tinta.
+  for (const linha of linhas) {
+    if (linha.fio) {
+      linha.altura = linha.fio
+      continue
+    }
+    linha.texto = cortarParaCaber(linha.font, linha.texto, largura, linha.escala)
+    linha.altura = alturaDaTinta(linha.font, linha.texto, 0, linha.escala)
+  }
 
-  // 6) FILete final + a frase de rodapé do bot (opcional): fecha a folha e
-  //    dá o peso de "cartaz antigo" que o miolo de papel pede.
-  fio(imagem, x + 150, x + largura - 150, y, 3, TINTA_SUAVE)
-  y += 44
-  const rodape = cortarParaCaber(fontPequena, limparParaFonte(fontPequena, dados.rodape || ''), largura - 60)
-  const alturaRodape = alturaDaTinta(fontPequena, rodape, 16)
-  if (rodape) {
-    escreverCentrado(imagem, fontPequena, centro, yParaCentrar(fontPequena, rodape, y + alturaRodape / 2), rodape, TINTA_SUAVE)
-    y += alturaRodape
+  const tinta = linhas.reduce((soma, linha) => soma + linha.altura, 0)
+  const disponivel = FUNDO_MIOLO - CAIXA_TEXTO.y - TOPO_MIOLO
+  // 🛡️ Piso de 8 px: se o miolo ficar apertado, as linhas se encostam — mas
+  // nunca se SOBREPÕEM (o gap jamais fica negativo).
+  const gap = Math.max(8, (disponivel - tinta) / linhas.length)
+
+  // ✍️ Desenha na ordem. O cursor é INTEIRO de propósito: o gap vem de uma
+  // divisão, e `fio`/escrever receber coordenada fracionária perderia pixel
+  // em silêncio (índice fracionário em TypedArray é ignorado).
+  let y = Math.round(CAIXA_TEXTO.y + TOPO_MIOLO)
+  for (const linha of linhas) {
+    if (linha.fio) {
+      fio(imagem, x + 150, x + largura - 150, y, linha.altura, TINTA_SUAVE)
+    } else if (linha.texto) {
+      escreverCentrado(
+        imagem, linha.font, centro,
+        yParaCentrar(linha.font, linha.texto, y + linha.altura / 2, linha.escala),
+        linha.texto, linha.cor, linha.escala, linha.contorno || null
+      )
+    }
+    y += Math.round(linha.altura + gap)
   }
 
   return y
 }
 
 // ─── 🎬 FUNÇÃO PRINCIPAL ───
-// comporCartazProcurado({ nome, alcunha, total, palavra, desde, foto }):
-//   devolve o Buffer PNG pronto p/ enviar. LÊ a moldura do disco, detecta o
-//   círculo, compõe a foto e escreve o texto. Lança em qualquer problema
-//   (moldura ausente, PNG inválido) — quem chama é o comando, que tem o
-//   fallback em texto.
+// comporCartazProcurado({ nome, alcunha, total, palavra, desde, ultimaMensagem,
+// rodape, foto }): devolve o Buffer PNG pronto p/ enviar. LÊ a moldura do
+// disco, detecta o círculo, compõe a foto e escreve o texto. Lança em qualquer
+// problema (moldura ausente, PNG inválido) — quem chama é o comando, que tem o
+// fallback em texto.
+// ⚠️ `ultimaMensagem` é a data JÁ FORMATADA ("30/09/2026") ou null/ausente:
+// sem ela o cartaz sai sem a linha da última mensagem.
 async function comporCartazProcurado (dados) {
   // 🖼️ A moldura tem que estar no disco (é versionada no repositório).
   if (!fs.existsSync(CAMINHO_MOLDURA)) {
@@ -516,8 +750,10 @@ async function comporCartazProcurado (dados) {
   }
 
   // ✍️ Título na faixa escura + texto no miolo de papel.
+  // A fonte de 16 px fica de RESERVA em `fontes.pequena`: o piso da escada do
+  // nome é 32 px × 1,2, para o nome nunca sair menor do que as outras linhas.
   desenharTitulo(moldura, fontTitulo)
-  desenharTexto(moldura, fontMedia, fontPequena, dados)
+  desenharTexto(moldura, { titulo: fontTitulo, media: fontMedia, pequena: fontPequena }, dados)
 
   return moldura.getBuffer(JimpMime.png)
 }
@@ -542,9 +778,12 @@ module.exports = {
   __internos: {
     ALFA_CORTADA, CLARO_MIN, CLARO_MAX_SAT, AREA_MINIMA,
     TINTA, TINTA_SUAVE, OURO, OURO_CLARO, PAPEL, PAPEL_ESCURO, FITA, FITA_CLARA,
+    TOPO_MIOLO, FUNDO_MIOLO, ESCALA_TITULO, ESCALA_ALCUNHA, ESCALA_RODAPE,
+    ESCADARIA_NOME, MIN_VISIVEL_NOME,
     limparParaFonte, medir, tintaVertical, yParaCentrar, cortarParaCaber,
-    escrever, escreverCentrado, pintarReto, pintarElipse, fio, alturaDaTinta,
-    aplicarFoto, discoVazio, realce, desenharTitulo, desenharTexto
+    escolher, escrever, escreverCentrado, pintarReto, pintarElipse, fio,
+    alturaDaTinta, coberturaEm, gradeDaLinha, pintarGrade,
+    aplicarFoto, discoVazio, realce, desenharTitulo, desenharTexto, glifos
   }
 }
 

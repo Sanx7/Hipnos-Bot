@@ -9,12 +9,21 @@
 //   2) ffmpeg recorta para quadrado 512×512 (com pad negro só para fontes
 //      minúsculas), baixa a 12 fps e codifica WEBP animado (encoder
 //      libwebp) SEM áudio;
-//   3) os metadados do pack ("Hipnos Bot") são injetados com node-webpmux
-//      via a classe Exif de wa-sticker-formatter — SEM re-encodear frames
-//      (o sharp tardaria/pesaria; o webp do ffmpeg já é figurinha válida);
+//   3) os metadados do pack ("Hipnos Bot" + autor) são injetados com
+//      node-webpmux via a classe Exif de wa-sticker-formatter — SEM
+//      re-encodear frames (o sharp tardaria/pesaria; o webp do ffmpeg já é
+//      figurinha válida);
 //   4) se o webp supera ~1 MB (limite típico de figurinha no WhatsApp)
 //      re-codificamos a 8 fps e qualidade menor; se ainda assim fica
 //      grande, avisamos o usuário.
+//
+// ✍️ ASSINATURA VIP (/assinatura): NÃO é marca d'água desenhada — é o nome
+//    de AUTOR no EXIF da figurinha (o "pack • autor" que o WhatsApp mostra
+//    ao segurar a figurinha). Pack fixo "Hipnos Bot" + autor = assinatura
+//    do VIP (ou "Sombras do Limbo" quando não há). Decisão documentada: o
+//    pack fica fixo para manter a identidade do bot; só o autor é
+//    personalizável (o WhatsApp exibe os dois juntos, então a marca do
+//    autor aparece sem apagar a do bot).
 // ============================================
 
 const {
@@ -25,7 +34,7 @@ const {
   normalizeMessageContent
 } = require('@whiskeysockets/baileys')
 const { Sticker, StickerTypes } = require('wa-sticker-formatter')
-const { rodarExecutavel, comAssinatura, prepararAssinatura } = require('./webp-animado')
+const { rodarExecutavel } = require('./webp-animado')
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
@@ -85,30 +94,9 @@ function apagarComRetry(caminho, tentativas = 3) {
   })()
 }
 
-// ─── ✍️ ASSINATURA VIP: camada extra antes do webp (caminho de IMAGEM) ───
-// O caminho de imagem do /s NÃO usa ffmpeg (quem recorta e re-encoda é o
-// wa-sticker-formatter), então a marca d'água é gravada numa PASSADA SEPARADA:
-// entrada → PNG com o drawtext → o Sticker() recebe o PNG e faz o que sempre
-// fez. Como a marca só existe quando o autor é VIP com assinatura, sem ela
-// nada muda: nem arquivo, nem ffmpeg, nem buffer diferente.
-async function aplicarAssinaturaNaImagem(caminhoEntrada, caminhoSaida, assinatura) {
-  await rodar(
-    caminhoFfmpeg(),
-    [
-      '-y', '-nostdin',
-      '-i', caminhoEntrada,
-      '-vf', comAssinatura('', assinatura),
-      '-frames:v', '1',
-      caminhoSaida
-    ],
-    120000
-  );
-
-  if (!fs.existsSync(caminhoSaida) || fs.statSync(caminhoSaida).size === 0) {
-    throw new Error('o ffmpeg não conseguiu estampar a assinatura na imagem');
-  }
-  return fs.readFileSync(caminhoSaida);
-}
+// 🏷️ EXIF padrão do /s (pack fixo + autor padrão).
+const PACK_PADRAO = 'Hipnos Bot'
+const AUTOR_PADRAO = 'Sombras do Limbo'
 
 // ─── 🎬 Vídeo → WEBP animado (quadrado 512×512, sem áudio) ───
 // @param {string} caminhoVideo
@@ -116,21 +104,16 @@ async function aplicarAssinaturaNaImagem(caminhoEntrada, caminhoSaida, assinatur
 // @param {number} [limiteBytes] Limite de bytes que dispara uma 2ª passada
 //                                a menor qualidade/fps (por padrão 1 MB).
 // @returns {Promise<{bytes: number, segundaPassada: boolean}>}
-async function videoParaWebpAnimado(caminhoVideo, caminhoWebp, limiteBytes = LIMITE_BYTES_STICKER, assinatura = null) {
+async function videoParaWebpAnimado(caminhoVideo, caminhoWebp, limiteBytes = LIMITE_BYTES_STICKER) {
   const construirArgs = (fps, qualidade) => [
     '-y', '-nostdin',
     '-i', caminhoVideo,
     '-t', String(LIMITE_VIDEO_SEGUNDOS), // rede de segurança: máximo 10s
     '-vf',
-    // ✍️ Assinatura no FIM da cadeia (depois do pad, as coordenadas w/h já
-    // são as do quadrado 512×512 final). Sem assinatura, filtro idêntico.
-    comAssinatura(
-      'scale=512:512:force_original_aspect_ratio=increase,' +
+    'scale=512:512:force_original_aspect_ratio=increase,' +
       'crop=min(iw\\,512):min(ih\\,512),' +        // recorta apenas quando sobra
       'pad=512:512:(ow-iw)/2:(oh-ih)/2:black,' +  // preenche fontes minúsculas
       `fps=${fps}`,
-      assinatura
-    ),
     '-c:v', 'libwebp',
     '-lossless', '0',
     '-q:v', String(qualidade),
@@ -159,15 +142,32 @@ async function videoParaWebpAnimado(caminhoVideo, caminhoWebp, limiteBytes = LIM
 // O Exif de wa-sticker-formatter usa node-webpmux: carrega o webp, injeta
 // o chunk EXIF ("sticker-pack-name", etc.) e o guarda — os frames ANMF se
 // conservam tal qual (comprovado: 48 → 48 frames).
-function inyectarMetadatosWebp(buffer) {
+// ✍️ `autor` é a assinatura VIP quando há (senão AUTOR_PADRAO); o pack fica
+// fixo para manter a identidade do bot.
+function inyectarMetadatosWebp(buffer, autor = null) {
   const { default: ClaseExif } = require('wa-sticker-formatter/dist/internal/Metadata/Exif.js')
   const exif = new ClaseExif({
-    pack: 'Hipnos Bot',
-    author: 'Sombras do Limbo',
+    pack: PACK_PADRAO,
+    author: autor || AUTOR_PADRAO,
     id: 'hipnos_s_video',
     categories: ['🔮']
   })
   return exif.add(buffer)
+}
+
+// ─── ✍️ Resolve o nome de AUTOR do EXIF para o autor resolvido ───
+// Consulta tolerante ao documento de VIP (NUNCA lança): sem VIP, sem
+// assinatura ou com o banco fora, devolve AUTOR_PADRAO e o EXIF segue padrão.
+// 🪪 O chamador passa SEMPRE o número resolvido via resolverAutorVip (LID cru
+// nunca acha o documento — era o bug que apagava a assinatura em grupos).
+async function resolverAutorExif(autorVip) {
+  try {
+    const assinatura = await vip.obterAssinatura(autorVip)
+    if (assinatura) return assinatura
+  } catch (errAssinatura) {
+    console.error('[s] ⚠️ falha ao ler a assinatura (EXIF padrão):', errAssinatura?.message || errAssinatura)
+  }
+  return AUTOR_PADRAO
 }
 
 module.exports = {
@@ -188,9 +188,6 @@ module.exports = {
   async executar(sock, jid, msg, texto) {
     let caminhoVideo = null
     let caminhoWebp = null
-    // ✍️ Temporários da assinatura (só existem se o autor tiver uma)
-    let caminhoAssinatura = null
-    let caminhoImagemMarcada = null
 
     try {
       // ─── ⏳ COOLDOWN / 💠 VIP (por USUÁRIO, vale em grupo e no PV) ───
@@ -261,20 +258,16 @@ module.exports = {
 
       console.log(`[s] 📎 mídia capturada: ${video ? 'vídeo' : 'imagem'} ${veioNaLegenda ? 'direta (legenda com o comando)' : 'citada (reply)'}`)
 
-      // ─── ✍️ ASSINATURA DO AUTOR (VIP, /assinatura) ───
+      // ─── ✍️ AUTOR DO EXIF (VIP, /assinatura) ───
       // Uma consulta tolerante ao documento de VIP, feita DEPOIS da captura (ou
       // seja, só quando há mesmo figura para marcar). Sem VIP, sem assinatura ou
-      // com o banco fora, `assinatura` fica null: nenhum arquivo, nenhum drawtext,
-      // nenhuma chamada extra ao ffmpeg. Falha aqui NUNCA derruba a figurinha.
-      let assinatura = null
-      try {
-        assinatura = prepararAssinatura(await vip.obterAssinatura(autorVip), `s-${Date.now()}`)
-        if (assinatura) {
-          caminhoAssinatura = assinatura.caminhoTexto
-          console.log(`[s] ✍️ assinatura aplicada: "${assinatura.texto}"`)
-        }
-      } catch (errAssinatura) {
-        console.error('[s] ⚠️ falha ao ler a assinatura (figura sem marca d\'água):', errAssinatura?.message || errAssinatura)
+      // com o banco fora, `autorExif` fica no padrão: pack fixo + autor padrão.
+      // 🪪 Sempre pelo número RESOLVIDO via resolverAutorVip (LID cru nunca
+      // acha o documento — era o bug que apagava a assinatura em grupos).
+      // Falha aqui NUNCA derruba a figurinha.
+      const autorExif = await resolverAutorExif(autorVip)
+      if (autorExif !== AUTOR_PADRAO) {
+        console.log(`[s] ✍️ assinatura no EXIF: "${autorExif}"`)
       }
 
       // Envia uma mensagem de carregamento
@@ -310,7 +303,7 @@ module.exports = {
         caminhoWebp = path.join(os.tmpdir(), `${idUnico}.webp`)
         fs.writeFileSync(caminhoVideo, buffer)
 
-        const { bytes, segundaPassada } = await videoParaWebpAnimado(caminhoVideo, caminhoWebp, undefined, assinatura)
+        const { bytes, segundaPassada } = await videoParaWebpAnimado(caminhoVideo, caminhoWebp)
         console.log(`[s] 🎬 webp animado pronto: ${bytes} bytes${segundaPassada ? ' (2ª passada comprimida)' : ''}`)
 
         if (bytes > LIMITE_BYTES_STICKER) {
@@ -319,9 +312,10 @@ module.exports = {
 
         stickerBuffer = fs.readFileSync(caminhoWebp)
 
-        // Injeta pack/autor; se falha, o webp do ffmpeg já vale como figurinha
+        // Injeta pack/autor (autor = assinatura VIP quando há); se falha, o webp
+        // do ffmpeg já vale como figurinha
         try {
-          const conMetadatos = await inyectarMetadatosWebp(stickerBuffer)
+          const conMetadatos = await inyectarMetadatosWebp(stickerBuffer, autorExif)
           if (conMetadatos && conMetadatos.length > 0) stickerBuffer = conMetadatos
         } catch (errMetadatos) {
           console.error('[s] ⚠️ não foi possível injetar os metadados (enviando o webp cru):', errMetadatos?.message || errMetadatos)
@@ -339,26 +333,10 @@ module.exports = {
           buffer = Buffer.concat([buffer, parte])
         }
 
-        // ✍️ Camada extra da assinatura (só com VIP+assinatura): a imagem vai
-        // para um PNG com o drawtext e é esse PNG que entra no Sticker(). Sem
-        // assinatura, `buffer` segue intacto e o caminho é o de sempre.
-        if (assinatura) {
-          const idMarcado = `s-ass-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-          caminhoImagemMarcada = path.join(os.tmpdir(), `${idMarcado}.png`)
-          const origemMarcada = path.join(os.tmpdir(), `${idMarcado}.origem`)
-          fs.writeFileSync(origemMarcada, buffer)
-          try {
-            buffer = await aplicarAssinaturaNaImagem(origemMarcada, caminhoImagemMarcada, assinatura)
-            console.log(`[s] ✍️ marca d'água estampada na imagem (${buffer.length} bytes)`)
-          } finally {
-            await apagarComRetry(origemMarcada)
-          }
-        }
-
-        // Cria e formata a figurinha
+        // Cria e formata a figurinha (autor = assinatura VIP quando há)
         const sticker = new Sticker(buffer, {
-          pack: 'Hipnos Bot',         // Nome do pacote de figurinhas
-          author: 'Sombras do Limbo', // Nome do autor
+          pack: PACK_PADRAO,            // Nome do pacote de figurinhas (fixo)
+          author: autorExif,            // Nome do autor (assinatura VIP ou padrão)
           type: StickerTypes.CROPPED, // Corta a imagem para caber perfeitamente no quadrado
           categories: ['🔮'],
           id: 'hipnos_s',
@@ -383,7 +361,7 @@ module.exports = {
       }, { quoted: msg }).catch(() => {})
     } finally {
       // 🧹 Limpeza sempre (incluso em erros)
-      for (const caminho of [caminhoVideo, caminhoWebp, caminhoAssinatura, caminhoImagemMarcada]) {
+      for (const caminho of [caminhoVideo, caminhoWebp]) {
         if (caminho) await apagarComRetry(caminho)
       }
     }
@@ -394,10 +372,12 @@ module.exports = {
 Object.assign(module.exports, {
   videoParaWebpAnimado,
   inyectarMetadatosWebp,
+  resolverAutorExif,
+  PACK_PADRAO,
+  AUTOR_PADRAO,
   LIMITE_VIDEO_SEGUNDOS,
   LIMITE_BYTES_STICKER,
-  aplicarAssinaturaNaImagem,
-  // 🧪 Ganchos dos testes offline da assinatura VIP (/assinatura): permite
-  // inspecionar os args do ffmpeg (o drawtext no -vf) sem gravar nada.
+  // 🧪 Gancho dos testes offline: troca o executor do ffmpeg (padrão
+  // _injetar* do projeto). Sem injeção, roda o ffmpeg de verdade.
   _injetarRodarExecutavel: (fn) => { rodar = fn || rodarExecutavel }
 })

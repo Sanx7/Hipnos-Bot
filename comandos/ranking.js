@@ -1,13 +1,21 @@
 // ============================================
 // 🏆 RANKING — Os Mestres da Palavra do Recinto
 // ============================================
-// Mostra os TOP 10 membros que mais enviaram mensagens NO GRUPO atual, agora
-// como PERGAMINHO GREGO (imagem gerada com Jimp — ver ../pergaminho-ranking.js):
-// frisco grego dourado, rolos de ouro no topo e na base e o nome de cada VIP
-// pintado com a cor do `corVip`.
+// Mostra os TOP 7 membros que mais enviaram mensagens NO GRUPO atual, num
+// QUADRO GREGO (imagem + texto desenhado por cima via Jimp — ver
+// ../dados/ranking-pergaminho.js). A arte é o arquivo
+// assets/quadros/ranking-pergaminho.png: moldura grega, rolos dourados,
+// templo no cabeçalho e as 7 posições do pódio (coroa + louros + número),
+// cada uma com a linha pontilhada onde o nome e a contagem são escritos.
+// O nome sai na cor do `corVip` de quem configurou (/corvip).
 //
-// 🛟 Se a imagem falhar por qualquer motivo, o comando cai no TEXTO de sempre
-// (mesma lista, mesma formatação) — ninguém fica sem o ranking.
+// ⚠️ São 7 posições porque são 7 as que a imagem tem — e não há linha para a
+// 8ª. O corte para 7 acontece DEPOIS do agrupamento por número (passo 5.5),
+// para o documento do telefone da mesma pessoa não ficar de fora.
+//
+// 🛟 Se a imagem falhar por qualquer motivo (quadro ausente, Jimp, envio), o
+// comando cai no TEXTO de sempre (mesma lista, mesma formatação) — ninguém
+// fica sem o ranking.
 //
 // Os dados vêm do MongoDB (ver ../database.js), onde TODA mensagem que passa
 // pelo bot é registrada separada por grupo (remoteJid).
@@ -34,8 +42,8 @@ const {
   agruparPorNumero
 } = require('../ranking-registro')
 
-// 🏛️ O desenho do pergaminho (e a miniatura do preview) vivem num módulo só.
-const { comporPergaminhoRanking, miniaturaDoPergaminho } = require('../pergaminho-ranking')
+// 🏛️ O quadro de honra (e a miniatura do preview) vivem num módulo só.
+const { comporPergaminhoRanking, miniaturaDoPergaminho, POSICOES_RANKING } = require('../dados/ranking-pergaminho')
 
 
 // Normaliza um participante (objeto ou JID) para comparar com o usuário salvo
@@ -52,13 +60,17 @@ function normalizarParticipante(participante) {
 // Medalhas para o pódio do TOP 3; depois vira "4º", "5º"...
 const MEDALHAS = ['🥇', '🥈', '🥉']
 
-// 🏛️ Gerador do pergaminho. Fica numa variável porque os testes trocam por um
+// 📏 Quantas posições o QUADRO tem (7 — uma por linha pontilhada do asset).
+// É a fonte da verdade do corte do top: mais que isso não tem onde escrever.
+const LIMITE_EXIBIDOS = POSICOES_RANKING.length
+
+// 🏛️ Gerador do quadro. Fica numa variável porque os testes trocam por um
 // gerador que falha de propósito (para exercitar o fallback em texto).
 let comporCapa = comporPergaminhoRanking
 
 module.exports = {
   nome: 'ranking',
-  descricao: 'Mostra os 10 membros mais ativos do grupo num pergaminho ilustrado.',
+  descricao: 'Mostra os 7 membros mais ativos do grupo num quadro ilustrado.',
 
   async executar(sock, jid, msg) {
     try {
@@ -76,9 +88,9 @@ module.exports = {
       }
 
       // 2) Busca no banco as linhas do grupo atual (filtrado por grupo_id).
-      //    🪪 LIMITE_BUSCA_AGRUPAMENTO (maior que 10) de propósito: o
+      //    🪪 LIMITE_BUSCA_AGRUPAMENTO (maior que 7) de propósito: o
       //    agrupamento por número (passo 5.5) pode juntar o LID e o telefone da
-      //    MESMA pessoa, e o documento do telefone costuma estar fora do top 10.
+      //    MESMA pessoa, e o documento do telefone costuma estar fora do top 7.
       const bruto = await buscarRanking(jid, LIMITE_BUSCA_AGRUPAMENTO)
 
       // 3) Grupo ainda sem mensagens registradas -> resposta amigável
@@ -101,8 +113,8 @@ module.exports = {
       try {
         const metadata = await sock.groupMetadata(jid)
         participantes = metadata.participants || []
-        // 🏛️ O nome do grupo vira o subtítulo do pergaminho (se vier vazio, o
-        // pergaminho usa o subtítulo padrão dele).
+        // 🏛️ O nome do grupo vira o subtítulo do quadro (na faixa vazia entre o
+        // templo e a 1ª posição).
         nomeDoGrupo = String(metadata.subject || '').trim()
       } catch (err) {
         // Sem metadados o ranking continua funcionando (mostra só o número)
@@ -122,22 +134,24 @@ module.exports = {
         console.error('[ranking] ⚠️ falha ao resolver os identificadores:', errResolucao?.message || errResolucao)
       }
 
-      // 5.5) 📊 AGRUPA POR NÚMERO RESOLVIDO e só ENTÃO corta o top 10: a mesma
-      //    pessoa com LID + telefone no banco vira UMA linha com a SOMA (sem
-      //    isso ela apareceria duas vezes e o ranking ficaria com um "buraco").
+      // 5.5) 📊 AGRUPA POR NÚMERO RESOLVIDO e só ENTÃO corta no tamanho do quadro: a
+      //    mesma pessoa com LID + telefone no banco vira UMA linha com a SOMA
+      //    (sem isso ela apareceria duas vezes e o ranking ficaria com um
+      //    "buraco"). O corte é no FIM porque cortar antes jogaria fora justamente
+      //    o documento do telefone, que pode estar fora das 7 primeiras.
       let top = []
       try {
-        top = agruparPorNumero(bruto, numeros).slice(0, 10)
+        top = agruparPorNumero(bruto, numeros).slice(0, LIMITE_EXIBIDOS)
       } catch (errAgrupamento) {
         console.error('[ranking] ⚠️ falha ao agrupar por número (usando as linhas cruas):', errAgrupamento?.message || errAgrupamento)
-        top = bruto.slice(0, 10)
+        top = bruto.slice(0, LIMITE_EXIBIDOS)
       }
 
-      // 6) 💠 Estilos dos VIPs entre os 10 do pódio (/nomecustom e /corvip —
+      // 6) 💠 Estilos dos VIPs entre os 7 do pódio (/nomecustom e /corvip —
       //    campos `nomeCustom` e `corVip` do documento VIP): UMA consulta só,
       //    feita com os NÚMEROS REAIS resolvidos acima. Quem definiu nome
       //    aparece com ele; quem definiu cor vê o emoji ANTES do nome
-      //    ("🔥 João") no texto e o NOME PINTADO na cor no pergaminho. Os
+      //    ("🔥 João") no texto e o NOME PINTADO na cor no quadro. Os
       //    demais seguem no padrão (pushName do banco ou número). Falha do
       //    banco de VIPs não derruba o ranking — obterEstilosVip nunca lança
       //    e devolve mapa vazio.
@@ -149,7 +163,7 @@ module.exports = {
       }
 
       // 7) Monta a lista numerada: cada item guarda os dados CRUS (para o
-      //    pergaminho) e a linha de texto pronta (para o fallback).
+      //    quadro) e a linha de texto pronta (para o fallback).
       const itens = top.map((item, indice) => {
         const posicao = MEDALHAS[indice] || `${indice + 1}º`
         // 🔑 A chave do mapa de estilos é o NÚMERO REAL resolvido no passo 5 —
@@ -192,21 +206,21 @@ module.exports = {
       const linhas = itens.map((item) => item.linha)
       const resposta =
         '🏆 *RANKING DOS MAIS ATIVOS* 🏆\n\n' +
-        'Os 10 reinos que mais ecoaram no recinto:\n\n' +
+        `Os ${LIMITE_EXIBIDOS} reinos que mais ecoaram no recinto:\n\n` +
         linhas.join('\n\n') +
         '\n\n💤 *"O sono alcança até os mais falantes."*'
 
-      // 8) 🏛️ O pergaminho em imagem. Qualquer tropeço aqui (arte, miniatura
+      // 8) 🏛️ O quadro em imagem. Qualquer tropeço aqui (arte, miniatura
       //    ou envio) cai no TEXTO logo abaixo, sem perder a lista.
-      const legenda = '🏆 Pergaminho do ranking — os 10 mais ativos do recinto'
+      const legenda = `🏆 Quadro do ranking — os ${LIMITE_EXIBIDOS} mais ativos do recinto`
       try {
-        const pergaminho = await comporCapa({ itens, subtitulo: nomeDoGrupo })
-        const miniatura = await miniaturaDoPergaminho(pergaminho)
-        const payload = { image: pergaminho, caption: legenda }
+        const quadro = await comporCapa({ itens, subtitulo: nomeDoGrupo })
+        const miniatura = await miniaturaDoPergaminho(quadro)
+        const payload = { image: quadro, caption: legenda }
         if (miniatura) payload.jpegThumbnail = miniatura
         await sock.sendMessage(jid, payload, { quoted: msg })
-      } catch (errPergaminho) {
-        console.error('[ranking] ⚠️ pergaminho falhou, segue em texto:', errPergaminho?.message || errPergaminho)
+      } catch (errQuadro) {
+        console.error('[ranking] ⚠️ quadro falhou, segue em texto:', errQuadro?.message || errQuadro)
         await sock.sendMessage(jid, { text: resposta }, { quoted: msg })
       }
     } catch (err) {
@@ -226,6 +240,8 @@ module.exports = {
   _restaurarCapa () { comporCapa = comporPergaminhoRanking },
   __internos: {
     MEDALHAS,
+    LIMITE_EXIBIDOS,
+    POSICOES_RANKING,
     normalizarParticipante,
     resolverNumeros,
     agruparPorNumero,
