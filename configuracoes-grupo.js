@@ -466,6 +466,55 @@ function __definirColecaoTeste(colecao) {
   }
 }
 
+// 🗑️ ANTI-APAGADA — mesmo padrão do welcome/IA: 1/0 POR GRUPO, na MESMA
+// collection ("configuracoesGrupo"), campo `antiapagada`.
+// DECISÃO: LIGADO por padrão (ausência do campo = ligado). Motivo: o valor
+// do recurso está em recuperar o que foi apagado sem configurar nada; quem
+// se incomoda com a privacidade desliga com 1 comando (/antiapagada 0).
+// Documentado no /antiapagada, no /menu-admin e no changelog.
+async function definirAntiApagada(grupoIdBruto, ativo) {
+  const grupoId = String(grupoIdBruto || '').trim()
+  if (!grupoId) return null
+
+  const colecao = await obterColecaoConfiguracoes()
+  const documento = {
+    grupo_id: grupoId,
+    antiapagada: Boolean(ativo),
+    atualizado_em: Date.now()
+  }
+
+  await colecao.updateOne(
+    { grupo_id: grupoId },
+    { $set: documento },
+    { upsert: true }
+  )
+
+  console.log(`🗑️ [config-grupo] anti-apagada ${ativo ? 'LIGADA' : 'DESLIGADA'} p/ ${grupoId}`)
+  return documento
+}
+
+// antiApagadaHabilitada(grupoId): devolve true/false (NUNCA lança —
+// falha de banco assume LIGADO? NÃO: assume DESLIGADO, fail-safe de
+// privacidade — sem banco não há como provar que o grupo aceitou).
+// Grupo sem registro (campo ausente) = LIGADO (padrão documentado).
+async function antiApagadaHabilitada(grupoIdBruto) {
+  const grupoId = String(grupoIdBruto || '').trim()
+  if (!grupoId) return false
+
+  try {
+    const config = await obterConfiguracoes(grupoId)
+    if (!config) return true
+    if (config.antiapagada === undefined || config.antiapagada === null) return true
+    return config.antiapagada === true
+  } catch (erro) {
+    console.error(
+      '⚠️ [config-grupo] falha ao consultar a anti-apagada — assumindo DESLIGADO:',
+      erro?.message
+    )
+    return false
+  }
+}
+
 module.exports = {
   obterConfiguracoes,
   definirWelcome,
@@ -482,6 +531,9 @@ module.exports = {
   definirLegenda,
   removerLegenda,
   obterLegenda,
+  // 🗑️ Anti-apagada por grupo (/antiapagada + reenvio automático)
+  definirAntiApagada,
+  antiApagadaHabilitada,
   // 🧪 Limites (usados pelos comandos p/ avisar o admin ANTES de gravar)
   LIMITE_BYTES_BANNER,
   LIMITE_CARACTERES_LEGENDA,

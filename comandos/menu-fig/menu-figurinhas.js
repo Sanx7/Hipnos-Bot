@@ -38,7 +38,7 @@ module.exports = {
 (também: /sticker, /stiker e /sticker2).
 
 🖼️ /figurinha
-➥ A mesma figurinha, mas SEM CORTES: a imagem inteira entra no quadrado e o que sobra vira fundo TRANSPARENTE (ex: /figurinha com a foto na legenda ou respondendo uma foto).
+➥ A mesma figurinha, mas SEM CORTES: a imagem inteira é ESTICADA até preencher todo o quadrado (a proporção pode mudar, mas nada é cortado e nada sobra de fundo) (ex: /figurinha com a foto na legenda ou respondendo uma foto).
 (também: /fig).
 
 🎨 /attp <texto>

@@ -5,7 +5,9 @@
 // videoParaWebpAnimado() e verifica:
 //   - o webp resultante é ANIMADO (chunks ANMF) e ≤ 1 MB;
 //   - o recorte sempre dá 512×512 (incl. fontes minúsculas 100×50);
-//   - a 2ª passada de compressão se dispara ao pedir um limite baixo;
+//   - a ESCADA de compressão desce até caber, baixando a QUALIDADE antes do
+//     fps (fluidez preservada) — e o webp final toca no fps que ele declara
+//     (o bug do "~2 fps" era o arquivo não caber, não o delay do container);
 //   - os metadados do pack são injetados sem perder frames (node-webpmux).
 // Uso: node scripts/teste-sticker-video.js
 // ============================================
@@ -34,6 +36,29 @@ const rodar = (args, timeoutMs) => new Promise((resolver, rejeitar) => {
 function contarAnmf(buffer) {
   const conteudo = buffer.toString('latin1')
   return (conteudo.match(/ANMF/g) || []).length
+}
+
+// ─── 🔎 Parser mínimo do container WEBP animado ───
+// Lê os chunks de verdade (não um regex): conta os ANMF e soma as durações de
+// cada frame (3 bytes little-endian no offset 12 do payload do ANMF). É o que
+// permite conferir se o arquivo TOCA no fps que promete.
+function parseWebp(buffer) {
+  let deslocamento = 12
+  const info = { anmf: 0, duracaoTotal: 0, duracoes: [] }
+  while (deslocamento + 8 <= buffer.length) {
+    const tag = buffer.toString('ascii', deslocamento, deslocamento + 4)
+    const tamanho = buffer.readUInt32LE(deslocamento + 4)
+    if (tag === 'ANMF') {
+      const duracao = buffer.readUIntLE(deslocamento + 8 + 12, 3)
+      info.anmf += 1
+      info.duracaoTotal += duracao
+      info.duracoes.push(duracao)
+    }
+    deslocamento += 8 + tamanho + (tamanho % 2)
+    if (tamanho <= 0 || deslocamento > buffer.length) break
+  }
+  info.fpsReal = info.duracaoTotal > 0 ? info.anmf / (info.duracaoTotal / 1000) : 0
+  return info
 }
 
 async function generarVideo(destino, size, duracion) {
@@ -88,8 +113,8 @@ async function main() {
       console.log(`   → ${bufer.length} bytes, ${contarAnmf(bufer)} frames ANMF`)
     })
 
-    // 3) 2ª passada de compressão: o webp comprimido fica MENOR que o primário
-    await testar('2ª passada de compressão gera webp menor', async () => {
+    // 3) Escada de compressão: com limite baixo o webp final fica MENOR
+    await testar('limite baixo dispara a escada e gera webp menor', async () => {
       const video = path.join(tmp, 'v6.mp4')
       const webpA = path.join(tmp, 'v6a.webp')
       const webpB = path.join(tmp, 'v6b.webp')
@@ -115,6 +140,36 @@ async function main() {
       if (!conteudo.includes('sticker-pack-name')) throw new Error('EXIF não injetado')
       if (framesAntes !== framesDespues) throw new Error(`perdeu frames: ${framesAntes} → ${framesDespues}`)
       console.log(`   → ${framesAntes} frames conservados, +${conMetadatos.length - original.length} bytes de EXIF`)
+    })
+
+    // 5) A escada prefere BAIXAR A QUALIDADE a matar o fps (fluidez primeiro)
+    await testar('escada baixa a qualidade antes de matar o fps', async () => {
+      const video = path.join(tmp, 'v5.mp4')
+      const webpA = path.join(tmp, 'v5a.webp')
+      const webpB = path.join(tmp, 'v5b.webp')
+      await generarVideo(video, '640x360', 5)
+      const primaria = await videoParaWebpAnimado(video, webpA, 1024 * 1024)
+      // Limite 1 byte abaixo do primário: o degrau seguinte é SÓ qualidade
+      const ajustada = await videoParaWebpAnimado(video, webpB, primaria.bytes - 1)
+      if (ajustada.bytes >= primaria.bytes) throw new Error(`compressão não reduziu: ${ajustada.bytes} >= ${primaria.bytes}`)
+      if (ajustada.fps !== 12) throw new Error(`baixou o fps sem necessidade: ${ajustada.fps} (degrau ${ajustada.degrau})`)
+      const info = parseWebp(fs.readFileSync(webpB))
+      if (Math.abs(info.fpsReal - 12) > 0.05) throw new Error(`o webp não toca a 12 fps: ${info.anmf} frames em ${info.duracaoTotal}ms (${info.fpsReal.toFixed(2)})`)
+      console.log(`   → ${primaria.bytes} → ${ajustada.bytes} bytes mantendo 12 fps (degrau ${ajustada.degrau})`)
+    })
+
+    // 6) Invariante anti-"~2 fps": com limite agressivo a figurinha final CABE
+    //    e TOCA no fps que ela mesma declara (o container fala a verdade).
+    await testar('limite agressivo: cabe no teto e toca no fps declarado', async () => {
+      const video = path.join(tmp, 'v10.mp4')
+      const webp = path.join(tmp, 'v10.webp')
+      await generarVideo(video, '640x360', 10)
+      const limite = 150 * 1024
+      const resultado = await videoParaWebpAnimado(video, webp, limite)
+      if (resultado.bytes > limite) throw new Error(`não coube no teto: ${resultado.bytes} > ${limite}`)
+      const info = parseWebp(fs.readFileSync(webp))
+      if (Math.abs(info.fpsReal - resultado.fps) > 0.5) throw new Error(`fps real ${info.fpsReal.toFixed(2)} != declarado ${resultado.fps}`)
+      console.log(`   → ${resultado.bytes} bytes (teto ${limite}) @ ${resultado.fps} fps declarado / ${info.fpsReal.toFixed(2)} real (degrau ${resultado.degrau})`)
     })
   } finally {
     try {

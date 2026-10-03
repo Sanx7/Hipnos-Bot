@@ -9,9 +9,10 @@
 //   PARTE 1 — captura da mídia (o bug do "só reply" não pode existir aqui):
 //     imagem citada (reply), imagem DIRETA na legenda, prioridade da direta,
 //     mídia encapsulada (view-once/temporária) e ausência de imagem;
-//   PARTE 2 — pipeline real do encaixe (ffmpeg):
-//     quadrada (sem padding), retrato (padding LATERAL transparente),
-//     paisagem (padding TOPO/BASE transparente), vídeo → webp animado,
+//   PARTE 2 — pipeline real do esticamento (ffmpeg):
+//     quadrada, retrato e paisagem → todas ESTICADAS para 512×512, sem
+//     padding e sem faixa transparente (a imagem preenche o quadrado todo,
+//     distorcendo a proporção quando preciso), vídeo → webp animado opaco,
 //     EXIF do pack injetado (mesmo método do /s) e limpeza dos temporários;
 //   PARTE 3 — erros/limites amigáveis:
 //     mídia vazia e arquivo acima de 25 MB.
@@ -173,8 +174,13 @@ function montarLeitor (dados) {
     const i = (y * LADO + x) * 4
     return { r: dados[i], g: dados[i + 1], b: dados[i + 2], a: dados[i + 3] }
   }
+  // 🔎 Conta os pixels com alfa ZERO: é a prova de que a imagem PREENCHEU o
+  // quadrado inteiro (nada de faixa transparente de padding sobrando).
+  let transparentes = 0
+  for (let i = 3; i < dados.length; i += 4) if (dados[i] === 0) transparentes += 1
   return {
     px,
+    transparentes,
     ehTransparente: (x, y) => px(x, y).a === 0,
     ehOpaco: (x, y) => px(x, y).a > 200
   }
@@ -315,7 +321,7 @@ async function contarClaros (buffer, marca) {
 // 🏃 MAIN — PARTE 1: captura da mídia (sem conversão)
 // ============================================
 async function main () {
-  console.log('🧪 TESTE /figurinha — encaixe 512×512 com fundo transparente\n')
+  console.log('🧪 TESTE /figurinha — imagem ESTICADA para preencher o 512×512 inteiro\n')
   const midias = await prepararMidias()
 
   // ── Presença no loader/registro ──
@@ -326,13 +332,15 @@ async function main () {
   checar('alias /fig registrado', (figurinha.aliases || []).includes('fig'))
   checar('o /figurinha NÃO anuncia mais figcompleta/figurinha como apelido',
     !(figurinha.aliases || []).includes('figcompleta') && !(figurinha.aliases || []).includes('figurinha'))
-  checar('o filtro de imagem é o do requisito (decrease + pad transparente)',
-    figurinha.FILTRO_IMAGEM.includes('force_original_aspect_ratio=decrease') &&
-    figurinha.FILTRO_IMAGEM.includes(`pad=${LADO}:${LADO}:(ow-iw)/2:(oh-ih)/2:color=0x00000000`) &&
+  checar('o filtro de imagem é o de ESTICAR: scale direto 512:512 (sem decrease, sem pad, sem crop)',
+    figurinha.FILTRO_IMAGEM === `scale=${LADO}:${LADO}` &&
+    !/force_original_aspect_ratio/.test(figurinha.FILTRO_IMAGEM) &&
+    !/pad=/.test(figurinha.FILTRO_IMAGEM) &&
     !/crop/.test(figurinha.FILTRO_IMAGEM),
     figurinha.FILTRO_IMAGEM)
-  checar('o filtro de vídeo mantém a proporção (sem crop)',
-    !/crop/.test(figurinha.filtroVideo(12)), figurinha.filtroVideo(12))
+  checar('o filtro de vídeo estica igual (sem pad/crop) e mantém o fps de saída',
+    figurinha.filtroVideo(12) === `scale=${LADO}:${LADO},fps=12`,
+    figurinha.filtroVideo(12))
 
   // ── Captura: só o caminho da mídia (a conversão é interrompida de propósito) ──
   modoFalha = true
@@ -376,8 +384,8 @@ async function main () {
   checar('sem imagem alguma: orienta legenda e reply sem baixar mídia',
     r.envios.length === 0 && r.mensagens.length === 1 &&
     /legenda/.test(ultimo()?.texto) && /Responda/.test(ultimo()?.texto))
-  checar('sem imagem alguma: menciona o fundo transparente (é o diferencial do comando)',
-    /transparente/i.test(ultimo()?.texto))
+  checar('sem imagem alguma: avisa que a imagem sai ESTICADA (é o diferencial do comando)',
+    /esticad/i.test(ultimo()?.texto) && !/transparente/i.test(ultimo()?.texto), ultimo()?.texto)
 
   r = await rodarComando({ extendedTextMessage: { text: '/figurinha', contextInfo: { quotedMessage: { conversation: 'oi' } } } })
   checar('reply de TEXTO (sem mídia) → mesma orientação amigável',
@@ -397,21 +405,27 @@ async function main () {
   let sticker = rotulo(r)
   checar('quadrada: envia uma figurinha (webp)', Boolean(sticker?.sticker), JSON.stringify(r.mensagens.map((m) => m.texto)))
   checar('quadrada: envia o aviso de progresso antes do sticker',
-    r.mensagens.length === 2 && /Encaixando/.test(r.mensagens[0].texto))
+    r.mensagens.length === 2 && /Esticando/.test(r.mensagens[0].texto))
   let px = await pixelsDeWebpEstatico(sticker.sticker, 'quadrada')
   checar('quadrada: a imagem ocupa o quadrado inteiro (canto é a COR, opaca)',
     px.ehOpaco(0, 0) && ehVermelho(px.px(0, 0)), JSON.stringify(px.px(0, 0)))
-  checar('quadrada: nenhuma faixa transparente (sem padding necessário)',
+  checar('quadrada: nenhuma faixa transparente (nada de padding sobrando)',
     px.ehOpaco(255, 0) && px.ehOpaco(0, 255) && px.ehOpaco(LADO - 1, LADO - 1))
+  checar('quadrada: NENHUM pixel transparente — preenche o quadrado inteiro',
+    px.transparentes === 0, `${px.transparentes} pixel(s) com alfa 0`)
 
-  // ── (b) imagem RETRATO (300×600): encaixa na ALTURA → sobra LATERAL ──
+  // ── (b) imagem RETRATO (300×600): ESTICADA na largura → preenche tudo ──
   bufferAtual = midias.retrato.buffer
   r = await rodarComando(msgDireta(foto))
   sticker = rotulo(r)
   px = await pixelsDeWebpEstatico(sticker.sticker, 'retrato')
-  checar('retrato: laterais ficam TRANSPARENTES (padding lateral)',
-    px.ehTransparente(0, 0) && px.ehTransparente(0, 256) && px.ehTransparente(LADO - 1, 256),
-    `${JSON.stringify(px.px(0, 256))} | ${JSON.stringify(px.px(LADO - 1, 256))}`)
+  checar('retrato: canto superior esquerdo é a COR da imagem, opaca (nada de padding transparente)',
+    px.ehOpaco(0, 0) && ehVermelho(px.px(0, 0)), JSON.stringify(px.px(0, 0)))
+  checar('retrato: laterais OPACAS até a borda — a imagem foi esticada, não encaixada com fundo',
+    px.ehOpaco(0, 200) && px.ehOpaco(LADO - 1, 200) && ehVermelho(px.px(0, 200)),
+    `${JSON.stringify(px.px(0, 200))} | ${JSON.stringify(px.px(LADO - 1, 200))}`)
+  checar('retrato: NENHUM pixel transparente — a imagem preenche o quadrado inteiro',
+    px.transparentes === 0, `${px.transparentes} pixel(s) com alfa 0`)
   checar('retrato: a imagem INTEIRA sobreviveu — topo (vermelho) e base (verde) presentes',
     ehVermelho(px.px(256, 12)) && ehVerde(px.px(256, LADO - 12)),
     `topo=${JSON.stringify(px.px(256, 12))} base=${JSON.stringify(px.px(256, LADO - 12))}`)
@@ -420,14 +434,24 @@ async function main () {
     px.ehOpaco(256, 320) && ehVerde(px.px(256, 320)),
     `acima=${JSON.stringify(px.px(256, 200))} abaixo=${JSON.stringify(px.px(256, 320))}`)
 
-  // ── (c) imagem PAISAGEM (600×300): encaixa na LARGURA → sobra TOPO/BASE ──
+  // ── (c) imagem PAISAGEM (600×300): ESTICADA na altura → preenche tudo ──
   bufferAtual = midias.paisagem.buffer
   r = await rodarComando(msgCitando(foto)) // 🖼️ caminho do REPLY, p/ variar
   sticker = rotulo(r)
   px = await pixelsDeWebpEstatico(sticker.sticker, 'paisagem')
-  checar('paisagem (via reply): topo/base ficam TRANSPARENTES (padding vertical)',
-    px.ehTransparente(256, 0) && px.ehTransparente(256, LADO - 1) && px.ehTransparente(0, 0),
+  checar('paisagem (via reply): topo/base OPACOS até a borda — esticada, sem faixa transparente',
+    px.ehOpaco(256, 0) && px.ehOpaco(256, LADO - 1) && px.ehOpaco(0, 0),
     `${JSON.stringify(px.px(256, 0))} | ${JSON.stringify(px.px(256, LADO - 1))}`)
+  checar('paisagem (via reply): os 4 cantos trazem a COR da imagem (esquerda vermelha, direita verde)',
+    ehVermelho(px.px(0, 0)) && ehVerde(px.px(LADO - 1, 0)) &&
+    ehVermelho(px.px(0, LADO - 1)) && ehVerde(px.px(LADO - 1, LADO - 1)),
+    `se=${JSON.stringify(px.px(0, 0))} sd=${JSON.stringify(px.px(LADO - 1, 0))} ` +
+    `ie=${JSON.stringify(px.px(0, LADO - 1))} id=${JSON.stringify(px.px(LADO - 1, LADO - 1))}`)
+  checar('paisagem (via reply): NENHUM pixel transparente — a imagem preenche o quadrado inteiro',
+    px.transparentes === 0, `${px.transparentes} pixel(s) com alfa 0`)
+  checar('paisagem (via reply): as metades continuam divididas no meio (esticada, não deslocada)',
+    ehVermelho(px.px(200, 256)) && ehVerde(px.px(320, 256)),
+    `esq=${JSON.stringify(px.px(200, 256))} dir=${JSON.stringify(px.px(320, 256))}`)
   checar('paisagem (via reply): a imagem INTEIRA sobreviveu — esquerda (vermelha) e direita (verde)',
     ehVermelho(px.px(12, 256)) && ehVerde(px.px(LADO - 12, 256)),
     `esq=${JSON.stringify(px.px(12, 256))} dir=${JSON.stringify(px.px(LADO - 12, 256))}`)
@@ -440,14 +464,14 @@ async function main () {
     sticker.sticker.subarray(0, 4).toString('ascii') === 'RIFF' &&
     sticker.sticker.subarray(8, 12).toString('ascii') === 'WEBP')
 
-  // ── (e) VÍDEO → figurinha ANIMADA com o MESMO encaixe transparente ──
+  // ── (e) VÍDEO → figurinha ANIMADA com o MESMO esticamento (sem padding) ──
   bufferAtual = midias.videoRetrato.buffer
   r = await rodarComando(msgDireta({ ...video, seconds: 2 }))
   sticker = rotulo(r)
   checar('vídeo: envia figurinha ANIMADA (chunks ANMF)',
     Boolean(sticker?.sticker) && sticker.sticker.includes(Buffer.from('ANMF')))
-  checar('vídeo: webp animado traz o canal alfa (chunk ALPH)',
-    sticker.sticker.includes(Buffer.from('ALPH')))
+  checar('vídeo: webp animado sai OPACO — sem ALPH (o alfa só existia para o padding)',
+    Boolean(sticker?.sticker) && !sticker.sticker.includes(Buffer.from('ALPH')))
   let anim = null
   let erroAnim = null
   try {
@@ -455,9 +479,11 @@ async function main () {
   } catch (err) {
     erroAnim = err
   }
-  checar('vídeo: 1º frame com padding lateral TRANSPARENTE (alfa sobreviveu)',
-    Boolean(anim) && anim.quantidadeFrames > 1 && anim.ehTransparente(0, 256) && anim.ehOpaco(256, 256),
-    erroAnim ? `não consegui inspecionar: ${erroAnim.message}` : JSON.stringify(anim?.px(0, 256)))
+  checar('vídeo: 1º frame esticado até a borda (sem faixa transparente lateral)',
+    Boolean(anim) && anim.quantidadeFrames > 1 && anim.ehOpaco(0, 256) &&
+    anim.ehOpaco(256, 256) && anim.transparentes === 0,
+    erroAnim ? `não consegui inspecionar: ${erroAnim.message}` :
+      `${JSON.stringify(anim?.px(0, 256))} | ${anim?.transparentes} pixel(s) com alfa 0`)
 
   // ── (f) limpeza dos temporários (padrão apagarComRetry) ──
   checar('nenhum temporário do comando ficou para trás em os.tmpdir()', contarTemporarios() === 0,

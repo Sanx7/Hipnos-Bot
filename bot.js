@@ -57,6 +57,13 @@ const { extrairTextoComando } = require('./dados/texto-comando')
 // Nunca lança: qualquer falha é logada e o fluxo segue.
 const capturaDiaria = require('./dados/captura-diaria')
 
+// 🗑️ ANTI-APAGADA: cache temporário (~2h) + reenvio de "apagar para todos".
+// Memória (Map por msg.key.id) + histórico do dia no Mongo com TTL.
+// Nunca lança: captura e reenvio são acessórios e não bloqueiam o fluxo.
+const cacheMensagens = require('./dados/cache-mensagens')
+const { tratarRevogacao } = require('./dados/reenvio-apagadas')
+const { antiApagadaHabilitada } = require('./configuracoes-grupo')
+
 // ⚙️ Configurações globais do bot
 // - OWNER_NUMBERS: lista de donos SEMPRE pode usar os comandos (mesmo no modo restrito)
 // - AVISAR_BLOQUEIO: true = avisa não-admin | false = ignora silenciosamente
@@ -462,6 +469,23 @@ async function startBot() {
       const jid = msg.key.remoteJid
       const sender = msg.key.participant || msg.key.remoteJid
 
+      // 🗑️ ANTI-APAGADA: "apagar para todos" (protocolMessage REVOKE) chega
+      // AQUI como mensagem normal — o Baileys não tem evento separado.
+      // Se o grupo tem a recuperação ligada, busca o original no cache e
+      // reenvia; sem cache = silencioso. Roda ANTES de tudo (inclusive do
+      // ranking/jornal) e nunca bloqueia o fluxo. Só grupos.
+      try {
+        if (String(jid || '').endsWith('@g.us')) {
+          const ativo = await antiApagadaHabilitada(jid)
+          if (ativo) {
+            const resultado = await tratarRevogacao(sock, msg, jid)
+            if (resultado === 'reenviado') return
+          }
+        }
+      } catch (errApagadas) {
+        console.error('[apagadas] falha no reenvio (fluxo segue normal):', errApagadas?.message || errApagadas)
+      }
+
       // ====================
       // 📊 REGISTRO DE MENSAGENS PARA O /RANKING
       // ====================
@@ -584,6 +608,20 @@ async function startBot() {
         if (String(jid || '').endsWith('@g.us')) capturaDiaria.capturarMensagem(msg, jid)
       } catch (errJornal) {
         console.error('[jornal] falha na captura (fluxo segue normal):', errJornal?.message || errJornal)
+      }
+
+      // 🗑️ CACHE DE MENSAGENS (anti-apagada): guarda texto/mídia por ~2h
+      // p/ o reenvio do "apagar para todos". Fire-and-forget DE PROPÓSITO
+      // (o download da mídia não pode atrasar comandos/ranking). Respeita o
+      // toggle do grupo: desligado = nada é guardado. Só grupos.
+      try {
+        if (String(jid || '').endsWith('@g.us')) {
+          antiApagadaHabilitada(jid).then((ativo) => {
+            if (ativo) cacheMensagens.capturarMensagem(msg, jid).catch(() => {})
+          }).catch(() => {})
+        }
+      } catch (errCache) {
+        console.error('[apagadas] falha na captura (fluxo segue normal):', errCache?.message || errCache)
       }
 
       const muteCmd = comandos.get("mute")

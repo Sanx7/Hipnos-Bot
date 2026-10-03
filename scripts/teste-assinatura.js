@@ -1,6 +1,9 @@
 // ============================================================
-// TESTE ASSINATURA - parte 1/4 (cabecalho + harness)
+// TESTE ASSINATURA - autor + pack custom (cabecalho + harness)
 // ============================================================
+// Cobre os DOIS campos do /assinatura: `assinatura` (autor) e `packCustom`
+// (pack) — definir cada um separado, definir os dois juntos, mostrar os dois
+// atuais, remover cada um separado e recusar não-VIP nos dois modos.
 process.env.MONGODB_URI = ''
 process.env.MONGO_URI_RPG = ''
 const path = require('path')
@@ -186,19 +189,121 @@ async function main() {
     const e3 = await lerExif(await figurinha.aplicarMetadados(base, null))
     if (e3.autor !== 'Sombras do Limbo') throw new Error('padrao: ' + JSON.stringify(e3))
   })
-  await testar('pack fixo e sem drawtext', async () => {
+  await testar('metadados gravam pack custom (webp do Sticker)', async () => {
+    const base = await gerarStickerExif(sticker.PACK_PADRAO, sticker.AUTOR_PADRAO)
+    const e1 = await lerExif(await sticker.inyectarMetadatosWebp(base, '@joaovip', 'Pack do Edu'))
+    if (e1.autor !== '@joaovip' || e1.pack !== 'Pack do Edu') throw new Error('/s pack: ' + JSON.stringify(e1))
+    const e2 = await lerExif(await figurinha.aplicarMetadados(base, '@joaovip', 'Pack do Edu'))
+    if (e2.autor !== '@joaovip' || e2.pack !== 'Pack do Edu') throw new Error('/fig pack: ' + JSON.stringify(e2))
+  })
+  await testar('resolvers de pack usam packCustom (ou padrao)', async () => {
+    vips().clear()
+    vips().set(NUM_VIP, { numero: NUM_VIP, expira_em: Date.now() + DOIS_DIAS, packCustom: 'Pack do Edu' })
+    if ((await sticker.resolverPackExif(NUM_VIP)) !== 'Pack do Edu') throw new Error('/s nao devolveu pack')
+    if ((await figurinha.resolverPackExif(NUM_VIP)) !== 'Pack do Edu') throw new Error('/figurinha nao devolveu pack')
+    if ((await sticker.resolverPackExif(NUM_COMUM)) !== sticker.PACK_PADRAO) throw new Error('/s nao caiu no pack padrao')
+    if ((await figurinha.resolverPackExif(NUM_COMUM)) !== figurinha.PACK_PADRAO) throw new Error('/figurinha nao caiu no pack padrao')
+    const parS = await sticker.resolverExif(NUM_VIP)
+    if (parS.pack !== 'Pack do Edu') throw new Error('/s par sem pack: ' + JSON.stringify(parS))
+    const parFig = await figurinha.resolverExif(NUM_VIP)
+    if (parFig.pack !== 'Pack do Edu') throw new Error('/fig par sem pack: ' + JSON.stringify(parFig))
+  })
+  await testar('pack usa EXIF padrao sem pack custom', async () => {
+    vips().clear()
+    vips().set(NUM_VIP, { numero: NUM_VIP, expira_em: Date.now() + DOIS_DIAS, assinatura: '@joaovip' })
+    const base = await gerarStickerExif(sticker.PACK_PADRAO, sticker.AUTOR_PADRAO)
+    const pack = await sticker.resolverPackExif(NUM_VIP)
+    if (pack !== 'Hipnos Bot') throw new Error('pack devia ser padrao: ' + pack)
+    const e1 = await lerExif(await sticker.inyectarMetadatosWebp(base, '@joaovip', pack))
+    if (e1.autor !== '@joaovip' || e1.pack !== 'Hipnos Bot') throw new Error('/s padrao: ' + JSON.stringify(e1))
+  })
+  await testar('pack custom e sem drawtext', async () => {
     if (sticker.PACK_PADRAO !== 'Hipnos Bot') throw new Error('pack /s: ' + sticker.PACK_PADRAO)
     if (figurinha.PACK_PADRAO !== 'Hipnos Bot') throw new Error('pack /fig: ' + figurinha.PACK_PADRAO)
     for (const arq of ['sticker.js', 'figurinha.js']) {
       const fonte = fs.readFileSync(path.join(__dirname, '..', 'comandos', 'menu-fig', arq), 'utf8')
       if (/drawtext/i.test(fonte)) throw new Error(arq + ' ainda tem drawtext')
       if (!/resolverAutorExif/.test(fonte)) throw new Error(arq + ' sem resolverAutorExif')
+      if (!/resolverPackExif/.test(fonte)) throw new Error(arq + ' sem resolverPackExif')
     }
   })
   await testar('ajuda fala em nome de autor', async () => {
     if (!/nome de autor/i.test(comando.descricao)) throw new Error('descricao: ' + JSON.stringify(comando.descricao))
     const fonte = fs.readFileSync(path.join(__dirname, '..', 'comandos', 'menu-vip', 'assinatura.js'), 'utf8')
     if (/marca d'água/i.test(fonte)) throw new Error('ajuda ainda fala em marca')
+  })
+  await testar('ajuda menciona o pack custom', async () => {
+    if (!/pack/i.test(comando.descricao)) throw new Error('descricao sem pack: ' + JSON.stringify(comando.descricao))
+    if (!/pack <texto>/i.test(comando.descricao)) throw new Error('descricao sem uso pack: ' + JSON.stringify(comando.descricao))
+  })
+  await testar('VIP define o pack customizado (/assinatura pack <texto>)', async () => {
+    vips().clear()
+    vips().set(NUM_VIP, { numero: NUM_VIP, expira_em: Date.now() + DOIS_DIAS })
+    const { sock, envios } = criarSock()
+    await comando.executar(sock, JID_GRUPO, mensagem('/assinatura pack Meu Pack VIP'), '/assinatura pack Meu Pack VIP')
+    if ((await vip.obterPackCustom(NUM_VIP)) !== 'Meu Pack VIP') throw new Error('pack nao gravou: ' + JSON.stringify(await vip.obterAssinaturaCompleta(NUM_VIP)))
+    if ((await vip.obterAssinatura(NUM_VIP)) !== null) throw new Error('autor nao devia mudar')
+    if (!/PACK DEFINIDO/i.test(envios.at(-1)?.texto || '')) throw new Error('sem confirmacao: ' + JSON.stringify(envios.at(-1)?.texto))
+  })
+  await testar('VIP define o autor customizado (/assinatura <texto>)', async () => {
+    vips().clear()
+    vips().set(NUM_VIP, { numero: NUM_VIP, expira_em: Date.now() + DOIS_DIAS })
+    const { sock, envios } = criarSock()
+    await comando.executar(sock, JID_GRUPO, mensagem('/assinatura Edu | 777'), '/assinatura Edu | 777')
+    if ((await vip.obterAssinatura(NUM_VIP)) !== 'Edu | 777') throw new Error('autor nao gravou')
+    if ((await vip.obterPackCustom(NUM_VIP)) !== null) throw new Error('pack nao devia mudar')
+    if (!/ASSINATURA DEFINIDA/i.test(envios.at(-1)?.texto || '')) throw new Error('sem confirmacao: ' + JSON.stringify(envios.at(-1)?.texto))
+  })
+  await testar('VIP define os dois ao mesmo tempo (autor + pack)', async () => {
+    vips().clear()
+    vips().set(NUM_VIP, { numero: NUM_VIP, expira_em: Date.now() + DOIS_DIAS })
+    const { sock } = criarSock()
+    await comando.executar(sock, JID_GRUPO, mensagem('/assinatura Edu | 777'), '/assinatura Edu | 777')
+    await comando.executar(sock, JID_GRUPO, mensagem('/assinatura pack Pack do Edu'), '/assinatura pack Pack do Edu')
+    const completo = await vip.obterAssinaturaCompleta(NUM_VIP)
+    if (completo.autor !== 'Edu | 777' || completo.pack !== 'Pack do Edu') throw new Error('par incompleto: ' + JSON.stringify(completo))
+  })
+  await testar('/assinatura sozinho mostra os dois valores atuais', async () => {
+    vips().clear()
+    vips().set(NUM_VIP, { numero: NUM_VIP, expira_em: Date.now() + DOIS_DIAS, assinatura: 'Edu | 777', packCustom: 'Pack do Edu' })
+    const { sock, envios } = criarSock()
+    await comando.executar(sock, JID_GRUPO, mensagem('/assinatura'), '/assinatura')
+    const texto = envios.at(-1)?.texto || ''
+    if (!/Edu \| 777/.test(texto)) throw new Error('autor sumiu: ' + JSON.stringify(texto))
+    if (!/Pack do Edu/.test(texto)) throw new Error('pack sumiu: ' + JSON.stringify(texto))
+  })
+  await testar('remover cada um separadamente (autor e pack independentes)', async () => {
+    vips().clear()
+    vips().set(NUM_VIP, { numero: NUM_VIP, expira_em: Date.now() + DOIS_DIAS, assinatura: 'Edu | 777', packCustom: 'Pack do Edu' })
+    const { sock } = criarSock()
+    await comando.executar(sock, JID_GRUPO, mensagem('/assinatura pack remover'), '/assinatura pack remover')
+    let completo = await vip.obterAssinaturaCompleta(NUM_VIP)
+    if (completo.pack !== null) throw new Error('pack nao saiu: ' + JSON.stringify(completo))
+    if (completo.autor !== 'Edu | 777') throw new Error('autor nao devia sair: ' + JSON.stringify(completo))
+    await comando.executar(sock, JID_GRUPO, mensagem('/assinatura remover'), '/assinatura remover')
+    completo = await vip.obterAssinaturaCompleta(NUM_VIP)
+    if (completo.autor !== null) throw new Error('autor nao saiu: ' + JSON.stringify(completo))
+    if (completo.pack !== null) throw new Error('pack nao devia voltar: ' + JSON.stringify(completo))
+  })
+  await testar('pack usa o mesmo limite do autor (35 caracteres)', async () => {
+    vips().clear()
+    vips().set(NUM_VIP, { numero: NUM_VIP, expira_em: Date.now() + DOIS_DIAS })
+    const { sock, envios } = criarSock()
+    await comando.executar(sock, JID_GRUPO, mensagem('/assinatura pack ' + 'p'.repeat(36)), '/assinatura pack ' + 'p'.repeat(36))
+    if ((await vip.obterPackCustom(NUM_VIP)) !== null) throw new Error('pack longo nao devia gravar')
+    if (!/muito longo/i.test(envios.at(-1)?.texto || '')) throw new Error('sem aviso de limite: ' + JSON.stringify(envios.at(-1)?.texto))
+  })
+  await testar('nao-VIP recusado no autor E no pack', async () => {
+    vips().clear()
+    vips().set(NUM_VIP, { numero: NUM_VIP, expira_em: Date.now() + DOIS_DIAS })
+    const { sock, envios } = criarSock()
+    const msgComum = (texto) => ({ key: { remoteJid: JID_GRUPO, participant: `${NUM_COMUM}@s.whatsapp.net` }, message: { conversation: texto }, pushName: 'Comum' })
+    await comando.executar(sock, JID_GRUPO, msgComum('/assinatura Eu Quero'), '/assinatura Eu Quero')
+    if (!/coroados/.test(envios.at(-1)?.texto || '')) throw new Error('autor liberou p/ nao-VIP')
+    await comando.executar(sock, JID_GRUPO, msgComum('/assinatura pack Eu Quero'), '/assinatura pack Eu Quero')
+    if (!/coroados/.test(envios.at(-1)?.texto || '')) throw new Error('pack liberou p/ nao-VIP')
+    if ((await vip.obterAssinatura(NUM_COMUM)) !== null) throw new Error('autor gravou p/ nao-VIP')
+    if ((await vip.obterPackCustom(NUM_COMUM)) !== null) throw new Error('pack gravou p/ nao-VIP')
   })
   await testar('LID cru resolvido via metadados', async () => {
     const { resolverAutorVip } = require('../vip-acesso')
@@ -220,7 +325,7 @@ async function main() {
     for (const arq of ['sticker.js', 'figurinha.js']) {
       const fonte = fs.readFileSync(path.join(__dirname, '..', 'comandos', 'menu-fig', arq), 'utf8')
       if (!/numero: autorVip.*resolverAutorVip\(sock, jid, msg/.test(fonte)) throw new Error(arq + ' nao resolve via vip-acesso')
-      if (!/resolverAutorExif\(autorVip\)/.test(fonte)) throw new Error(arq + ' nao consulta pelo resolvido')
+      if (!/resolverExif\(autorVip\)/.test(fonte)) throw new Error(arq + ' nao consulta o par pelo resolvido')
     }
   })
   console.log(reprovadas === 0 ? 'TODOS PASSARAM' : reprovadas + ' FALHARAM')

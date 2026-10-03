@@ -131,6 +131,9 @@ module.exports = {
 👁️ /antistatus (1 ou 0)
 ➥ Intercepta e bane marcações invasivas de status externo.
 
+ 🗑️ /antiapagada (1 ou 0)
+ ➥ Recupera o que for apagado "para todos": volta ao grupo na hora e entra no /apagadas do dia. Ligada por padrao.
+
 ════════════════════
 
 👁️‍🗨️ UTILITÁRIOS

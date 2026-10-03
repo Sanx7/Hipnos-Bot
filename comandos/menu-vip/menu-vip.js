@@ -62,8 +62,9 @@ module.exports = {
 ➥ Exclusivo de VIP.
 
 ✍️ /assinatura <texto>
-➥ Marca as figurinhas que você cria com /s e /figurinha (canto inferior direito).
-➥ Até 15 caracteres, sem emoji; /assinatura remover desliga (também: /assinaturavip).
+➥ Marca o nome de autor e o nome do pack das suas figurinhas do /s e do /figurinha (o pack e o autor aparecem ao segurar a figurinha).
+➥ /assinatura <texto> define o autor (até 35 caracteres, emoji liberado); /assinatura remover desliga o autor.
+➥ /assinatura pack <texto> define o pack (padrão "Hipnos Bot", mesmo limite); /assinatura sozinho mostra os dois; /assinatura pack remover desliga o pack (também: /assinaturavip).
 
 🎨 /temavip <tema>
 ➥ Escolhe o esquema de cor (fundo, texto e destaque) dos seus cards: o do /perfil e os de /ship e /kiss.

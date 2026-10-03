@@ -123,6 +123,9 @@ module.exports = {
 
 🗞️ /jornal
 ➥ Resume as conversas do dia do grupo como capa de jornal (também: /resumododia e /manchetes). Ex.: /jornal
+ 🗑️ /apagadas
+ ➥ Lista as apagadas de hoje neste grupo (autor, horario e previa). Tambem: /historico-apagadas e /msgsapagadas.
+
 
 🔮 /gemini <pergunta>
 ➥ Consulte o oráculo do Limbo (também: /googleia e /bard). Ex.: /gemini Crie um poema sobre o sono

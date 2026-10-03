@@ -18,6 +18,24 @@
 
 module.exports = [
   {
+    data: '2026-10-03',
+    titulo: '/estourar agora deixa a voz inteligível',
+    detalhes: 'O efeito caixa de som no talo estava tão saturado que ninguém entendia o que foi falado. Continua estourado e distorcido, mas agora dá para entender as palavras: o ganho foi reduzido de um absurdo de +62 dB para uns +14 dB e o áudio passa por um limitador no final, que corta o pico em vez de deixar a onda quadrada. A calibração foi feita com vozes reais (nível baixo, normal e alto) medindo o quanto de distorção sobra e o quanto ainda se entende.'
+  },
+
+  {
+    data: '2026-10-03',
+    titulo: '/figurinha agora preenche o quadrado inteiro (sem sobras)',
+    detalhes: 'O /figurinha mudou de comportamento: em vez de encaixar a imagem inteira e deixar sobra transparente nas laterais (retrato) ou em cima/embaixo (paisagem), ele agora ESTICA a mídia até preencher todo o quadrado 512×512. Nada é cortado — mas fotos muito retangulares saem com a proporção alterada. O /s continua cortando para manter a proporção.'
+  },
+
+  {
+    data: '2026-10-03',
+    titulo: '/apagadas e /antiapagada — o que for apagado volta ao grupo',
+    detalhes: 'O bot guarda cada mensagem do grupo por ~2h e, no apagar para todos, reenvia o conteudo original na hora e registra no historico do dia (/apagadas). Admins ligam/desligam por grupo com /antiapagada 1 ou 0 (ligada por padrao).'
+  },
+
+  {
     data: '2026-10-02',
     titulo: '/ranking agora é um quadro grego com o top 7',
     detalhes: 'O /ranking mudou de cara: o pergaminho desenhado por código virou um quadro fixo (moldura grega, rolos dourados, templo no topo) com as 7 posições do pódio prontas. Agora cada linha traz o nome na cor do seu /corvip e a contagem de mensagens, e o quadro mostra os 7 primeiros colocados. Se a imagem falhar, a lista em texto continua sendo enviada.'

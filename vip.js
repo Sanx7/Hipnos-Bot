@@ -41,6 +41,11 @@
 //      `assinatura`: nome de AUTOR de até ASSINATURA_MAX (35) caracteres
 //      (emoji permitido), que o /s e o /figurinha gravam no EXIF da figurinha;
 //      obterAssinatura(numero) devolve null (sem lançar) quando não há.
+//  10b. validarPackCustom/definirPackCustom/removerPackCustom — campo
+//      `packCustom`: nome do PACK de até ASSINATURA_MAX (35) caracteres, com a
+//      MESMA sanitização do autor (normalizarAssinatura); o /s e o /figurinha
+//      gravam no EXIF quando há, senão usam o pack padrão "Hipnos Bot";
+//      obterPackCustom(numero) devolve null (sem lançar) quando não há.
 //  11. validarTemaVip/definirTemaVip/removerTemaVip — campo `temaVip`: nome
 //      do esquema de cor (padrao/neon/pastel/escuro/dourado, catálogo no
 //      temas-vip.js) que o /temavip aplica nos cards (fundo/texto/destaque);
@@ -596,6 +601,47 @@ async function removerAssinatura(numeroBruto) {
 }
 
 // -------------------------------------------------------------------
+// 📦 NOME DO PACK CUSTOM (campo `packCustom` do MESMO documento de VIP)
+// — /assinatura pack <texto>
+// -------------------------------------------------------------------
+// Mesmo molde do autor (`assinatura`): até ASSINATURA_MAX (35) caracteres,
+// mesma sanitização (normalizarAssinatura — tira controle/invisível, dobra
+// espaço, apara pontas) e emoji PERMITIDO (EXIF grava UTF-8 puro).
+// O /s e o /figurinha usam quando há; sem pack custom o EXIF segue com o
+// pack padrão "Hipnos Bot". Nada de collection nova.
+async function validarPackCustom(textoBruto) {
+  const packCustom = normalizarAssinatura(textoBruto)
+  if (!packCustom) return { ok: false, motivo: 'vazio' }
+
+  const tamanho = [...packCustom].length
+  if (tamanho > ASSINATURA_MAX) {
+    return { ok: false, motivo: 'longo', packCustom, tamanho }
+  }
+
+  return { ok: true, packCustom, tamanho }
+}
+
+// 📦 definirPackCustom(numeroBruto, texto): grava `packCustom` no documento do
+// VIP ATIVO (LID resolvido p/ o número real, como os outros campos).
+async function definirPackCustom(numeroBruto, textoBruto) {
+  const validacao = await validarPackCustom(textoBruto)
+  if (!validacao.ok) return validacao
+
+  const resultado = await definirCampoDeVipAtivo(numeroBruto, 'packCustom', validacao.packCustom)
+  if (!resultado.ok) return resultado
+  console.log(`[vip] 📦 pack custom definido p/ ${resultado.numero}: "${validacao.packCustom}"`)
+  return { ok: true, packCustom: validacao.packCustom }
+}
+
+// 🧹 removerPackCustom(numeroBruto): apaga o pack custom (a figurinha volta a
+// sair com o pack padrão "Hipnos Bot"). { ok: true, tinha } | { ok: false, motivo }.
+async function removerPackCustom(numeroBruto) {
+  const resultado = await removerCampoDeVipAtivo(numeroBruto, 'packCustom', normalizarAssinatura)
+  if (resultado.ok) console.log(`[vip] 🧹 pack custom removido de ${resultado.numero}`)
+  return resultado
+}
+
+// -------------------------------------------------------------------
 // 🎨 TEMA VIP (campo `temaVip` do MESMO documento de VIP) — /temavip
 // -------------------------------------------------------------------
 // Nome do esquema de cor que os geradores de card aplicam nas cores de
@@ -844,6 +890,36 @@ async function obterAssinatura(numeroBruto) {
   }
 }
 
+// 📦 obterPackCustom(numeroBruto): nome do pack custom do VIP ATIVO (ou null).
+// NUNCA lança — é usada pelo /s e pelo /figurinha como nome do PACK do EXIF
+// (sem banco, VIP sem pack custom ou registro vencido = null, e a figurinha
+// sai com o pack padrão "Hipnos Bot").
+async function obterPackCustom(numeroBruto) {
+  try {
+    const lido = await lerCamposDeVipAtivo(numeroBruto, { packCustom: normalizarAssinatura })
+    return lido?.packCustom || null
+  } catch (err) {
+    console.error('⚠️ [vip] falha ao ler o pack custom:', err?.message || err)
+    return null
+  }
+}
+
+// 📦 obterAssinaturaCompleta(numeroBruto): autor + pack do VIP ATIVO.
+// { autor, pack } (cada um null quando ausente). NUNCA lança — é o atalho que
+// o /assinatura (mostrar os dois atuais) e os testes usam numa consulta só.
+async function obterAssinaturaCompleta(numeroBruto) {
+  try {
+    const lido = await lerCamposDeVipAtivo(numeroBruto, {
+      assinatura: normalizarAssinatura,
+      packCustom: normalizarAssinatura
+    })
+    return { autor: lido?.assinatura || null, pack: lido?.packCustom || null }
+  } catch (err) {
+    console.error('⚠️ [vip] falha ao ler a assinatura completa:', err?.message || err)
+    return { autor: null, pack: null }
+  }
+}
+
 // 🏷️ obterNomesCustom(numeros): mapa numero → nomeCustom dos VIPs ATIVOS
 // entre `numeros`, numa ÚNICA consulta. NUNCA lança.
 // -------------------------------------------------------------------
@@ -945,6 +1021,11 @@ module.exports = {
   definirAssinatura,
   obterAssinatura,
   removerAssinatura,
+  validarPackCustom,
+  definirPackCustom,
+  obterPackCustom,
+  obterAssinaturaCompleta,
+  removerPackCustom,
   validarTemaVip,
   definirTemaVip,
   obterTemaVip,
