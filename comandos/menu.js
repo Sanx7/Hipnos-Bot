@@ -51,6 +51,10 @@ enfrentam o julgamento das sombras."
 🎵 /play <nome da música>
 ➥ Pesquisa e baixa o áudio do YouTube direto no chat.
 
+📥 /menu-download (ou /downloads)
+➥ Abre a forja dos downloads: TikTok, Pinterest, Instagram, X, Facebook,
+Roblox e velocidade de vídeo (também: /menudownload e /menu-downloads).
+
 ════════════════════
 
 🌤️ UTILITÁRIOS

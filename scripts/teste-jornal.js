@@ -51,6 +51,45 @@ async function main () {
     exigir(I.URL_GROQ_CHAT.includes('api.groq.com'), 'Groq igual /gpt')
   })
 
+  await testar('sanitizarTextoJimp: aspas curvas viram aspas retas', async () => {
+    exigir(typeof I.sanitizarTextoJimp === 'function', 'sanitizarTextoJimp nao exportada')
+    const t = I.sanitizarTextoJimp('“Manchete” do grupo disse ’oi’')
+    const esperado = '"' + 'Manchete' + '"' + ' do grupo disse ' + String.fromCharCode(39) + 'oi' + String.fromCharCode(39)
+    exigir(t === esperado, 'aspas curvas nao viraram retas: ' + t)
+  })
+
+  await testar('sanitizarTextoJimp: travessao longo e meio-travessao viram hifen', async () => {
+    exigir(I.sanitizarTextoJimp('A — B') === 'A - B', 'em-dash nao virou hifen')
+    exigir(I.sanitizarTextoJimp('A – B') === 'A - B', 'meio-travessao nao virou hifen')
+  })
+
+  await testar('sanitizarTextoJimp: reticencias unicode viram tres pontos', async () => {
+    exigir(I.sanitizarTextoJimp('Fim… do resumo') === 'Fim... do resumo', 'reticencias nao viraram tres pontos')
+  })
+
+  await testar('sanitizarTextoJimp: texto normal (ASCII/acentos) passa intacto', async () => {
+    const normal = 'Churrasco do domingo às 18h, café coado e cerveja gelada!'
+    exigir(I.sanitizarTextoJimp(normal) === normal, 'texto normal foi alterado: ' + I.sanitizarTextoJimp(normal))
+  })
+
+  await testar('sanitizarTextoJimp: fora do conjunto vira espaco, \\n preservado', async () => {
+    exigir(I.sanitizarTextoJimp('grupo 🎉 legal') === 'grupo legal', 'emoji nao virou espaco')
+    const nl = String.fromCharCode(10)
+    exigir(I.sanitizarTextoJimp('linha1' + nl + 'linha2') === 'linha1' + nl + 'linha2', 'quebra de linha nao preservada')
+  })
+
+  await testar('capa com texto sujo da IA nao quebra (sanitizado no desenho)', async () => {
+    const buf = await I.comporCapaJornal({
+      manchete: '“Grupo” — aí sim…',
+      resumo: 'A turma ’combinou’ tudo — café… pronto 🎉\nSegunda linha “entre aspas”.',
+      fotoBuffer: null
+    })
+    exigir(Buffer.isBuffer(buf) && buf.length > 5000, 'capa com texto sujo falhou')
+    const { Jimp } = require('jimp')
+    const img = await Jimp.read(buf)
+    exigir(img.bitmap.width === 900 && img.bitmap.height === 1200, 'dimensao errada')
+  })
+
   await testar('acumulado vazio avisa sem chamar IA', async () => {
     captura._limparMemoria()
     captura._injetarColecao({ findOne: async () => null })

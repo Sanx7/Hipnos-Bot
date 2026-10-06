@@ -144,6 +144,56 @@ module.exports = {
 
 ════════════════════
 
+✨ EFEITOS ESPECIAIS
+
+Responda a uma FOTO com o efeito (vídeos curtos, somem como GIF):
+
+📺 /glitchgif
+➥ Glitch digital: blocos deslocados e cores RGB tremendo.
+
+🔄 /rotacao3d
+➥ A foto gira em pseudo-3D como um cartão.
+
+🌊 /ondasanim
+➥ Ondas na água se mexendo sobre a foto.
+
+🔥 /fogogif
+➥ Chamas animadas lambendo a base da foto.
+
+📼 /vhs
+➥ Fita VHS antiga: ruído, cor lavada e tremido.
+
+🫠 /derreter
+➥ A foto escorrendo para baixo.
+
+👁️ /naoolhe (também: /nao-olhe)
+➥ Estática que revela a foto em flashes rápidos.
+
+⚠️ /falha
+➥ Tela travando: blocos congelados e inversão piscando.
+
+👤 /entidade
+➥ Sombra assombrada respirando sobre a foto.
+
+✨ /textopulsar <texto>
+➥ Vídeo curto do texto pulsando (não precisa de foto).
+
+Fotos estáticas (responda a foto):
+
+🏆 /conquista
+➥ Card "CONQUISTA DESBLOQUEADA" com a foto de ícone.
+
+🚀 /impostor
+➥ Astronauta genérico com a foto no visor.
+
+🧠 /cerebro
+➥ Meme do cérebro expandindo com a foto.
+
+🎯 /gun
+➥ Mira de brincadeira sobre a foto.
+
+════════════════════
+
 🔉 MODIFICADOR DE VOZ
 
 Responda a uma nota de voz ou audio com o efeito:

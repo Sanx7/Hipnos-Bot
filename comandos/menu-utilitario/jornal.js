@@ -173,9 +173,45 @@ function dataPorExtenso () {
   } catch (e) { return chaveDataLocal() }
 }
 
+// ============================================================
+// sanitizarTextoJimp — limpa texto vindo da IA antes de desenhar
+// com a fonte do jimp (manchete e resumo, nas 2 colunas). Sem
+// isso, caractere fora da fonte vira "?" de fallback no desenho.
+// Lista completa de substituições (documentada de propósito):
+//   “ ” „ ‟ (aspas duplas curvas)   → "
+//   ‘ ’ ‚ ‛ (aspas simples curvas)  → '
+//   – — ‒ − (meio/longo travessão)  → -
+//   …      (reticências unicode)    → ...
+//   NBSP (espaço não separável) → espaço simples
+//   Qualquer outro caractere fora do conjunto suportado da fonte
+//   (ASCII imprimível + acentos latinos comuns; ex.: emoji, cirílico)
+//   → espaço simples; espaços duplicados gerados são colapsados.
+//   Quebras de linha (\n) são preservadas.
+// ============================================================
+const SUBSTITUICOES_JIMP = [
+  [/[“”„‟]/g, '"'],
+  [/[‘’‚‛]/g, "'"],
+  [/[–—‒−]/g, '-'],
+  [/…/g, '...'],
+  [/\u00A0/g, ' ']
+]
+// Conjunto suportado: quebra de linha, ASCII imprimível (0x20-7E)
+// e letras acentuadas latinas (U+00C0-00D6, U+00D8-00F6, U+00F8-00FF;
+// sem × e ÷). O resto é trocado por espaço.
+const FORA_DA_FONTE_JIMP = /[^\n\x20-\x7EÀ-ÖØ-öø-ÿ]/g
+
+function sanitizarTextoJimp (texto) {
+  let t = String(texto == null ? '' : texto)
+  for (const [padrao, destino] of SUBSTITUICOES_JIMP) t = t.replace(padrao, destino)
+  t = t.replace(FORA_DA_FONTE_JIMP, ' ')
+  return t.split('\n').map((linha) => linha.replace(/ {2,}/g, ' ')).join('\n')
+}
+
 async function comporCapaJornal (args) {
-  const manchete = args.manchete
-  const resumo = args.resumo
+  // Todo texto que vai ser desenhado (manchete e resumo, nas 2
+  // colunas) passa pela sanitização de fonte para não virar "?".
+  const manchete = sanitizarTextoJimp(args.manchete)
+  const resumo = sanitizarTextoJimp(args.resumo)
   const fotoBuffer = args.fotoBuffer
   const fontTitulo = await fonteJornal(SANS_32_BLACK)
   const fontTexto = await fonteJornal(SANS_16_BLACK)
@@ -343,6 +379,7 @@ module.exports = {
     SYSTEM_PROMPT, CAPA_LARG, CAPA_ALT, MARGEM,
     montarTextoDia, truncar, montarPrompt, extrairJson, avisoPara,
     quebrarEmLinhas, comporCapaJornal, textoFallback, dataPorExtenso,
+    sanitizarTextoJimp, SUBSTITUICOES_JIMP, FORA_DA_FONTE_JIMP,
     modeloJornal, AVISO_VAZIO, ErroJornal
   }
 }

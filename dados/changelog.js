@@ -18,6 +18,16 @@
 
 module.exports = [
   {
+    data: '2026-10-06',
+    titulo: '8 comandos novos de download: /insta, /igmp3, /twitter, /facebook, /robloxstalk, /videorapido, /videolento e /videocontrario',
+    detalhes: 'Novo submenu /menu-download (também: /menudownload e /downloads) reunindo tudo que baixa: /play, /tiktok, /pinterest e os novos. /insta baixa foto/reel do Instagram, /igmp3 extrai só o MP3, /twitter e /facebook baixam vídeo pelo link (todos até 50MB). /robloxstalk mostra nome, ID, criação da conta e avatar de qualquer perfil (API oficial da Roblox). Responda um vídeo (até 60s) com /videorapido (2x), /videolento (metade) ou /videocontrario (de trás pra frente) e o vídeo volta alterado. ATENÇÃO: /insta, /igmp3, /twitter e /facebook dependem de serviços externos não-oficiais — podem falhar em servidor mesmo funcionando na sua rede; nesses casos o bot avisa em vez de travar. /robloxstalk e os 3 de velocidade de vídeo não têm esse risco.'
+  },
+  {
+    data: '2026-10-06',
+    titulo: '14 efeitos especiais: /glitchgif, /vhs, /conquista e mais',
+    detalhes: 'Nova leva no /menu-efeitos (seção EFEITOS ESPECIAIS): responda a uma foto para gerar vídeos curtos (/glitchgif, /rotacao3d, /ondasanim, /fogogif, /vhs, /derreter, /naoolhe, /falha, /entidade), texto pulsante sem foto (/textopulsar <texto>) e cartões estáticos (/conquista, /impostor, /cerebro, /gun).'
+  },
+  {
     data: '2026-10-03',
     titulo: '/estourar agora deixa a voz inteligível',
     detalhes: 'O efeito caixa de som no talo estava tão saturado que ninguém entendia o que foi falado. Continua estourado e distorcido, mas agora dá para entender as palavras: o ganho foi reduzido de um absurdo de +62 dB para uns +14 dB e o áudio passa por um limitador no final, que corta o pico em vez de deixar a onda quadrada. A calibração foi feita com vozes reais (nível baixo, normal e alto) medindo o quanto de distorção sobra e o quanto ainda se entende.'
