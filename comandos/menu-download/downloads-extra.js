@@ -78,7 +78,7 @@ function ehTimeout (err) {
     || err?.code === 'ECONNABORTED' || /timeout|timed out|exceeded/i.test(err?.message || '')
 }
 
-async function baixarComLimite (url, rotulo, referer) {
+async function baixarComLimite (url, rotulo, referer, opcoes = {}) {
   rotulo = rotulo || 'midia'
   const get = baixarHttp || axios.get
   const resposta = await get(url, {
@@ -87,6 +87,10 @@ async function baixarComLimite (url, rotulo, referer) {
     headers: { 'User-Agent': USER_AGENT, ...(referer ? { Referer: referer } : {}) }
   })
   try {
+    const contentType = String(resposta.headers?.['content-type'] || '').split(';')[0].trim().toLowerCase()
+    if (opcoes.comMetadados && ehRespostaDeErro(contentType)) {
+      throw new ErroDownloadExtra('a CDN devolveu texto/HTML/JSON em vez de mídia', 'fonte')
+    }
     const declarado = Number(resposta.headers?.['content-length'])
     if (Number.isFinite(declarado) && declarado > LIMITE_BYTES) {
       throw new ErroDownloadExtra(`${rotulo} passa do limite de ${LIMITE_MB} MB`, 'grande')
@@ -108,10 +112,51 @@ async function baixarComLimite (url, rotulo, referer) {
     })
     const buffer = Buffer.concat(partes)
     if (!buffer.length) throw new ErroDownloadExtra(`download da ${rotulo} vazio`, 'fonte')
-    return buffer
+    return opcoes.comMetadados ? { buffer, contentType } : buffer
   } finally {
     try { resposta.data.destroy() } catch (e) {}
   }
+}
+
+function ehRespostaDeErro (contentType) {
+  return /^text\//.test(contentType) || /(?:json|xml)/.test(contentType)
+}
+
+function tipoDeclarado (valor) {
+  const tipo = String(valor || '').split(';')[0].trim().toLowerCase()
+  if (/^video\//.test(tipo) || ['video', 'mp4', 'mov', 'webm'].includes(tipo)) return 'video'
+  if (/^image\//.test(tipo) || ['image', 'imagem', 'photo', 'jpg', 'jpeg', 'png', 'gif', 'webp', 'avif', 'heic'].includes(tipo)) return 'imagem'
+  return null
+}
+
+function tipoDoConteudo (buffer) {
+  if (buffer.subarray(0, 3).equals(Buffer.from([0xff, 0xd8, 0xff]))) return 'imagem'
+  if (buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return 'imagem'
+  if (/^GIF8[79]a$/.test(buffer.toString('ascii', 0, 6))) return 'imagem'
+  if (buffer.toString('ascii', 0, 4) === 'RIFF' && buffer.toString('ascii', 8, 12) === 'WEBP') return 'imagem'
+  if (buffer.length >= 12 && buffer.toString('ascii', 4, 8) === 'ftyp') {
+    // AVIF/HEIF também usam ISO BMFF; não confundir com MP4 de vídeo.
+    const brand = buffer.toString('ascii', 8, 12)
+    if (/^(avif|avis|heic|heix|hevc|hevx|mif1|msf1)$/.test(brand)) return 'imagem'
+    if (/^(isom|iso[2-9]|mp4[12]|avc1|M4V |qt  )$/.test(brand)) return 'video'
+  }
+  return null
+}
+
+function classificarMidiaInsta (item, contentType, buffer) {
+  // Rejeita respostas de erro mesmo quando a API/URL afirma ser vídeo.
+  const inicio = buffer.subarray(0, 512).toString('utf8').replace(/^\uFEFF/, '').trimStart()
+  if (ehRespostaDeErro(contentType) || /^(?:<|\{|\[)/.test(inicio)) {
+    throw new ErroDownloadExtra('a CDN devolveu HTML/JSON em vez de mídia', 'fonte')
+  }
+  const tipo = tipoDeclarado(item.tipo) || tipoDeclarado(contentType) || tipoDoConteudo(buffer)
+  if (tipo) return tipo
+  // A extensão é só fallback; ausência dela não significa imagem.
+  let pathname = ''
+  try { pathname = new URL(item.url).pathname } catch (e) {}
+  if (/\.(mp4|mov|webm)$/i.test(pathname)) return 'video'
+  if (/\.(jpe?g|png|gif|webp|avif|heic)$/i.test(pathname)) return 'imagem'
+  throw new ErroDownloadExtra('não consegui identificar o tipo da mídia do Instagram', 'fonte')
 }
 
 async function enviarMidia (sock, jid, msg, buffer, tipo, legenda, prefixo) {
@@ -139,7 +184,12 @@ function parseIgdl (resultado) {
   const lista = Array.isArray(resultado.result) ? resultado.result : []
   const itens = lista
     .filter((i) => i && typeof i.url === 'string' && i.url.length > 0)
-    .map((i) => ({ url: i.url, thumb: i.thumbnail || '' }))
+    .map((i) => ({
+      url: i.url,
+      thumb: i.thumbnail || '',
+      tipo: i.type || i.mimetype || i.mime_type || i.tipo || '',
+      legenda: typeof i.caption === 'string' ? i.caption : typeof i.legenda === 'string' ? i.legenda : ''
+    }))
   return itens.length ? itens : null
 }
 
@@ -229,9 +279,9 @@ async function executarInsta (sock, jid, msg, text) {
       return await sock.sendMessage(jid, { text: avisoFonte('post do Instagram') }, { quoted: msg })
     }
     const primeiro = itens[0]
-    const ehVideo = /\.mp4(\?|#|$)/i.test(primeiro.url)
-    const buffer = await baixarComLimite(primeiro.url, ehVideo ? 'video' : 'foto', 'https://www.instagram.com/')
-    await enviarMidia(sock, jid, msg, buffer, ehVideo ? 'video' : 'imagem', '📸 *Instagram baixado* 🌙', 'insta')
+    const { buffer, contentType } = await baixarComLimite(primeiro.url, 'mídia do Instagram', 'https://www.instagram.com/', { comMetadados: true })
+    const tipo = classificarMidiaInsta(primeiro, contentType, buffer)
+    await enviarMidia(sock, jid, msg, buffer, tipo, primeiro.legenda || '📸 *Instagram baixado* 🌙', 'insta')
   } catch (err) {
     console.error('[insta] erro:', err?.message || err)
     if (err instanceof ErroDownloadExtra && err.tipo === 'grande') {

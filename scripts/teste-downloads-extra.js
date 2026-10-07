@@ -26,6 +26,8 @@ const path = require('path')
 const fs = require('fs')
 const os = require('os')
 const { Readable } = require('stream')
+const assert = require('node:assert/strict')
+const { execFileSync } = require('child_process')
 const dl = require(path.resolve(__dirname, '..', 'comandos', 'menu-download', 'downloads-extra'))
 const vel = require(path.resolve(__dirname, '..', 'comandos', 'menu-download', 'video-velocidade'))
 
@@ -58,6 +60,70 @@ const ultimoTexto = (enviadas) => {
 const ultimoVideo = (enviadas) => {
   const e = [...enviadas].reverse().find((x) => x.conteudo?.video)
   return e ? e.conteudo : null
+}
+
+async function testarClassificacaoInsta (testar, link) {
+  const pasta = fs.mkdtempSync(path.join(os.tmpdir(), 'hipnos-insta-tipos-'))
+  const mp4 = path.join(pasta, 'video.mp4')
+  const jpg = path.join(pasta, 'foto.jpg')
+  try {
+    const ffmpeg = require('@ffmpeg-installer/ffmpeg').path
+    execFileSync(ffmpeg, [
+      '-y', '-nostdin', '-f', 'lavfi', '-i', 'color=c=black:s=720x1280:d=0.3',
+      '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=44100:duration=0.3',
+      '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-ac', '2', '-shortest', mp4
+    ], { stdio: 'pipe', windowsHide: true })
+    execFileSync(ffmpeg, ['-y', '-nostdin', '-f', 'lavfi', '-i', 'color=c=black:s=32x32', '-frames:v', '1', jpg], { stdio: 'pipe', windowsHide: true })
+    const video = fs.readFileSync(mp4)
+    const imagem = fs.readFileSync(jpg)
+    const rapid = 'https://d.rapidcdn.app/v2?token=teste'
+    const casos = [
+      { nome: 'URL .mp4 → vídeo', url: 'https://cdn.test/video.mp4', buffer: video, esperado: 'video' },
+      { nome: 'sem extensão, Content-Type video/mp4 → vídeo', url: rapid, buffer: video, contentType: 'video/mp4; charset=binary', esperado: 'video' },
+      { nome: 'sem extensão, API video/mp4 e octet-stream → vídeo', url: rapid, type: 'video/mp4', buffer: video, contentType: 'application/octet-stream', esperado: 'video' },
+      { nome: 'rapidcdn.app/v2, octet-stream, API só url/thumbnail, MP4 real → video NUNCA image', url: rapid, buffer: video, contentType: 'application/octet-stream', esperado: 'video' },
+      { nome: 'sem extensão, Content-Type JPEG → imagem', url: rapid, buffer: imagem, contentType: 'image/jpeg', esperado: 'image' },
+      { nome: 'sem extensão, octet-stream com assinatura JPEG → imagem', url: rapid, buffer: imagem, contentType: 'application/octet-stream', esperado: 'image' },
+      { nome: 'Content-Type JPEG prevalece sobre extensão .mp4', url: 'https://cdn.test/foto.mp4', buffer: imagem, contentType: 'image/jpeg', esperado: 'image' },
+      { nome: 'assinatura JPEG prevalece sobre extensão .mp4', url: 'https://cdn.test/foto.mp4', buffer: imagem, contentType: 'application/octet-stream', esperado: 'image' },
+      { nome: 'HTML rejeitado mesmo com API vídeo e URL .mp4', url: 'https://cdn.test/video.mp4', type: 'video', buffer: Buffer.from('<!DOCTYPE html><html>Erro</html>'), contentType: 'text/html', esperado: 'erro' },
+      { nome: 'JSON de erro rejeitado', url: rapid, type: 'video', buffer: Buffer.from('{"error":"forbidden"}'), contentType: 'application/json', esperado: 'erro' },
+      { nome: 'HTML disfarçado de octet-stream rejeitado', url: rapid, type: 'video', buffer: Buffer.from('  <html>Erro</html>'), contentType: 'application/octet-stream', esperado: 'erro' },
+      { nome: 'JSON disfarçado de video/mp4 rejeitado', url: rapid, type: 'video', buffer: Buffer.from('{"error":"forbidden"}'), contentType: 'video/mp4', esperado: 'erro' },
+      { nome: 'octet-stream desconhecido sem extensão não vira imagem', url: rapid, buffer: Buffer.from('dados desconhecidos'), contentType: 'application/octet-stream', esperado: 'erro' },
+      { nome: 'legenda original preservada, vídeo sem recodificação', url: rapid, buffer: video, caption: 'Minha legenda original 🎬', contentType: 'application/octet-stream', esperado: 'video' }
+    ]
+    for (const caso of casos) {
+      await testar(`/insta: ${caso.nome}`, async () => {
+        let stream
+        dl._injetar({
+          igdl: async () => ({ status: true, result: [{ url: caso.url, thumbnail: 'thumb', type: caso.type, caption: caso.caption }] }),
+          baixarHttp: async () => {
+            stream = Readable.from([caso.buffer])
+            return { headers: { 'content-type': caso.contentType, 'content-length': String(caso.buffer.length) }, data: stream }
+          }
+        })
+        const { sock, enviadas } = criarSock()
+        await dl.find((c) => c.nome === 'insta').executar(sock, 'G@g.us', criarMsg(`/insta ${link}`), `/insta ${link}`)
+        const midias = enviadas.filter((e) => e.conteudo.video || e.conteudo.image)
+        assert.ok(stream.destroyed, 'stream deve ser fechado inclusive na recusa')
+        if (caso.esperado === 'erro') {
+          assert.equal(midias.length, 0, 'não pode enviar HTML/JSON/dados desconhecidos como mídia')
+          assert.match(ultimoTexto(enviadas), /Não consegui baixar/)
+        } else {
+          assert.equal(midias.length, 1)
+          const conteudo = midias[0].conteudo
+          assert.deepEqual(conteudo[caso.esperado], caso.buffer, 'envia os bytes originais, sem recodificar')
+          assert.equal(conteudo[caso.esperado === 'video' ? 'image' : 'video'], undefined)
+          if (caso.esperado === 'video') assert.equal(conteudo.mimetype, 'video/mp4')
+          if (caso.caption) assert.equal(conteudo.caption, caso.caption)
+        }
+      })
+    }
+  } finally {
+    for (const arquivo of [mp4, jpg]) if (fs.existsSync(arquivo)) fs.unlinkSync(arquivo)
+    fs.rmdirSync(pasta)
+  }
 }
 
 
@@ -223,6 +289,8 @@ function httpMock (tamanho, opts) {
     if (!video.caption || !/Instagram/i.test(video.caption)) throw new Error(`legenda: ${video.caption}`)
     if (!video.jpegThumbnail) throw new Error('jpegThumbnail ausente')
   })
+
+  await testarClassificacaoInsta(testar, LINK_INSTA)
 
   await testar('executar /twitter com fonte caindo: aviso amigável (sem erro cruso)', async () => {
     dl._injetar({ twitter: async () => { throw new Error('ECONNRESET socket hang up') } })
@@ -394,4 +462,3 @@ function httpMock (tamanho, opts) {
 }
 
 main()
-
