@@ -51,6 +51,9 @@ module.exports = {
 📜 /transcrever (responda a um áudio/vídeo)
 ➥ Escreve o que é dito na mídia citada — transcrição em texto (Groq Whisper).
 
+✂️ /removebg (responda a uma imagem ou mencione alguém)
+➥ Remove o fundo da imagem citada ou da foto de perfil. Sem menção usa a sua foto.
+
 😂 /meme
 ➥ Puxa um meme aleatório do Reddit com o título original (imagem, GIF ou vídeo).
 

@@ -19,6 +19,11 @@
 module.exports = [
   {
     data: '2026-10-07',
+    titulo: '/removebg — remoção de fundo de fotos',
+    detalhes: 'Responda a uma imagem com /removebg ou mencione alguém para usar sua foto de perfil. Sem imagem citada ou menção usa a foto de quem chamou. Retorna PNG transparente; depende da cota disponível no remove.bg.'
+  },
+  {
+    data: '2026-10-07',
     titulo: 'Cinco brincadeiras novas: /ppt, /quem, /pergunta, /dino e /cobrinha',
     detalhes: 'Desafie Hipnos no pedra-papel-tesoura (/jokenpo), descubra quem é mais provável de algo ou puxe uma conversa reflexiva. Dino e cobrinha são jogos em turnos por texto: só quem iniciou joga, um jogo por grupo, desistir encerra e 2 minutos sem jogada cancelam a partida.'
   },
