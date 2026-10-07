@@ -18,6 +18,11 @@
 
 module.exports = [
   {
+    data: '2026-10-07',
+    titulo: '/totag — reenvio com menções ocultas (também: /notag2)',
+    detalhes: 'Admins e donos do bot podem responder a texto, vídeo ou áudio com /totag para reenviar o conteúdo original marcando todos, sem acrescentar texto. Preserva a legenda do vídeo e o formato do áudio. Em áudio, a notificação da menção pode não aparecer no WhatsApp.'
+  },
+  {
     data: '2026-10-06',
     titulo: '8 comandos novos de download: /insta, /igmp3, /twitter, /facebook, /robloxstalk, /videorapido, /videolento e /videocontrario',
     detalhes: 'Novo submenu /menu-download (também: /menudownload e /downloads) reunindo tudo que baixa: /play, /tiktok, /pinterest e os novos. /insta baixa foto/reel do Instagram, /igmp3 extrai só o MP3, /twitter e /facebook baixam vídeo pelo link (todos até 50MB). /robloxstalk mostra nome, ID, criação da conta e avatar de qualquer perfil (API oficial da Roblox). Responda um vídeo (até 60s) com /videorapido (2x), /videolento (metade) ou /videocontrario (de trás pra frente) e o vídeo volta alterado. ATENÇÃO: /insta, /igmp3, /twitter e /facebook dependem de serviços externos não-oficiais — podem falhar em servidor mesmo funcionando na sua rede; nesses casos o bot avisa em vez de travar. /robloxstalk e os 3 de velocidade de vídeo não têm esse risco.'

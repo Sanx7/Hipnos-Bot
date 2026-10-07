@@ -103,6 +103,9 @@ module.exports = {
 📢 /hidetag [texto]
 ➥ Convocação oculta de todas as almas do grupo.
 
+📩 /totag (ou /notag2)
+➥ Responda a texto, vídeo ou áudio para reenviar o conteúdo original com menções ocultas a todos (só admin ou dono). Em áudio, a notificação de menção pode não aparecer no WhatsApp.
+
 🗑️ /delete (ou /d)
 ➥ Apaga a mensagem respondida e o próprio comando. (Responda à mensagem.)
 
