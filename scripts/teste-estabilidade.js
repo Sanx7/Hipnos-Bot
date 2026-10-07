@@ -243,7 +243,8 @@ function mensagemRevelar(quotedMessage, opcoes = {}) {
   return {
     key: {
       remoteJid: '120363021888888888@g.us',
-      participant: '5511977776666@s.whatsapp.net',
+      // Estes cenários verificam mídia/estabilidade com um autor autorizado.
+      participant: `${require('../config').getDonos()[0]}@s.whatsapp.net`,
       id: 'MSG' + Math.random().toString(36).slice(2, 8),
       fromMe: false
     },

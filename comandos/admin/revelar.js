@@ -6,6 +6,41 @@ const {
 const { exec } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const { ehAdminDoGrupo, ehDonoDoBot } = require('../../config');
+const { resolverNumeroAlvo } = require('../../lid');
+const vip = require('../../vip');
+
+// Autoriza o REMETENTE, nunca o autor da mensagem citada.
+// Mesmo padrão de /revelaraudio: metadados + mapeamento LID da sessão.
+async function temPermissao(sock, jid, msg) {
+  const sender = msg?.key?.participant || msg?.key?.remoteJid || '';
+  if (!sender) return false;
+  let participantes = [];
+  if (String(jid || '').endsWith('@g.us')) {
+    try {
+      participantes = (await sock.groupMetadata(jid))?.participants || [];
+    } catch (err) {
+      console.error('[revelar] sem metadados do grupo:', err?.message || err);
+    }
+  }
+
+  const candidatos = [sender];
+  try {
+    const { numero, via } = await resolverNumeroAlvo(participantes, sender);
+    if (via !== null && numero) candidatos.push(`${numero}@s.whatsapp.net`);
+  } catch (err) {
+    console.error('[revelar] falha ao resolver remetente:', err?.message || err);
+  }
+  if (candidatos.some((c) => ehAdminDoGrupo(participantes, c) || ehDonoDoBot(participantes, c))) return true;
+  for (const candidato of candidatos) {
+    try {
+      if (await vip.isVip(candidato)) return true;
+    } catch (err) {
+      console.error('[revelar] falha ao checar VIP (sem liberar):', err?.message || err);
+    }
+  }
+  return false;
+}
 
 // Usa o binário de FFmpeg instalado com o projeto, com fallback para o PATH
 const binarioFfmpeg = (() => {
@@ -104,6 +139,13 @@ module.exports = {
     let caminhoThumbTemp = null;
 
     try {
+      // Interrompe antes de ler a mídia, reagir, baixar ou criar temporários.
+      if (!(await temPermissao(sock, jid, msg))) {
+        return await sock.sendMessage(jid, {
+          text: '🔒 O /revelar é exclusivo para administradores do grupo, VIPs ou donos do bot.'
+        }, { quoted: msg }).catch(() => {});
+      }
+
       // 1. Localizar a mensagem citada (quoted)
       // ⚠️ A PRÓPRIA mensagem de resposta pode vir embrulhada em
       // ephemeralMessage quando o grupo tem mensagens temporárias ativas,
