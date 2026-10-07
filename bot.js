@@ -160,6 +160,7 @@ const { comandos } = require('./comandos-registry')
 // persistência e cache vivem todos em prefixo.js — aqui só consumimos.
 const prefixoComandos = require('./prefixo')
 const estadoBot = require('./estado-bot')
+const mensagensEnviadas = require('./dados/mensagens-enviadas')
 
 // 🎮 Registro COMPARTILHADO de jogos por grupo (dados/jogos-ativos.js).
 // Duas responsabilidades que o bot.js usa aqui:
@@ -321,6 +322,8 @@ async function startBot() {
   })
 
   sockAtual = sock
+  // Histórico de chaves para /limpar-chat, incluindo os envios automáticos.
+  mensagensEnviadas.acompanharSocket(sock)
   // Permite que boas-vindas pendentes reenviem pelo socket recriado.
   registrarSocketBoasVindas(sock)
 

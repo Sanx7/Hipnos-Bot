@@ -162,12 +162,21 @@ async function main() {
     const mapaAfk = new Map()
     const mutados = new Map()
     const registro = new Map([['mute', { mutedUsers: mutados }]])
+    const limparChat = require('../comandos/menu-dono/limpar-chat')
+    registro.set('limpar-chat', { executar: async (...args) => {
+      eventos.push('comando:limpar-chat')
+      return limparChat.executar(...args)
+    } })
+    let sequencia = 0
     for (const nome of ['menu', 'ping', 'vip', 'ban', 'on', 'off', 'forca']) {
       registro.set(nome, { executar: async () => eventos.push(`comando:${nome}`) })
     }
     const contexto = {
       sock: { ...sock, ev: { on(evento, fn) { handler = fn } },
-        async sendMessage(jid, conteudo) { eventos.push(conteudo.delete ? 'delete' : 'resposta') }
+        async sendMessage(jid, conteudo) {
+          eventos.push(conteudo.delete ? 'delete' : 'resposta')
+          return { key: { remoteJid: jid, fromMe: true, id: `manutencao-${++sequencia}` } }
+        }
       },
       estadoBot: estado,
       console,
@@ -195,14 +204,34 @@ async function main() {
       processarMensagemLivre: async () => { eventos.push('jogo'); return false },
       processarGatilhoIA: async () => eventos.push('ia')
     }
+    require('../dados/mensagens-enviadas').acompanharSocket(contexto.sock)
     vm.runInNewContext(fonte.slice(inicio, fim), contexto)
-    return { eventos, protecoes, mapaAfk, mutados, async enviar(texto, sender = `${comum}@s.whatsapp.net`, conteudo) {
+    return { eventos, protecoes, mapaAfk, mutados, sock: contexto.sock, async enviar(texto, sender = `${comum}@s.whatsapp.net`, conteudo) {
       eventos.length = 0
       await handler({ messages: [{ ...msg(sender), message: conteudo || { conversation: texto } }] })
       await Promise.resolve()
     } }
   }
   const fluxo = criarHandler()
+  await teste('ON + ADM: limpar-chat real apaga 10 mensagens via handler', async () => {
+    await estado.definirLigado(true)
+    for (let i = 0; i < 10; i++) await fluxo.sock.sendMessage(grupo, { text: 'teste' })
+    await fluxo.enviar('/limpar-chat 10', '67890@lid')
+    assert.ok(fluxo.eventos.includes('comando:limpar-chat'))
+    assert.equal(fluxo.eventos.filter(e => e === 'delete').length, 10)
+    await estado.definirLigado(false)
+  })
+  await teste('OFF + ADM: limpar-chat bloqueado antes de executar', async () => {
+    for (let i = 0; i < 10; i++) await fluxo.sock.sendMessage(grupo, { text: 'teste' })
+    await fluxo.enviar('/limpar-chat 10', '67890@lid')
+    assert.ok(!fluxo.eventos.includes('comando:limpar-chat'))
+    assert.ok(!fluxo.eventos.includes('delete'))
+  })
+  await teste('OFF + dono: limpar-chat real continua permitido', async () => {
+    await fluxo.enviar('/limpar-chat 10', '12345@lid')
+    assert.ok(fluxo.eventos.includes('comando:limpar-chat'))
+    assert.equal(fluxo.eventos.filter(e => e === 'delete').length, 10)
+  })
   await teste('OFF bloqueia menu, comum, VIP, ADM e comando de jogo sem resposta', async () => {
     for (const comando of ['menu', 'ping', 'vip', 'ban', 'forca']) {
       await fluxo.enviar(`/${comando}`)
