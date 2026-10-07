@@ -478,10 +478,10 @@ async function executarRobloxstalk (sock, jid, msg, text) {
 
 // --- Exporta os 5 comandos de link (o loader registra cada item) ---
 module.exports = [
-  { nome: 'insta', aliases: ['instagram', 'igdl'], descricao: 'Baixa foto/video/reel do Instagram a partir do link (ate 50 MB).', executar: executarInsta },
-  { nome: 'igmp3', aliases: ['ig-audio', 'instagram-audio'], descricao: 'Baixa so o audio (MP3) de um video/reel do Instagram (ate 50 MB).', executar: executarIgmp3 },
-  { nome: 'twitter', aliases: ['x', 'twtdl', 'xdl'], descricao: 'Baixa video/gif do Twitter/X a partir do link (ate 50 MB).', executar: executarTwitter },
-  { nome: 'facebook', aliases: ['fb', 'fbdl'], descricao: 'Baixa video do Facebook a partir do link (ate 50 MB).', executar: executarFacebook },
+  { nome: 'insta', aliases: ['instagram', 'ig'], descricao: 'Baixa foto/video/reel do Instagram a partir do link (ate 50 MB).', executar: executarInsta },
+  { nome: 'igmp3', aliases: ['ig-audio', 'instagram-audio','igaudio',], descricao: 'Baixa so o audio (MP3) de um video/reel do Instagram (ate 50 MB).', executar: executarIgmp3 },
+  { nome: 'twitter', aliases: ['x', 'twt', 'xdl'], descricao: 'Baixa video/gif do Twitter/X a partir do link (ate 50 MB).', executar: executarTwitter },
+  { nome: 'facebook', aliases: ['fb', 'fbdl','face'], descricao: 'Baixa video do Facebook a partir do link (ate 50 MB).', executar: executarFacebook },
   { nome: 'robloxstalk', aliases: ['robloxinfo', 'rbxstalk'], descricao: 'Mostra perfil publico do Roblox (ID, criacao, avatar) a partir do nome.', executar: executarRobloxstalk }
 ]
 

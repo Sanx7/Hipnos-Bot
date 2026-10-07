@@ -162,7 +162,7 @@ async function executar (sock, jid, msg, text) {
 
 module.exports = {
   nome: 'tiktok-audio',
-  aliases: ['tiktok-aud', 'tiktok-mp3', 'tt-audio', 'tk-audio', 'tiktokmusica'],
+  aliases: ['tiktok-aud', 'tiktok-mp3', 'tt-audio', 'tk-audio', 'tiktokmusica','ttkmp3','ttkaudio'],
   descricao: 'Baixa só o áudio (MP3) de um vídeo do TikTok a partir do link (até 50 MB).',
   executar,
   // Extras internos para os testes offline (padrão do tiktok.js)

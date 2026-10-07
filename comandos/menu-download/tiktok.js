@@ -360,7 +360,7 @@ async function executar (sock, jid, msg, text) {
 
 module.exports = {
   nome: 'tiktok',
-  aliases: ['tt', 'tk', 'tik-tok', 'tiktokdl'],
+  aliases: ['tt', 'ttk', 'tik-tok', 'tiktokdl'],
   descricao: 'Baixa um vídeo do TikTok sem marca d\'água a partir do link (até 50 MB).',
   executar,
   // Extras internos para os testes offline (padrão dos extras do velha.js)

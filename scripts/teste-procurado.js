@@ -228,7 +228,7 @@ const DADOS_CARTAZ = {
   palavra: 'mensagens',
   desde: '30/09/2026',
   ultimaMensagem: '30/09/2026',
-  rodape: 'Quem linger mais no chat, mais aparece aqui.'
+  rodape: comando.__internos.RODAPE_CARTAZ
 }
 
 // Um cartaz custa ~0,9s (leitura da moldura + 1,5M de pixels), então o
@@ -356,8 +356,26 @@ async function main () {
     exigir(r.x0 >= t.x && r.x1 <= t.x + t.largura, 'o título estourou a largura da faixa: ' + JSON.stringify(r))
     const meio = (r.x0 + r.x1) / 2
     exigir(Math.abs(meio - cx) <= 2, 'o título não está centralizado (meio ' + meio + ', centro ' + cx + ')')
+    const meioY = (r.y0 + r.y1) / 2
+    exigir(Math.abs(meioY - (t.y + t.altura / 2)) <= 2, 'o título não está centrado verticalmente: ' + meioY)
+    // Limites medidos na moldura real, independentes da caixa configurada.
+    exigir(r.y0 >= 185 && r.y1 + 6 <= 295, 'título/sombra invadiu o ornamento ou saiu da faixa preta')
     // A 1,5× o título é bem maior do que a fonte de 64 px crua.
     exigir(r.altura >= 60, 'o título continua pequeno (' + r.altura + ' px de tinta)')
+  })
+
+  await testar('rodapé em português e afastado do filete/losango (com e sem data)', async () => {
+    exigir(comando.__internos.RODAPE_CARTAZ === 'Quem mais fica no chat, mais aparece aqui.', 'frase de rodapé incorreta')
+    for (const ultimaMensagem of [DADOS_CARTAZ.ultimaMensagem, null]) {
+      const imagem = ultimaMensagem ? (await cartazDosTestes(false)).imagem
+        : await Jimp.read(await cartaz.comporCartazProcurado({ ...DADOS_CARTAZ, ultimaMensagem }))
+      const t = cartaz.CAIXA_TEXTO
+      const rodape = faixasDeCor(imagem, I.TINTA, t.x, t.y, t.x + t.largura, I.FUNDO_MIOLO).at(-1)
+      const filete = faixasRobustas(imagem, I.TINTA_SUAVE, t.x, t.y, t.x + t.largura, I.FUNDO_MIOLO, 400).at(-1)
+      // O losango ainda alcança 5 px abaixo da base do traço de 3 px.
+      const folga = rodape.y0 - (filete.y1 + 5) - 1
+      exigir(folga >= 32, 'rodapé perto do losango: apenas ' + folga + ' px')
+    }
   })
 
   await testar('composição: o NOME é a maior linha do miolo e cabe na caixa', async () => {

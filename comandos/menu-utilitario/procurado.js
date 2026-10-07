@@ -56,7 +56,7 @@ const {
 } = require('../../ranking-registro')
 
 // 📜 Frase de rodapé do cartaz (a mesma do humor do /ranking).
-const RODAPE_CARTAZ = 'Quem linger mais no chat, mais aparece aqui.'
+const RODAPE_CARTAZ = 'Quem mais fica no chat, mais aparece aqui.'
 
 // ⏱️ Download da foto: mesmo contrato do /perfil (NUNCA lança, devolve null).
 async function baixarFoto (url, limiteBytes = 8 * 1024 * 1024, timeoutMs = 15000) {

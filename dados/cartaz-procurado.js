@@ -36,12 +36,13 @@ const CAMINHO_MOLDURA = path.join(__dirname, '..', 'assets', 'quadros', 'cartaz-
 // -------------------------------------------------------------------
 // 📐 CALIBRADO para assets/quadros/cartaz-procurado.png (1024×1536).
 // Medido com a própria imagem (brilho/saturação por linha e por coluna):
-//   • faixa escura do topo: y 0..303 (luminância ~20);
+//   • faixa escura curva: topo central ≈ 174, fundo central ≈ 310;
+//     área útil do título y 185..295, afastada do friso e dos ornamentos;
 //   • círculo: x 267..755, y 352..840 → centro (511, 596), r ≈ 244;
 //   • miolo de papel do texto: y 880..1440, x 120..904.
 // ⚠️ RECALIBRAR se a moldura for trocada: o teste imprime as medidas.
 // -------------------------------------------------------------------
-const CAIXA_TITULO = { x: 150, y: 120, largura: 724, altura: 120 }
+const CAIXA_TITULO = { x: 150, y: 185, largura: 724, altura: 110 }
 const CAIXA_TEXTO = { x: 120, y: 880, largura: 784, altura: 560 }
 
 // 🏷️ Título da faixa escura — constante fácil de trocar.
@@ -670,7 +671,7 @@ function desenharTexto (imagem, fontes, dados) {
 
   // 5) FILete final + a frase de rodapé do bot: fecha a folha e dá o peso de
   //    "cartaz antigo" que o miolo de papel pede.
-  linhas.push({ fio: 3 })
+  linhas.push({ fio: 3, respiroDepois: 16 })
   linhas.push({
     texto: limparParaFonte(fontes.media, dados.rodape || ''),
     font: fontes.media,
@@ -681,14 +682,16 @@ function desenharTexto (imagem, fontes, dados) {
   // ✂️ Corta cada linha (nunca estoura a caixa) e mede a altura da tinta.
   for (const linha of linhas) {
     if (linha.fio) {
-      linha.altura = linha.fio
+      // O losango tem raio 2× a espessura e ultrapassa o traço horizontal.
+      // Reserva sua altura inteira, não apenas os 3 px da linha.
+      linha.altura = linha.fio * 4 + 1
       continue
     }
     linha.texto = cortarParaCaber(linha.font, linha.texto, largura, linha.escala)
     linha.altura = alturaDaTinta(linha.font, linha.texto, 0, linha.escala)
   }
 
-  const tinta = linhas.reduce((soma, linha) => soma + linha.altura, 0)
+  const tinta = linhas.reduce((soma, linha) => soma + linha.altura + (linha.respiroDepois || 0), 0)
   const disponivel = FUNDO_MIOLO - CAIXA_TEXTO.y - TOPO_MIOLO
   // 🛡️ Piso de 8 px: se o miolo ficar apertado, as linhas se encostam — mas
   // nunca se SOBREPÕEM (o gap jamais fica negativo).
@@ -700,7 +703,8 @@ function desenharTexto (imagem, fontes, dados) {
   let y = Math.round(CAIXA_TEXTO.y + TOPO_MIOLO)
   for (const linha of linhas) {
     if (linha.fio) {
-      fio(imagem, x + 150, x + largura - 150, y, linha.altura, TINTA_SUAVE)
+      const deslocamento = linha.fio * 2 - Math.floor(linha.fio / 2)
+      fio(imagem, x + 150, x + largura - 150, y + deslocamento, linha.fio, TINTA_SUAVE)
     } else if (linha.texto) {
       escreverCentrado(
         imagem, linha.font, centro,
@@ -708,7 +712,7 @@ function desenharTexto (imagem, fontes, dados) {
         linha.texto, linha.cor, linha.escala, linha.contorno || null
       )
     }
-    y += Math.round(linha.altura + gap)
+    y += Math.round(linha.altura + gap + (linha.respiroDepois || 0))
   }
 
   return y
