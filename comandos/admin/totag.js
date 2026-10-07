@@ -1,17 +1,18 @@
 const { downloadMediaMessage, normalizeMessageContent, getContentType } = require('@whiskeysockets/baileys');
 const { ehAdminDoGrupo, ehDonoDoBot } = require('../../config');
 const { resolverNumeroAlvo } = require('../../lid');
+const { extrairTextoComando } = require('../../dados/texto-comando');
 
 module.exports = {
   nome: 'totag',
   aliases: ['notag2'],
-  descricao: 'Reenvia texto, vídeo ou áudio citado com menções ocultas (admin ou dono).',
+  descricao: 'Envia texto direto ou reenvia texto, vídeo ou áudio citado com menções ocultas (admin ou dono).',
 
-  async executar(sock, jid, msg) {
+  async executar(sock, jid, msg, text) {
     try {
       if (!String(jid || '').endsWith('@g.us')) {
         return await sock.sendMessage(jid, {
-          text: '🌑 Use /totag em um grupo, respondendo a uma mensagem de texto, vídeo ou áudio.'
+          text: '🌑 Use /totag em um grupo: escreva um texto depois do comando ou responda a uma mensagem de texto, vídeo ou áudio.'
         }, { quoted: msg });
       }
 
@@ -40,12 +41,23 @@ module.exports = {
         }, { quoted: msg });
       }
 
+      // Retira só o primeiro token (comando/prefixo/alias), preservando o
+      // conteúdo do argumento. Texto direto tem prioridade sobre o reply.
+      const textoDireto = String(text ?? extrairTextoComando(msg)).replace(/^\s*\S+\s*/, '');
+      // Mantém os IDs no formato do grupo (inclusive @lid).
+      const mentions = participantes.map((p) => p.id).filter(Boolean);
+      const marcacao = { mentions, contextInfo: { mentionedJid: mentions } };
+      if (textoDireto.trim()) {
+        await sock.sendMessage(jid, { text: textoDireto, ...marcacao });
+        return;
+      }
+
       const conteudo = normalizeMessageContent(msg.message) || {};
       const contexto = conteudo.extendedTextMessage?.contextInfo;
       const quoted = contexto?.quotedMessage;
       if (!quoted) {
         return await sock.sendMessage(jid, {
-          text: '📩 Responda a uma mensagem de texto, vídeo ou áudio e envie /totag (ou /notag2) para marcar todos silenciosamente.'
+          text: '📩 Use /totag seu texto (ou /notag2 seu texto).\n\nResponda a uma mensagem de texto, vídeo ou áudio e envie /totag sem texto para reenviá-la. Todos serão marcados silenciosamente.'
         }, { quoted: msg });
       }
 
@@ -57,9 +69,6 @@ module.exports = {
         }, { quoted: msg });
       }
 
-      // Mantém os IDs no formato do grupo (inclusive @lid).
-      const mentions = participantes.map((p) => p.id).filter(Boolean);
-      const marcacao = { mentions, contextInfo: { mentionedJid: mentions } };
       if (tipo === 'conversation' || tipo === 'extendedTextMessage') {
         const text = tipo === 'conversation' ? original.conversation : original.extendedTextMessage.text;
         await sock.sendMessage(jid, { text, ...marcacao });

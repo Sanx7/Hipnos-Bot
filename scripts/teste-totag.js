@@ -62,7 +62,7 @@ async function executar(message, opcoes = {}) {
       return { key: { id: 'REENVIO' } };
     }
   };
-  await cmd.executar(sock, opcoes.jid || GRUPO, message);
+  await cmd.executar(sock, opcoes.jid || GRUPO, message, opcoes.text);
   return enviadas;
 }
 
@@ -97,6 +97,45 @@ async function main() {
   await testar('nome/alias: totag e notag2, sem reservar notag', () => {
     assert.equal(cmd.nome, 'totag');
     assert.deepEqual(cmd.aliases, ['notag2']);
+  });
+  for (const [comando, texto] of [
+    ['/totag', 'teste'],
+    ['/totag', 'coloca a vivi no grupo tropa'],
+    ['/notag2', 'teste'],
+    ['/notag2', 'reunião às 20h'],
+    ['/totag', 'Linha 1\nLinha 2  com espaços 🎉']
+  ]) {
+    await testar(`${comando} texto direto preservado, sem comando ou @ visíveis`, async () => {
+      const message = msg(undefined);
+      message.message = { conversation: `${comando} ${texto}` };
+      const c = reenvio(await executar(message));
+      assert.equal(c.text, texto);
+      assert.ok(!c.text.includes(comando));
+      assert.ok(!c.text.includes('@'));
+      assert.equal(baixadas.length, 0);
+    });
+  }
+  await testar('texto direto tem prioridade sobre reply de vídeo sem baixar mídia', async () => {
+    const message = msg(VIDEO);
+    message.message.extendedTextMessage.text = '/totag use este texto';
+    const c = reenvio(await executar(message));
+    assert.equal(c.text, 'use este texto');
+    assert.equal(c.video, undefined);
+    assert.equal(baixadas.length, 0);
+  });
+  await testar('texto passado pelo roteador aceita prefixo configurado', async () => {
+    const c = reenvio(await executar(msg(undefined), { text: '!notag2 teste do roteador' }));
+    assert.equal(c.text, 'teste do roteador');
+  });
+  await testar('membro comum por LID não pode usar texto direto', async () => {
+    const message = msg(undefined, LID_COMUM);
+    message.message.extendedTextMessage.text = '/totag teste';
+    recusa(await executar(message), /Só administradores/);
+  });
+  await testar('comando com espaços mas sem texto ainda utiliza reply', async () => {
+    const message = msg({ conversation: 'Texto citado' });
+    message.message.extendedTextMessage.text = '/totag   ';
+    assert.equal(reenvio(await executar(message)).text, 'Texto citado');
   });
   await testar('texto com mentions e sem texto extra', async () => {
     const original = { conversation: 'Texto original\nSegunda linha' };
