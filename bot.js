@@ -159,6 +159,7 @@ const { comandos } = require('./comandos-registry')
 // (troca em tempo real pelo /set-prefix, sem reiniciar o bot). Validação,
 // persistência e cache vivem todos em prefixo.js — aqui só consumimos.
 const prefixoComandos = require('./prefixo')
+const estadoBot = require('./estado-bot')
 
 // 🎮 Registro COMPARTILHADO de jogos por grupo (dados/jogos-ativos.js).
 // Duas responsabilidades que o bot.js usa aqui:
@@ -631,6 +632,11 @@ async function startBot() {
         return
       }
 
+      // Manutenção GLOBAL: moderação, atividade e caches já processaram a
+      // mensagem. AFK ainda atualiza seus dados, mas só pode responder quando
+      // há autorização interativa. A barreira fica após essa atualização.
+      const podeInteragir = await estadoBot.permitirMensagem(sock, jid, sender)
+
       // 💤━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
       // 💤 SISTEMA AFK — checagem única por mensagem (UMA consulta ao Mongo)
       // ─────────────────────────────────────────────────────────────
@@ -716,7 +722,7 @@ async function startBot() {
           await removerAfk(numeroRemetente)
           afkMapa.delete(numeroRemetente) // não avisar que ele "está ausente" na mesma msg
           const tempoFora = formatarDuracao(Date.now() - (docRemetente.desde || Date.now()))
-          await sock.sendMessage(jid, {
+          if (podeInteragir) await sock.sendMessage(jid, {
             text:
               `👋 Bem-vindo(a) de volta, @${numeroRemetente}! ` +
               `Você estava ausente há *${tempoFora}*.`,
@@ -742,7 +748,7 @@ async function startBot() {
           )
         }
 
-        if (avisos.length) {
+        if (podeInteragir && avisos.length) {
           await sock.sendMessage(jid, {
             text: avisos.join('\n\n'),
             mentions: alvosParaAvisar
@@ -755,6 +761,10 @@ async function startBot() {
         console.error('⚠️ [afk] falha na checagem de AFK (fluxo segue normal):', erroAfk?.message || erroAfk)
       }
       // 💤━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+      // OFF bloqueia só a interação manual: comandos, palpites e IA.
+      // Donos (JID/LID) continuam acessando inclusive /on. Sem aviso/spam.
+      if (!podeInteragir) return
 
       // 🎮 TEXTO LIVRE PARA JOGOS — mensagens que NÃO são comandos (isto é,
       //      que não começam com o prefixo configurado) podem ser palpites de

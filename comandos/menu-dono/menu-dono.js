@@ -37,6 +37,11 @@ module.exports = {
 👑 /dono
 ➥ Revela a lista de donos do bot (consulta pública — qualquer pessoa pode chamar).
 
+☀️ /on • 💤 /off
+➥ Liga/desliga o uso geral em todos os grupos e no privado (só dono).
+➥ OFF = manutenção: apenas donos interagem; moderação e tarefas automáticas continuam.
+➥ Estado salvo no banco entre reinícios.
+
 👑 /seradm @membro
 ➥ Promove o autor (ou a @menção) a administrador DO GRUPO.
 ➥ Sem menção, promove quem chamou o comando.
