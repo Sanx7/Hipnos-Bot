@@ -74,6 +74,36 @@ module.exports = {
 
 ════════════════════
 
+📦 PACKS
+
+🏛️ /museu [página]
+➥ A vitrine dos packs ativos (ex: /museu, /museu 2).
+
+📦 /criarpack <nome> | <descrição>
+➥ Cria um pack vazio (ex: /criarpack Memes do limbo | só os clássicos).
+
+➕ /addfig <nome do pack>
+➥ Guarda a figurinha citada no pack (responda a figurinha com o comando).
+
+🔍 /abrirpack <nome>
+➥ Mostra a ficha e uma prévia do pack.
+
+📥 /usarpack <nome>
+➥ Despeja as figurinhas do pack no chat (até 10 de uma vez).
+
+🚨 /denunciarpack <nome> | <motivo>
+➥ Denuncia um pack (com 3 denúncias ele é suspenso para análise).
+
+🔎 /analisarpack [nome] (moderação)
+➥ Lista os suspensos ou mostra um para análise.
+
+♻️ /reativarpack <nome> (moderação)
+➥ Absolve o pack: volta ao museu com denúncias zeradas.
+
+🗑️ /apagarpack <nome> (dono ou moderação)
+➥ Apaga o pack do museu.
+
+════════════════════
 💀 FRASES DE HIPNOS
 
 "O sono alcança todos."

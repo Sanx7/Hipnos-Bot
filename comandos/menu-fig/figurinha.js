@@ -331,7 +331,7 @@ module.exports = {
   // eram apelidos anunciados pelos dois comandos e a precedência dependia da
   // ordem da varredura da pasta; agora cada apelido pertence a um único
   // comando, sem ambiguidade.
-  aliases: ['fig'],
+  aliases: ['fig','f','figu'],
   descricao: 'Cria figurinha SEM cortes: a imagem inteira é esticada até preencher todo o quadrado 512×512.',
 
   async executar (sock, jid, msg, texto) {
