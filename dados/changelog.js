@@ -19,6 +19,11 @@
 module.exports = [
   {
     data: '2026-10-07',
+    titulo: 'Cinco brincadeiras novas: /ppt, /quem, /pergunta, /dino e /cobrinha',
+    detalhes: 'Desafie Hipnos no pedra-papel-tesoura (/jokenpo), descubra quem é mais provável de algo ou puxe uma conversa reflexiva. Dino e cobrinha são jogos em turnos por texto: só quem iniciou joga, um jogo por grupo, desistir encerra e 2 minutos sem jogada cancelam a partida.'
+  },
+  {
+    data: '2026-10-07',
     titulo: '/totag — reenvio com menções ocultas (também: /notag2)',
     detalhes: 'Admins e donos do bot podem responder a texto, vídeo ou áudio com /totag para reenviar o conteúdo original marcando todos, sem acrescentar texto. Preserva a legenda do vídeo e o formato do áudio. Em áudio, a notificação da menção pode não aparecer no WhatsApp.'
   },

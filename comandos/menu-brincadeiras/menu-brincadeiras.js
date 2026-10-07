@@ -25,6 +25,23 @@ module.exports = {
 🎲 O salão dos jogos e das decisões do sono.
 (Comandos liberados para todos os mortais.)
 
+🪨 /ppt pedra|papel|tesoura
+➥ Desafie Hipnos no jokenpô (também: /jokenpo e /pedrapapeltesoura). Atalhos: p, pa, t.
+
+🔮 /quem
+➥ Sorteia uma pergunta “quem é mais provável de...” e marca um membro do grupo.
+
+💭 /pergunta
+➥ Uma pergunta reflexiva para conversar, sem repetir a anterior neste grupo.
+
+🦖 /dino
+➥ Jogo em turnos: pular/p salta cactos; seguir/s passa sob galhos. Só quem iniciou joga.
+
+🐍 /cobrinha
+➥ Tabuleiro 8×8: cima/baixo/esquerda/direita ou w/s/a/d. Coma maçãs e evite colisões.
+
+🎮 Dino e cobrinha: um jogo por grupo; envie desistir ou /dino desistir ou /cobrinha desistir. Encerram após 2 minutos sem jogada.
+
 ════════════════════
 
 🏆 SORTEIO & DECISÃO

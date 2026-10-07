@@ -27,6 +27,8 @@
 
 // ─── 🏷️ Tipos conhecidos + rótulos legíveis (pt-BR) ───
 const TIPOS = {
+  DINO: 'dino',
+  COBRINHA: 'cobrinha',
   VELHA: 'velha',
   ANAGRAMA: 'anagrama',
   GARTIC: 'gartic',
@@ -39,6 +41,8 @@ const TIPOS = {
 }
 
 const ROTULOS = {
+  dino: 'dinossauro',
+  cobrinha: 'cobrinha',
   velha: 'jogo da velha',
   anagrama: 'anagrama',
   gartic: 'gartic',
