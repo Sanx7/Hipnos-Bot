@@ -119,6 +119,15 @@ module.exports = {
 
 🛡️ GUARDIÕES DO LIMBO (ANTIS)
 
+🌑 FIGURINHAS DO LIMBO (ADM ou dono)
+➥ Responda à figurinha para gravar uma única regra por grupo:
+☠️ /figban — remove quem reenviar (protege ADM e dono).
+⚠️ /figadv — usa as advertências existentes, com o limite de 3.
+🗑️ /figdel — solicita apenas a exclusão da figurinha.
+🕊️ /delfigban · /delfigadv · /delfigdel — removem a regra correspondente por reply.
+📜 /figlistanegra [página] — lista os hashes e ações deste grupo.
+➥ Hipnos precisa ser ADM para apagar ou remover. Arquivos idênticos são reconhecidos; versões modificadas podem ter outro hash.
+
 ⚙️ /soadm
 ➥ Alterna o modo somente admin: só admins (e o dono) usam os comandos. Também aceita /soadm 1 (ativa) ou /soadm 0 (desativa).
 

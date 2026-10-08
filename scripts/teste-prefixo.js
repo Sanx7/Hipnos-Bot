@@ -23,6 +23,8 @@ process.env.MONGO_URI_RPG = ''
 
 const path = require('path')
 const fs = require('fs')
+const assert = require('node:assert/strict')
+const vm = require('node:vm')
 
 const prefixo = require('../prefixo')
 const { getDonos } = require('../config')
@@ -49,7 +51,7 @@ function criarColecaoFake() {
         return { matchedCount: 1 }
       }
       if (opcoes?.upsert) {
-        documentos.set(chave, { ...(atualizacao.$setOnInsert || {}), ...(atualizacao.$set || {}) })
+        documentos.set(chave, { _id: chave, ...(atualizacao.$setOnInsert || {}), ...(atualizacao.$set || {}) })
         return { upsertedCount: 1 }
       }
       return { matchedCount: 0 }
@@ -122,9 +124,11 @@ const resetarEstado = () => {
 // ------------------------------------------------------------
 async function main() {
   let reprovadas = 0
+  let aprovadas = 0
   const testar = async (nome, fn) => {
     try {
       await fn()
+      aprovadas++
       console.log(`✅ ${nome}`)
     } catch (err) {
       reprovadas += 1
@@ -133,6 +137,66 @@ async function main() {
   }
 
   // ── 🧩 MÓDULO CENTRAL (prefixo.js) ──
+
+  // Executa a inicialização REAL, sem o gancho que pula obterColecao().
+  // O driver é offline; criar/listar/remover índices é detectado pelo mock.
+  await testar('inicialização real lê documento salvo sem criar ou alterar índices', async () => {
+    const colecao = criarColecaoFake()
+    colecao._mapa.set('global', { _id: 'global', prefixo: '!', campoExistente: 'preservar' })
+    let indices = 0
+    for (const metodo of ['createIndex', 'createIndexes', 'dropIndex', 'dropIndexes']) {
+      colecao[metodo] = async () => { indices++; throw new Error('Índice não deve ser alterado') }
+    }
+    const mongo = { MongoClient: class {
+      async connect() {}
+      async close() {}
+      db() { return { command: async () => ({ ok: 1 }), collection: nome => {
+        assert.equal(nome, prefixo.NOME_COLECAO)
+        return colecao
+      } } }
+    } }
+    const modulo = { exports: {} }
+    vm.runInNewContext(fs.readFileSync(require.resolve('../prefixo'), 'utf8'), {
+      module: modulo,
+      require: nome => {
+        if (nome === 'mongodb') return mongo
+        if (nome === './config') return require('../config')
+        throw new Error(`Import inesperado: ${nome}`)
+      },
+      process: { env: { MONGODB_URI: 'mongodb://offline', MONGODB_COLLECTION_PREFIXO: prefixo.NOME_COLECAO } },
+      console
+    })
+    assert.equal(await modulo.exports.obterPrefixo(), '!')
+    assert.equal(await modulo.exports.obterPrefixo(), '!')
+    assert.equal(colecao._leituras, 1)
+    assert.equal(indices, 0)
+    assert.equal(colecao._mapa.get('global').campoExistente, 'preservar')
+  })
+
+  await testar('restart simulado preserva prefixo salvo por /set-prefix e documento global', async () => {
+    resetarEstado()
+    colecaoFake._mapa.set('global', { _id: 'global', prefixo: '/', campoExistente: 'preservar' })
+    const { sock } = criarSock()
+    await comando.executar(sock, JID_GRUPO, mensagem('/set-prefix !', JID_DONO), '/set-prefix !')
+    assert.equal(docSalvo().prefixo, '!')
+    assert.equal(docSalvo()._id, 'global')
+    assert.equal(docSalvo().campoExistente, 'preservar')
+    delete require.cache[require.resolve('../prefixo')]
+    const reiniciado = require('../prefixo')
+    reiniciado.__definirColecaoTeste(colecaoFake)
+    assert.equal(await reiniciado.obterPrefixo(), '!')
+    assert.equal(colecaoFake._mapa.size, 1)
+  })
+
+  await testar('falha na leitura do Mongo usa / e cache evita novas consultas por mensagem', async () => {
+    resetarEstado()
+    colecaoFake._falhar = true
+    assert.equal(await prefixo.obterPrefixo(), '/')
+    assert.equal(await prefixo.obterPrefixo(), '/')
+    assert.equal(await prefixo.obterPrefixo(), '/')
+    assert.equal(colecaoFake._leituras, 1)
+    assert.equal(colecaoFake._mapa.size, 0)
+  })
 
   await testar('módulo: padrão "/" e barra legada ligada', async () => {
     if (prefixo.PREFIXO_PADRAO !== '/') throw new Error('padrão: ' + prefixo.PREFIXO_PADRAO)
@@ -371,7 +435,7 @@ async function main() {
     }
   })
 
-  console.log(reprovadas === 0 ? '\n🎉 Todos os testes passaram.' : `\n💥 ${reprovadas} teste(s) reprovado(s).`)
+  console.log(reprovadas === 0 ? `\n🎉 ${aprovadas} testes passaram.` : `\n💥 ${reprovadas} teste(s) reprovado(s).`)
   process.exit(reprovadas === 0 ? 0 : 1)
 }
 

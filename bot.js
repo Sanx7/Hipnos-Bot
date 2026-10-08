@@ -63,6 +63,7 @@ const capturaDiaria = require('./dados/captura-diaria')
 const cacheMensagens = require('./dados/cache-mensagens')
 const { tratarRevogacao } = require('./dados/reenvio-apagadas')
 const { antiApagadaHabilitada } = require('./configuracoes-grupo')
+const moderacaoFigurinhas = require('./dados/moderacao-figurinhas')
 
 // ⚙️ Configurações globais do bot
 // - OWNER_NUMBERS: lista de donos SEMPRE pode usar os comandos (mesmo no modo restrito)
@@ -467,9 +468,11 @@ async function startBot() {
 
   sock.ev.on('messages.upsert', async ({ messages }) => {
     try {
+      // Todos os stickers do lote, inclusive em OFF e além de messages[0].
+      const figurinhasTratadas = await moderacaoFigurinhas.processarLote(sock, messages)
       const msg = messages[0]
 
-      if (!msg.message) return
+      if (!msg?.message) return
       if (msg.key.fromMe) return
 
       const jid = msg.key.remoteJid
@@ -513,6 +516,7 @@ async function startBot() {
       }
 
       // 🪐 GUARDIÕES DO LIMBO (MONITORES DE GRUPO)
+      if (figurinhasTratadas.has(`${jid}:${msg.key.id}`)) return
       if (jid.endsWith('@g.us')) {
         const caminhoConfigs = path.join(__dirname, 'comandos', 'dados', 'antias.json');
         if (fs.existsSync(caminhoConfigs)) {

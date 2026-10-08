@@ -47,14 +47,20 @@ function __definirGravacaoBlacklistTeste(fn) {
 // REAL resolvido (lid.js) quando o alvo veio como "@lid" — sem isso, o /adv
 // gravaria o LID cru, contrariando a correção já aplicada em VIP/RPG.
 // Lança se o WhatsApp recusar a remoção (ex.: bot não é admin).
-async function banirDoGrupo(sock, jid, alvoJid, numeroParaBlacklist) {
+async function banirDoGrupo(sock, jid, alvoJid, numeroParaBlacklist, opcoes = {}) {
   // Também protege chamadas do /adv e das votações, antes da blacklist.
   if (await ehProprioBot(sock, jid, alvoJid)) {
     throw new Error(respostaAutoexpulsao());
   }
   const alvoLimpo = limparNumero(numeroParaBlacklist || alvoJid);
+  // Automações podem exigir prova recente de membro/ADM e validar o status
+  // retornado pelo WhatsApp, antes de arquivar advertências como banidas.
+  if (opcoes.validar) await opcoes.validar();
   gravarNaBlacklist(alvoLimpo);
-  await sock.groupParticipantsUpdate(jid, [alvoJid], 'remove');
+  const resultado = await sock.groupParticipantsUpdate(jid, [alvoJid], 'remove');
+  if (opcoes.verificarStatus && (!resultado?.length || resultado.some(r => String(r.status) !== '200'))) {
+    throw new Error('Remoção recusada pelo WhatsApp');
+  }
   return alvoLimpo;
 }
 

@@ -153,7 +153,7 @@ function montarFalhaBan ({ alvoNumero, motivos, aplicadoPor }) {
 // ARQUIVA as advertências do alvo neste grupo (histórico preservado, contagem
 // zerada). O sucesso/falha do WhatsApp decide entre a mensagem de banimento e
 // o aviso de falha acima.
-async function aplicarBanAutomatico (sock, jid, msg, alvoBruto, alvoReal, autorReal) {
+async function aplicarBanAutomatico (sock, jid, msg, alvoBruto, alvoReal, autorReal, opcoesBan) {
   // 📜 Histórico lido ANTES de arquivar (é ele que vai na mensagem)
   let motivos = []
   try {
@@ -166,7 +166,7 @@ async function aplicarBanAutomatico (sock, jid, msg, alvoBruto, alvoReal, autorR
   let banido = true
   try {
     console.log(`[adv] 🚨 ${alvoReal} atingiu ${LIMITE_ADVERTENCIAS} advertências em ${jid} — ban automático`)
-    await banirDoGrupo(sock, jid, alvoBruto, alvoReal)
+    await banirDoGrupo(sock, jid, alvoBruto, alvoReal, opcoesBan)
   } catch (erro) {
     banido = false
     console.error('[adv] 💥 o WhatsApp recusou a expulsão automática:', erro?.message || erro)
@@ -202,6 +202,8 @@ module.exports = {
   extrairAlvo,
   extrairMotivo,
   resolverNumeroReal,
+  montarConfirmacao,
+  aplicarBanAutomatico,
   async executar (sock, jid, msg, text) {
     try {
       // 1️⃣ Só em grupo

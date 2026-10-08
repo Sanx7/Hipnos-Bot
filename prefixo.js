@@ -167,8 +167,8 @@ async function obterColecao() {
     await clienteMongo.db('admin').command({ ping: 1 })
 
     colecaoCacheada = clienteMongo.db(NOME_BANCO).collection(NOME_COLECAO)
-    // Índice único no _id (garante UM documento global, sem duplicata).
-    await colecaoCacheada.createIndex({ _id: 1 }, { unique: true, name: 'idx_prefixo_global' })
+    // O MongoDB já garante a unicidade de _id pelo índice automático _id_.
+    // Não criar/reconfigurar esse índice; o documento segue com _id "global".
     console.log('✅ [prefixo] MongoDB conectado — o prefixo dos comandos persiste entre redeploys.')
     return colecaoCacheada
   } catch (erro) {

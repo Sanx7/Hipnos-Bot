@@ -189,6 +189,7 @@ async function main() {
       OWNER_NUMBERS, ehLid: lid.ehLid, resolverLidParaTelefone: lid.resolverLidParaTelefone,
       welcomeHabilitado: async () => false,
       antiApagadaHabilitada: async () => false,
+      moderacaoFigurinhas: { processarLote: async () => new Set() },
       rankingRegistro: { registrarComNumeroReal: async () => {} },
       ehRemetenteEhDono: async () => false,
       configAtiva: (configs, a, b, jid) => configs[a]?.includes(jid) || configs[b]?.includes(jid)

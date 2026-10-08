@@ -168,6 +168,17 @@ async function main() {
     const mutados = new Map()
     const registro = new Map([['mute', { mutedUsers: mutados }]])
     const limparChat = require('../comandos/menu-dono/limpar-chat')
+    const regrasFigurinhas = require('../dados/figurinhas-regras')
+    const moderacaoFigurinhas = require('../dados/moderacao-figurinhas')
+    const colecaoFake = require('./helpers/colecao-figurinhas-fake')
+    regrasFigurinhas.__definirColecoesTeste({ regras: colecaoFake(), ocorrencias: colecaoFake() })
+    moderacaoFigurinhas.__definirDownloadTeste(async () => require('node:stream').Readable.from([Buffer.from('figurinha-off')]))
+    for (const cmd of require('../comandos/admin/figurinhas-moderacao')) {
+      registro.set(cmd.nome, { executar: async (...args) => {
+        eventos.push(`comando:${cmd.nome}`)
+        return cmd.executar(...args)
+      } })
+    }
     registro.set('limpar-chat', { executar: async (...args) => {
       eventos.push('comando:limpar-chat')
       return limparChat.executar(...args)
@@ -203,6 +214,7 @@ async function main() {
         }
       },
       estadoBot: estado,
+      moderacaoFigurinhas,
       console,
       path: require('node:path'),
       __dirname: require('node:path').dirname(require.resolve('../bot')),
@@ -239,6 +251,25 @@ async function main() {
     } }
   }
   const fluxo = criarHandler()
+  await teste('OFF: moderação de figurinhas real funciona; ADM bloqueado e dono gerencia regras', async () => {
+    const regras = require('../dados/figurinhas-regras')
+    const hash = require('node:crypto').createHash('sha256').update('figurinha-off').digest('hex')
+    await regras.cadastrar(grupo, hash, 'del', dono)
+    await estado.definirLigado(false)
+    await fluxo.enviar('', `${comum}@s.whatsapp.net`, { stickerMessage: {} })
+    assert.ok(fluxo.eventos.includes('delete'), 'proteção antes do gate OFF')
+    const quoted = nome => ({ extendedTextMessage: { text: `/${nome}`, contextInfo: {
+      quotedMessage: { stickerMessage: {} }, stanzaId: 'figurinha-off-original', participant: `${comum}@s.whatsapp.net`
+    } } })
+    for (const cmd of ['figban', 'figadv', 'figdel', 'delfigban', 'delfigadv', 'delfigdel', 'figlistanegra']) {
+      await fluxo.enviar(`/${cmd}`, '67890@lid', quoted(cmd))
+      assert.ok(!fluxo.eventos.some(e => e.startsWith('comando:') || e === 'resposta'))
+    }
+    await fluxo.enviar('/figban', '12345@lid', quoted('figban'))
+    assert.ok(fluxo.eventos.includes('comando:figban'))
+    assert.equal(await regras.consultar(grupo, hash), 'ban')
+    await regras.remover(grupo, hash, 'ban')
+  })
   await teste('ON + ADM limpa mensagens de terceiros; OFF bloqueia ADM e permite dono', async () => {
     await estado.definirLigado(true)
     await fluxo.enviar('mensagem de terceiro')

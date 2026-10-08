@@ -59,6 +59,12 @@ if (process.exitCode !== 1 && !comandos.has('play')) process.exitCode = 1
 for (const nome of ['ranking', 'rankativo', 'inativos', 'sairgrupo', 'sairdogrupo', 'sairgp', 'leavegp']) {
   if (typeof comandos.get(nome)?.executar !== 'function') process.exitCode = 1
 }
+for (const cmd of require('../comandos/admin/figurinhas-moderacao')) {
+  if (comandos.get(cmd.nome) !== cmd) {
+    console.error(`❌ Implementação inesperada para /${cmd.nome}`)
+    process.exitCode = 1
+  }
+}
 const lembretesPrincipal = require('../comandos/meuslembretes')
 const lembretesUtilitario = require('../comandos/menu-utilitario/meuslembretes')
 for (const [nome, esperado] of [
