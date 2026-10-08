@@ -16,6 +16,7 @@ const {
   listarPendentes,
   obterNumeroRemetente
 } = require('../../lembretes')
+const { criarConsultaMetadados, resolverDestinos, destinoDoLembrete } = require('../../dados/destinos-lembretes')
 
 module.exports = {
   nome: 'meuslembretes',
@@ -24,8 +25,9 @@ module.exports = {
 
   async executar(sock, jid, msg) {
     try {
+      const consultarMetadados = criarConsultaMetadados(sock)
       // 🪪 Número REAL do remetente (mesma resolução do /lembrete)
-      const { numero } = await obterNumeroRemetente(sock, jid, msg)
+      const { numero } = await obterNumeroRemetente({ groupMetadata: consultarMetadados }, jid, msg)
       if (!numero) {
         return await sock.sendMessage(jid, {
           text:
@@ -44,10 +46,9 @@ module.exports = {
         }, { quoted: msg })
       }
 
+      const destinos = await resolverDestinos(pendentes, consultarMetadados)
       const linhas = pendentes.map((doc, i) => {
-        const onde = !doc.grupo_id
-          ? 'no seu PV'
-          : doc.grupo_id === jid ? 'aqui' : 'em outro grupo'
+        const onde = destinoDoLembrete(doc, destinos)
         return `${i + 1}. 📝 ${doc.texto}\n   📅 ${formatarDataHora(doc.disparar_em)} — ${onde}`
       })
 

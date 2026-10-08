@@ -3,6 +3,7 @@ const path = require('path');
 
 // Configuração global do bot (helper de dono — PROOF-LID)
 const { ehDonoDoBot, limparNumero } = require('../../config');
+const { ehProprioBot, respostaAutoexpulsao } = require('../../dados/protecao-bot');
 
 // Caminho da lista negra (comandos/dados/blacklist.json)
 const BANCO_BLACKLIST = path.join(__dirname, '..', 'dados', 'blacklist.json');
@@ -47,6 +48,10 @@ function __definirGravacaoBlacklistTeste(fn) {
 // gravaria o LID cru, contrariando a correção já aplicada em VIP/RPG.
 // Lança se o WhatsApp recusar a remoção (ex.: bot não é admin).
 async function banirDoGrupo(sock, jid, alvoJid, numeroParaBlacklist) {
+  // Também protege chamadas do /adv e das votações, antes da blacklist.
+  if (await ehProprioBot(sock, jid, alvoJid)) {
+    throw new Error(respostaAutoexpulsao());
+  }
   const alvoLimpo = limparNumero(numeroParaBlacklist || alvoJid);
   gravarNaBlacklist(alvoLimpo);
   await sock.groupParticipantsUpdate(jid, [alvoJid], 'remove');
@@ -77,6 +82,9 @@ module.exports = {
 
       // Verifica se quem usou o comando é administrador ou o dono do grupo
       const metadados = await sock.groupMetadata(jid);
+      if (await ehProprioBot(sock, jid, alvo, metadados.participants)) {
+        return await sock.sendMessage(jid, { text: respostaAutoexpulsao() }, { quoted: msg });
+      }
       const dadosSender = metadados.participants.find(p => p.id === sender);
       const ehAdmin = isAdmin(dadosSender) || metadados.owner === sender;
 
@@ -90,16 +98,6 @@ module.exports = {
       // na blacklist nem removido antes desta verificação.
       if (ehDonoDoBot(metadados.participants, alvo)) {
         return await sock.sendMessage(jid, { text: '⛔ Não é possível executar essa ação contra o dono do bot.' }, { quoted: msg });
-      }
-
-      // 🛡️ PROTEÇÃO DO PRÓPRIO BOT (JID dinâmico do socket — NADA fixo no código).
-      //    A proteção do DONO do bot já acontece acima via ehDonoDoBot; esta aqui
-      //    impede que o bot se auto-expulse (ex.: admin responde a uma mensagem
-      //    do bot e o alvo vira o próprio número dele). Comparação por dígitos
-      //    normalizados (igualdade), não por substring.
-      const meuNumero = limparNumero(sock.user?.id);
-      if (meuNumero && meuNumero === limparNumero(alvo)) {
-        return await sock.sendMessage(jid, { text: 'Tentar me banir usando meu próprio comando? Volte a dormir... 💤' }, { quoted: msg });
       }
 
       // Adiciona o alvo à blacklist antes de expulsar + execução do banimento

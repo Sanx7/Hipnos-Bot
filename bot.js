@@ -322,6 +322,8 @@ async function startBot() {
   })
 
   sockAtual = sock
+  // Nenhuma automação ou comando pode remover a conta conectada, mesmo em LID.
+  require('./dados/protecao-bot').protegerRemocoes(sock)
   // Histórico de chaves para /limpar-chat, incluindo os envios automáticos.
   mensagensEnviadas.acompanharSocket(sock)
   // Permite que boas-vindas pendentes reenviem pelo socket recriado.

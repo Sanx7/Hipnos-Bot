@@ -14,6 +14,7 @@
 const { listarPendentes, formatarDataHora, MAX_LEMBRETES_ATIVOS } = require('../lembretes')
 const { formatarDuracao } = require('../afk')
 const { resolverNumeroAlvo } = require('../lid')
+const { criarConsultaMetadados, resolverDestinos, destinoDoLembrete } = require('../dados/destinos-lembretes')
 
 module.exports = {
   nome: 'meuslembretes',
@@ -22,6 +23,7 @@ module.exports = {
 
   async executar(sock, jid, msg) {
     try {
+      const consultarMetadados = criarConsultaMetadados(sock)
       // 👤 Mesmo padrão do /afk, /registrar e /darvip: em grupo o remetente
       // autêntico é msg.key.participant; no privado, o próprio chat.
       let sender = msg.key?.participant || msg.key?.remoteJid || jid
@@ -33,7 +35,7 @@ module.exports = {
         let participantes = null
         if (jid.endsWith('@g.us')) {
           try {
-            participantes = (await sock.groupMetadata(jid)).participants
+            participantes = (await consultarMetadados(jid))?.participants
           } catch (err) {
             console.error('[meuslembretes] sem metadados do grupo p/ resolver @lid:', err?.message || err)
           }
@@ -61,12 +63,11 @@ module.exports = {
         }, { quoted: msg })
       }
 
+      const destinos = await resolverDestinos(pendentes, consultarMetadados)
       const agora = Date.now()
       const linhas = pendentes.map((doc, i) => {
         const falta = doc.disparar_em - agora
-        const origem = !doc.grupo_id
-          ? 'no seu PV'
-          : (doc.grupo_id === jid ? 'neste grupo' : `no grupo ${doc.grupo_id}`)
+        const origem = destinoDoLembrete(doc, destinos)
         return (
           `*${i + 1}.* 📝 ${doc.texto}\n` +
           `   ⏰ ${formatarDataHora(doc.disparar_em)} _(em ${formatarDuracao(falta)})_ • ${origem}`

@@ -42,6 +42,9 @@ module.exports = {
 ➥ OFF = manutenção: apenas donos interagem; moderação e tarefas automáticas continuam.
 ➥ Estado salvo no banco entre reinícios.
 
+🌙 /sairgrupo
+➥ Retira o Hipnos do grupo mediante confirmação (somente dono, prazo de 30 segundos).
+
 👑 /seradm @membro
 ➥ Promove o autor (ou a @menção) a administrador DO GRUPO.
 ➥ Sem menção, promove quem chamou o comando.

@@ -26,6 +26,7 @@ const {
 
 // Pausa dramática entre o anúncio do sorteado e a remoção efetiva (ms)
 const SUSPENSE_MS = 2500
+const { filtrarAlvosRemocao } = require('../../dados/protecao-bot')
 
 // Frases de suspense para o anúncio (mesmo estilo da /roleta)
 const SUSPENSE = [
@@ -106,14 +107,14 @@ module.exports = {
 
       // 5) Elegíveis = todos EXCETO os blindados:
       //    admins/superadmins, dono do grupo, donos do bot e o próprio bot.
-      const numeroDoBot = limparNumero(sock.user?.id)
       const numeroDonoGrupo = limparNumero(metadados.owner)
       const donosDoBot = new Set(OWNER_NUMBERS.map(limparNumero).filter(Boolean))
+      const seguros = new Set(await filtrarAlvosRemocao(sock, jid, participantes.map(p => p.id), participantes))
 
       const elegiveis = participantes.filter((p) => {
         if (ehParticipanteAdmin(p)) return false
         const numeros = numerosDoParticipante(p)
-        if (numeroDoBot && numeros.includes(numeroDoBot)) return false
+        if (!seguros.has(p.id)) return false
         if (numeroDonoGrupo && numeros.includes(numeroDonoGrupo)) return false
         if (numeros.some((n) => donosDoBot.has(n))) return false
         return true

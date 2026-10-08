@@ -2,6 +2,7 @@ const cooldown = new Map();
 
 // Configuração global do bot (helper de dono — PROOF-LID)
 const { ehDonoDoBot } = require('../../config');
+const { ehProprioBot, respostaAutoexpulsao } = require('../../dados/protecao-bot');
 
 function isAdmin(p) {
   return p?.admin === "admin" || p?.admin === "superadmin";
@@ -12,10 +13,12 @@ module.exports = {
 
   executar: async (sock, jid, msg, text) => {
     try {
+      if (!jid.endsWith('@g.us')) return await sock.sendMessage(jid, { text: '🌙 O /kick só funciona em grupos.' }, { quoted: msg });
       const sender = msg.key.participant || msg.key.remoteJid;
 
       const mentioned =
-        msg.message?.extendedTextMessage?.contextInfo?.mentionedJid?.[0];
+        msg.message?.extendedTextMessage?.contextInfo?.mentionedJid?.[0] ||
+        msg.message?.extendedTextMessage?.contextInfo?.participant;
 
       const motivo = text.split(" ").slice(2).join(" ") || "Não informado";
 
@@ -37,6 +40,9 @@ module.exports = {
 
       const metadata = await sock.groupMetadata(jid);
       const participants = metadata.participants;
+      if (await ehProprioBot(sock, jid, mentioned, participants)) {
+        return await sock.sendMessage(jid, { text: respostaAutoexpulsao() }, { quoted: msg });
+      }
 
       const senderData = participants.find(p => p.id === sender);
       const targetData = participants.find(p => p.id === mentioned);

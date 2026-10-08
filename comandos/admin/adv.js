@@ -32,6 +32,7 @@ const {
   LIMITE_ADVERTENCIAS
 } = require('../../advertencias')
 const { banirDoGrupo } = require('./ban')
+const { ehProprioBot, respostaAutoexpulsao } = require('../../dados/protecao-bot')
 
 function isAdmin (p) {
   return p?.admin === 'admin' || p?.admin === 'superadmin'
@@ -227,6 +228,9 @@ module.exports = {
       // 4️⃣ Alvo: menção (@) ou mensagem respondida
       const alvoBruto = extrairAlvo(msg)
       if (!alvoBruto) return await enviar(sock, jid, msg, AVISO_SEM_ALVO)
+      if (await ehProprioBot(sock, jid, alvoBruto, participantes)) {
+        return await enviar(sock, jid, msg, respostaAutoexpulsao())
+      }
 
       // 5️⃣ Não advertir a si mesmo
       if (limparNumero(alvoBruto) === limparNumero(sender)) {

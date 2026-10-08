@@ -6,6 +6,7 @@ const { limparNumero, ehDonoDoBot } = require('../../config');
 
 // 🪪 Resolução LID→número real (menção/reply pode chegar como "@lid")
 const { resolverNumeroAlvo } = require('../../lid');
+const { ehProprioBot, respostaAutoexpulsao } = require('../../dados/protecao-bot');
 
 // Caminho atualizado apontando para a pasta 'dados'
 const BANCO_BLACKLIST = path.join(__dirname, '..', 'dados', 'blacklist.json');
@@ -82,6 +83,10 @@ module.exports = {
         return await sock.sendMessage(jid, {
           text: '🌑 O ritual falhou...\nMarque um ser ou responda sua mensagem para que Hipnos o condene ao limbo.'
         }, { quoted: msg });
+      }
+
+      if (await ehProprioBot(sock, jid, alvo, participantes)) {
+        return await sock.sendMessage(jid, { text: respostaAutoexpulsao() }, { quoted: msg });
       }
 
       // 🚫 PROTEÇÃO DO DONO DO BOT: nem outro dono pode lançar um dono à

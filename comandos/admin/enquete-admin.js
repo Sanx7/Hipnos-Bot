@@ -35,6 +35,7 @@ const { resolverNumeroAlvo } = require('../../lid')
 const { TIPOS, rotuloDoTipo, registrarJogo, removerJogo, obterJogo, registrarOuvinteTexto } = require('../../dados/jogos-ativos')
 // ♻️ A punição é a MESMA do /ban: grava na blacklist e remove do grupo
 const { banirDoGrupo } = require('../admin/ban')
+const { ehProprioBot, respostaAutoexpulsao } = require('../../dados/protecao-bot')
 
 const TIPO_JOGO = TIPOS.ENQUETE_ADMIN
 const DURACAO_ENQUETE_MS = 2 * 60 * 1000 // ⏱️ 2 minutos
@@ -174,12 +175,10 @@ async function aplicarBanSeVenceu (sock, jid, dados) {
   if (metadados && ehDonoDoBot(metadados.participants, dados.alvoBan)) {
     return { executado: false, motivo: 'alvo-dono' }
   }
-  const meuNumero = limparNumero(sock.user?.id)
-  if (meuNumero && meuNumero === limparNumero(dados.alvoBan)) {
-    return { executado: false, motivo: 'alvo-e-o-bot' }
-  }
-
   try {
+    if (await ehProprioBot(sock, jid, dados.alvoBan, metadados?.participants)) {
+      return { executado: false, motivo: 'alvo-e-o-bot' }
+    }
     await banirDoGrupo(sock, jid, dados.alvoBan)
     return { executado: true, numero: limparNumero(dados.alvoBan) }
   } catch (err) {
@@ -205,6 +204,10 @@ async function anunciarResultado (sock, jid, dados, motivo) {
   if (b.executado) {
     await sock.sendMessage(jid, { text: `☠️ *Decisão executada:* @${b.numero} foi removido do grupo e entrou na blacklist.` }).catch(() => {})
   } else {
+    if (b.motivo === 'alvo-e-o-bot') {
+      await sock.sendMessage(jid, { text: respostaAutoexpulsao() }).catch(() => {})
+      return
+    }
     const motivo = { 'sim-perdeu': 'o SIM não venceu', empate: 'empate', 'sem-votos': 'ninguém votou', 'alvo-dono': 'o alvo é dono do bot', 'alvo-e-o-bot': 'o alvo é o próprio bot', 'falha-ban': 'o WhatsApp recusou (o bot precisa ser admin)' }[b.motivo] || b.motivo
     await sock.sendMessage(jid, { text: `🛡️ *Ban não executado:* ${motivo}.` }).catch(() => {})
   }
@@ -222,6 +225,9 @@ async function criar (sock, jid, msg, autor, pergunta, opcoes, alvoBan = null) {
   const participantes = metadados?.participants || []
   if (!ehAdminDoGrupo(participantes, autor) && !ehDonoDoBot(participantes, autor)) {
     return await sock.sendMessage(jid, { text: AVISO_SEM_ADMIN }, { quoted: msg })
+  }
+  if (alvoBan && await ehProprioBot(sock, jid, alvoBan, participantes)) {
+    return await sock.sendMessage(jid, { text: respostaAutoexpulsao() }, { quoted: msg })
   }
 
   if (opcoes.length < MIN_OPCOES) {

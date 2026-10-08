@@ -1,4 +1,6 @@
 // Testes offline: nenhuma conexão real ao MongoDB ou ao WhatsApp.
+process.env.MONGODB_URI = ''
+process.env.MONGO_URI_RPG = ''
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const vm = require('node:vm')
@@ -171,8 +173,17 @@ async function main() {
     for (const nome of ['menu', 'ping', 'vip', 'ban', 'on', 'off', 'forca', 'rankativo', 'inativos']) {
       registro.set(nome, { executar: async () => eventos.push(`comando:${nome}`) })
     }
+    const sairGrupo = require('../comandos/menu-dono/sairgrupo')
+    require('../prefixo').__definirPrefixoTeste('/')
+    for (const nome of [sairGrupo.nome, ...sairGrupo.aliases]) {
+      registro.set(nome, { executar: async (...args) => {
+        eventos.push('comando:sairgrupo')
+        return sairGrupo.executar(...args)
+      } })
+    }
     const contexto = {
       sock: { ...sock, ev: { on(evento, fn) { handler = fn } },
+        async groupLeave(jid) { assert.equal(jid, grupo); eventos.push('saida-grupo') },
         async sendMessage(jid, conteudo) {
           eventos.push(conteudo.delete ? 'delete' : 'resposta')
           return { key: { remoteJid: jid, fromMe: true, id: `manutencao-${++sequencia}` } }
@@ -214,6 +225,25 @@ async function main() {
     } }
   }
   const fluxo = criarHandler()
+  await teste('OFF: sairgrupo real exige dono e confirmação, incluindo aliases', async () => {
+    const sairGrupo = require('../comandos/menu-dono/sairgrupo')
+    await estado.definirLigado(false)
+    for (const nome of [sairGrupo.nome, ...sairGrupo.aliases]) {
+      sairGrupo.__limparConfirmacoesTeste()
+      for (const sender of [`${comum}@s.whatsapp.net`, '67890@lid']) {
+        await fluxo.enviar(`/${nome}`, sender)
+        assert.ok(!fluxo.eventos.includes('comando:sairgrupo'))
+      }
+      await fluxo.enviar(`/${nome}`, '12345@lid')
+      assert.ok(fluxo.eventos.includes('comando:sairgrupo'))
+      assert.ok(!fluxo.eventos.includes('saida-grupo'))
+      await fluxo.enviar(`/${nome} confirmar`, '12345@lid')
+      assert.ok(fluxo.eventos.includes('saida-grupo'))
+      await fluxo.enviar(`/${nome} confirmar`, '12345@lid')
+      assert.ok(!fluxo.eventos.includes('saida-grupo'))
+    }
+    sairGrupo.__limparConfirmacoesTeste()
+  })
   await teste('Mensagens do bot não alimentam o contador existente', async () => {
     await fluxo.enviar('/rankativo', `${comum}@s.whatsapp.net`, undefined, true)
     assert.ok(!fluxo.eventos.includes('ranking'))

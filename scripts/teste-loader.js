@@ -56,8 +56,19 @@ console.log('📊 Entradas no registro (comandos + aliases):', comandos.size)
 console.log('🎧 /play registrado?', comandos.has('play') ? '✅ SIM' : '❌ NÃO')
 
 if (process.exitCode !== 1 && !comandos.has('play')) process.exitCode = 1
-for (const nome of ['ranking', 'rankativo', 'inativos']) {
+for (const nome of ['ranking', 'rankativo', 'inativos', 'sairgrupo', 'sairdogrupo', 'sairgp', 'leavegp']) {
   if (typeof comandos.get(nome)?.executar !== 'function') process.exitCode = 1
+}
+const lembretesPrincipal = require('../comandos/meuslembretes')
+const lembretesUtilitario = require('../comandos/menu-utilitario/meuslembretes')
+for (const [nome, esperado] of [
+  ['meuslembretes', lembretesPrincipal], ['lembretes', lembretesPrincipal],
+  ['listalembretes', lembretesPrincipal], ['meus-lembretes', lembretesUtilitario]
+]) {
+  if (comandos.get(nome) !== esperado) {
+    console.error(`❌ Implementação inesperada para /${nome}`)
+    process.exitCode = 1
+  }
 }
 if (process.exitCode === 1) {
   console.log('❌ FALHOU: algum módulo não carregou ou o /play sumiu do registro.')
