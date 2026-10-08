@@ -56,6 +56,9 @@ console.log('📊 Entradas no registro (comandos + aliases):', comandos.size)
 console.log('🎧 /play registrado?', comandos.has('play') ? '✅ SIM' : '❌ NÃO')
 
 if (process.exitCode !== 1 && !comandos.has('play')) process.exitCode = 1
+for (const nome of ['ranking', 'rankativo', 'inativos']) {
+  if (typeof comandos.get(nome)?.executar !== 'function') process.exitCode = 1
+}
 if (process.exitCode === 1) {
   console.log('❌ FALHOU: algum módulo não carregou ou o /play sumiu do registro.')
 } else {

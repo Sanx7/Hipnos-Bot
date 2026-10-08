@@ -170,7 +170,35 @@ async function resolverNumeroDeDigitos(participantes, idBruto) {
   return { numero: digitos, via: null }
 }
 
+// Uma consulta para os pares ainda fora do cache, inclusive IDs antigos do
+// ranking sem sufixo. Ausência/falha nunca transforma LID em telefone.
+async function resolverLidsEmLote(ids) {
+  const alvos = [...new Set(ids.map(limparNumero).filter(Boolean))]
+  const mapa = new Map()
+  const faltantes = alvos.filter(id => !cacheLidTelefone.has(id))
+  try {
+    if (faltantes.length) {
+      const colecao = await obterColecaoAuth()
+      const docs = await colecao.find({
+        _id: { $in: faltantes.map(id => `lid-mapping-${id}_reverse`) }
+      }, { projection: { _id: 1, __rawValue__: 1 } }).toArray()
+      for (const doc of docs) {
+        const id = String(doc._id).match(/^lid-mapping-(\d+)_reverse$/)?.[1]
+        const telefone = typeof doc.__rawValue__ === 'string' ? limparNumero(doc.__rawValue__) : ''
+        if (id && telefone) cacheLidTelefone.set(id, telefone)
+      }
+    }
+  } catch (err) {
+    console.error('[lid] falha ao ler mapeamentos em lote:', err?.message || err)
+  }
+  for (const id of alvos) {
+    if (cacheLidTelefone.has(id)) mapa.set(id, cacheLidTelefone.get(id))
+  }
+  return mapa
+}
+
 module.exports = {
+  resolverLidsEmLote,
   ehLid,
   resolverNumeroAlvo,
   resolverNumeroDeDigitos,

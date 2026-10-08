@@ -60,6 +60,9 @@ module.exports = {
 📊 /checkativo (@membro ou respondendo uma mensagem)
 ➥ Mostra quantas mensagens a pessoa ecoou no recinto (também: /mensagens, /msgs e /ativo).
 
+🏆 /rankativo
+➥ Top 10 participantes atuais mais ativos do grupo.
+
 🕵️ /procurado
 ➥ Gera o cartaz de procurado do líder do ranking do grupo, com foto, alcunha e contagem de mensagens (também: /maisativo, /lider e /wanted). Ex.: /procurado
 

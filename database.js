@@ -263,10 +263,20 @@ async function buscarEstatisticasUsuario(grupoId, usuarioId) {
 // Exporta apenas o que o resto do bot precisa (mesmas funções,
 // mesmas assinaturas — implementação interna mudou p/ MongoDB)
 // -------------------------------------------------------------------
+// Leitura completa e estrita para cruzar TODOS os membros atuais, inclusive
+// zeros. Falha do banco deve ser distinguida de grupo sem registros.
+async function buscarContagensGrupo(grupoId) {
+  const colecao = await obterColecaoRanking()
+  return colecao.find({ grupo_id: grupoId }, {
+    projection: { usuario_id: 1, total: 1, nome: 1, ultimaMensagem: 1, lid: 1 }
+  }).toArray()
+}
+
 module.exports = {
   conectar,
   registrarMensagem,
   buscarRanking,
+  buscarContagensGrupo,
   buscarEstatisticasUsuario,
   normalizarId
 }

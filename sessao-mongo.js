@@ -111,6 +111,9 @@ function paraBufferCru(valor) {
  */
 function vestirColecaoAuth(colecao) {
   return {
+    // Cursor de documentos persistidos (sem desembrulhar): leitura em lote
+    // dos pares LID pelo lid.js, preservando _id e __rawValue__.
+    find(filtro, opcoes) { return colecao.find(filtro, opcoes) },
     updateOne(filtro, update, opcoes) {
       const set = update && !Array.isArray(update) ? update.$set : undefined
       const chave = filtro && filtro._id

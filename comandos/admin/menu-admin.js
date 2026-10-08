@@ -27,6 +27,9 @@ module.exports = {
 
 👥 GESTÃO DE MEMBROS
 
+💤 /inativos [página]
+➥ Participantes com 0 a 5 mensagens registradas (ADM ou dono), 20 por página.
+
 👢 /kick @membro
 ➥ Expulsa um mortal do recinto.
 

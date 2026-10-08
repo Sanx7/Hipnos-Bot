@@ -168,7 +168,7 @@ async function main() {
       return limparChat.executar(...args)
     } })
     let sequencia = 0
-    for (const nome of ['menu', 'ping', 'vip', 'ban', 'on', 'off', 'forca']) {
+    for (const nome of ['menu', 'ping', 'vip', 'ban', 'on', 'off', 'forca', 'rankativo', 'inativos']) {
       registro.set(nome, { executar: async () => eventos.push(`comando:${nome}`) })
     }
     const contexto = {
@@ -206,13 +206,34 @@ async function main() {
     }
     require('../dados/mensagens-enviadas').acompanharSocket(contexto.sock)
     vm.runInNewContext(fonte.slice(inicio, fim), contexto)
-    return { eventos, protecoes, mapaAfk, mutados, sock: contexto.sock, async enviar(texto, sender = `${comum}@s.whatsapp.net`, conteudo) {
+    return { eventos, protecoes, mapaAfk, mutados, sock: contexto.sock, async enviar(texto, sender = `${comum}@s.whatsapp.net`, conteudo, fromMe = false) {
       eventos.length = 0
-      await handler({ messages: [{ ...msg(sender), message: conteudo || { conversation: texto } }] })
+      const mensagem = msg(sender)
+      await handler({ messages: [{ ...mensagem, key: { ...mensagem.key, fromMe }, message: conteudo || { conversation: texto } }] })
       await Promise.resolve()
     } }
   }
   const fluxo = criarHandler()
+  await teste('Mensagens do bot não alimentam o contador existente', async () => {
+    await fluxo.enviar('/rankativo', `${comum}@s.whatsapp.net`, undefined, true)
+    assert.ok(!fluxo.eventos.includes('ranking'))
+    assert.ok(!fluxo.eventos.includes('comando:rankativo'))
+  })
+  await teste('Novos comandos respeitam ON/OFF no handler de produção', async () => {
+    for (const nome of ['rankativo', 'inativos']) {
+      await estado.definirLigado(false)
+      for (const sender of [`${comum}@s.whatsapp.net`, '67890@lid']) {
+        await fluxo.enviar(`/${nome}`, sender)
+        assert.ok(!fluxo.eventos.includes(`comando:${nome}`))
+      }
+      await fluxo.enviar(`/${nome}`, '12345@lid')
+      assert.ok(fluxo.eventos.includes(`comando:${nome}`))
+      await estado.definirLigado(true)
+      await fluxo.enviar(`/${nome}`)
+      assert.ok(fluxo.eventos.includes(`comando:${nome}`))
+    }
+    await estado.definirLigado(false)
+  })
   await teste('ON + ADM: limpar-chat real apaga 10 mensagens via handler', async () => {
     await estado.definirLigado(true)
     for (let i = 0; i < 10; i++) await fluxo.sock.sendMessage(grupo, { text: 'teste' })
