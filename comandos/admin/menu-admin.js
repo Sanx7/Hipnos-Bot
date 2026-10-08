@@ -107,10 +107,10 @@ module.exports = {
 ➥ Convocação oculta de todas as almas do grupo.
 
 📩 /totag (ou /notag2)
-➥ Escreva /totag seu texto ou responda a texto, vídeo ou áudio com /totag sem texto para reenviar o original com menções ocultas a todos (só admin ou dono). Em áudio, a notificação de menção pode não aparecer no WhatsApp.
+➥ Escreva /totag seu texto ou responda a texto, imagem, vídeo ou áudio com /totag sem texto para reenviar o original com menções ocultas a todos (só admin ou dono). Em áudio, a notificação de menção pode não aparecer no WhatsApp.
 
 🧹 /limpar-chat <1-20>
-➥ Apaga mensagens recentes enviadas pelo Hipnos (admin ou dono). Histórico em memória: até 50 mensagens por grupo desde a inicialização.
+➥ Solicita apagar mensagens recentes do grupo (admin ou dono). Hipnos precisa ser ADM para apagar mensagens de terceiros. Histórico em memória: até 50 mensagens por grupo desde a inicialização.
 
 🗑️ /delete (ou /d)
 ➥ Apaga a mensagem respondida e o próprio comando. (Responda à mensagem.)

@@ -21,6 +21,7 @@ const PARTICIPANTES = [
 const BYTES = Buffer.from('mídia simulada');
 let baixadas = [];
 let erroDownload = null;
+let bytesDownload = BYTES;
 const entrada = require.resolve('@whiskeysockets/baileys');
 const cacheOriginal = require.cache[entrada];
 require.cache[entrada] = {
@@ -30,7 +31,7 @@ require.cache[entrada] = {
     downloadMediaMessage: async (...args) => {
       baixadas.push(args);
       if (erroDownload) throw erroDownload;
-      return BYTES;
+      return bytesDownload;
     }
   }
 };
@@ -51,6 +52,7 @@ async function executar(message, opcoes = {}) {
   const enviadas = [];
   baixadas = [];
   erroDownload = opcoes.erroDownload || null;
+  bytesDownload = opcoes.bytesDownload ?? BYTES;
   const sock = {
     async groupMetadata() {
       if (opcoes.erroMetadata) throw new Error('metadata indisponível');
@@ -85,6 +87,7 @@ function recusa(enviadas, regex) {
 }
 
 const VIDEO = { videoMessage: { caption: 'Legenda original 🎬', mimetype: 'video/mp4' } };
+const IMAGEM = { imageMessage: { caption: 'Boa noite, pessoal!', mimetype: 'image/jpeg' } };
 let falhas = 0;
 let passou = 0;
 async function testar(nome, fn) {
@@ -185,10 +188,86 @@ async function main() {
       assert.deepEqual(wire.audioMessage.contextInfo.mentionedJid, c.mentions);
     });
   }
-  await testar('sem reply avisa uso', async () => recusa(await executar(msg(undefined)), /Responda.*texto, vídeo ou áudio/));
-  for (const tipo of ['imageMessage', 'stickerMessage']) {
-    await testar(`${tipo} recusado sem download`, async () => recusa(await executar(msg({ [tipo]: {} })), /só funciona.*texto, vídeo ou áudio/));
+  for (const [nome, original] of [
+    ['sem legenda', { imageMessage: { mimetype: 'image/png' } }],
+    ['com legenda', IMAGEM]
+  ]) {
+    await testar(`imagem ${nome} preserva buffer, formato e todas as menções`, async () => {
+      const copia = JSON.stringify(original);
+      const c = reenvio(await executar(msg(original)));
+      assert.equal(c.image, BYTES);
+      assert.equal(c.caption, original.imageMessage.caption);
+      assert.equal(c.mimetype, original.imageMessage.mimetype);
+      assert.equal(c.text, undefined);
+      assert.equal(c.video, undefined);
+      assert.equal(JSON.stringify(original), copia);
+      assert.equal(baixadas.length, 1);
+      assert.equal(baixadas[0][0].message, original);
+      assert.deepEqual(baixadas[0][0].key, { remoteJid: GRUPO, id: 'ORIGINAL', participant: COMUM, fromMe: false });
+      assert.equal(baixadas[0][1], 'buffer');
+      const proto = baileys.proto.Message;
+      const wire = proto.decode(proto.encode(proto.fromObject({
+        imageMessage: { caption: c.caption, mimetype: c.mimetype, contextInfo: c.contextInfo }
+      })).finish());
+      assert.deepEqual(wire.imageMessage.contextInfo.mentionedJid, PARTICIPANTES.map(p => p.id));
+    });
   }
+  for (const envelope of ['ephemeralMessage', 'viewOnceMessage', 'viewOnceMessageV2', 'viewOnceMessageV2Extension']) {
+    await testar(`imagem citada em ${envelope} utiliza normalização real`, async () => {
+      const quoted = { [envelope]: { message: IMAGEM } };
+      const message = msg(quoted);
+      message.message = { ephemeralMessage: { message: message.message } };
+      const c = reenvio(await executar(message));
+      assert.equal(c.image, BYTES);
+      assert.equal(c.caption, IMAGEM.imageMessage.caption);
+      assert.equal(baixadas[0][0].message, quoted);
+    });
+  }
+  await testar('notag2 reenvia imagem sem legenda nem texto extra', async () => {
+    const c = reenvio(await executar(msg({ imageMessage: {} }), { text: '/notag2' }));
+    assert.equal(c.image, BYTES);
+    assert.equal(c.caption, undefined);
+    assert.equal(c.text, undefined);
+  });
+  await testar('texto direto tem prioridade sobre imagem sem download', async () => {
+    const c = reenvio(await executar(msg(IMAGEM), { text: '/totag reunião hoje às 20h' }));
+    assert.equal(c.text, 'reunião hoje às 20h');
+    assert.equal(c.image, undefined);
+    assert.equal(baixadas.length, 0);
+  });
+  await testar('sem reply avisa uso incluindo imagem', async () => recusa(await executar(msg(undefined)), /Responda.*texto, imagem, vídeo ou áudio/));
+  await testar('figurinha recusada sem download', async () => recusa(await executar(msg({ stickerMessage: {} })), /só funciona.*texto, imagem, vídeo ou áudio/));
+  for (const sender of [LID_DONO, DONO, ADMIN]) {
+    await testar(`imagem permitida para ${sender}`, async () => assert.equal(reenvio(await executar(msg(IMAGEM, sender))).image, BYTES));
+  }
+  await testar('membro comum não pode reenviar imagem, mesmo em reply a ADM', async () => {
+    const message = msg(IMAGEM, LID_COMUM);
+    message.message.extendedTextMessage.contextInfo.participant = LID_ADMIN;
+    recusa(await executar(message), /Só administradores/);
+  });
+  await testar('VIP sem ADM não pode reenviar imagem nem usar VIP para autorização', async () => {
+    const vip = require('../vip');
+    const original = vip.isVip;
+    let consultas = 0;
+    vip.isVip = async () => { consultas++; return true; };
+    try {
+      recusa(await executar(msg(IMAGEM, LID_COMUM)), /Só administradores/);
+      assert.equal(consultas, 0);
+    } finally { vip.isVip = original; }
+  });
+  for (const opcoes of [{ erroDownload: new Error('imagem expirada') }, { bytesDownload: Buffer.alloc(0) }]) {
+    await testar(`imagem indisponível: ${opcoes.erroDownload ? 'falha de download' : 'buffer vazio'}`, async () => {
+      const envios = await executar(msg(IMAGEM), opcoes);
+      assert.equal(envios.length, 1);
+      assert.match(envios[0].conteudo.text, /Não consegui reenviar.*mídia pode ter expirado/);
+      assert.equal(envios[0].conteudo.image, undefined);
+      assert.equal(envios[0].conteudo.mentions, undefined);
+      assert.equal(baixadas.length, 1);
+    });
+  }
+  await testar('falha de envio de imagem não escapa do comando', async () => {
+    assert.deepEqual(await executar(msg(IMAGEM), { erroEnvio: true }), []);
+  });
   await testar('não-admin/não-dono por LID recusado, mesmo respondendo a ADM', async () => {
     const message = msg(VIDEO, LID_COMUM);
     message.message.extendedTextMessage.contextInfo.participant = LID_ADMIN;

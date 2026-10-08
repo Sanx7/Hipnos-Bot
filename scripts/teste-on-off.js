@@ -36,11 +36,13 @@ const donosOriginais = [...OWNER_NUMBERS]
 OWNER_NUMBERS.push(dono)
 lid.__definirConsultaSessaoTeste(async () => null)
 const sock = {
+  user: { id: '5511666660000@s.whatsapp.net', lid: '66666@lid' },
   envios: [],
   async groupMetadata() {
     return { participants: [
       { id: '12345@lid', phoneNumber: `${dono}@s.whatsapp.net` },
-      { id: '67890@lid', phoneNumber: `${comum}@s.whatsapp.net`, admin: 'admin' }
+      { id: '67890@lid', phoneNumber: `${comum}@s.whatsapp.net`, admin: 'admin' },
+      { id: '66666@lid', phoneNumber: '5511666660000@s.whatsapp.net', admin: 'admin' }
     ] }
   },
   async sendMessage(jid, conteudo) { this.envios.push({ jid, ...conteudo }) }
@@ -158,7 +160,8 @@ async function main() {
     const inicio = fonte.indexOf("sock.ev.on('messages.upsert', async ({ messages }) => {")
     const fim = fonte.indexOf("sock.ev.on('connection.update'", inicio)
     assert.ok(inicio >= 0 && fim > inicio)
-    let handler
+    const ouvintes = new Map()
+    const exclusoes = []
     const eventos = []
     const protecoes = {}
     const mapaAfk = new Map()
@@ -182,10 +185,20 @@ async function main() {
       } })
     }
     const contexto = {
-      sock: { ...sock, ev: { on(evento, fn) { handler = fn } },
+      sock: { ...sock, ev: { on(evento, fn) {
+        if (!ouvintes.has(evento)) ouvintes.set(evento, [])
+        ouvintes.get(evento).push(fn)
+      } },
         async groupLeave(jid) { assert.equal(jid, grupo); eventos.push('saida-grupo') },
         async sendMessage(jid, conteudo) {
           eventos.push(conteudo.delete ? 'delete' : 'resposta')
+          if (conteudo.delete) {
+            exclusoes.push(conteudo.delete)
+            for (const fn of ouvintes.get('messages.update') || []) fn([{
+              key: conteudo.delete,
+              update: { message: null, messageStubType: require('@whiskeysockets/baileys').WAMessageStubType.REVOKE }
+            }])
+          }
           return { key: { remoteJid: jid, fromMe: true, id: `manutencao-${++sequencia}` } }
         }
       },
@@ -217,14 +230,32 @@ async function main() {
     }
     require('../dados/mensagens-enviadas').acompanharSocket(contexto.sock)
     vm.runInNewContext(fonte.slice(inicio, fim), contexto)
-    return { eventos, protecoes, mapaAfk, mutados, sock: contexto.sock, async enviar(texto, sender = `${comum}@s.whatsapp.net`, conteudo, fromMe = false) {
+    return { eventos, exclusoes, protecoes, mapaAfk, mutados, sock: contexto.sock, async enviar(texto, sender = `${comum}@s.whatsapp.net`, conteudo, fromMe = false) {
       eventos.length = 0
       const mensagem = msg(sender)
-      await handler({ messages: [{ ...mensagem, key: { ...mensagem.key, fromMe }, message: conteudo || { conversation: texto } }] })
+      const lote = { messages: [{ ...mensagem, key: { ...mensagem.key, id: `recebida-${++sequencia}`, fromMe }, message: conteudo || { conversation: texto } }] }
+      for (const fn of ouvintes.get('messages.upsert') || []) await fn(lote)
       await Promise.resolve()
     } }
   }
   const fluxo = criarHandler()
+  await teste('ON + ADM limpa mensagens de terceiros; OFF bloqueia ADM e permite dono', async () => {
+    await estado.definirLigado(true)
+    await fluxo.enviar('mensagem de terceiro')
+    const quantidadeAntes = fluxo.exclusoes.length
+    await fluxo.enviar('/limpar-chat 1', '67890@lid')
+    assert.equal(fluxo.exclusoes.length, quantidadeAntes + 1)
+    assert.equal(fluxo.exclusoes.at(-1).fromMe, false)
+    assert.equal(fluxo.exclusoes.at(-1).participant, `${comum}@s.whatsapp.net`)
+    await estado.definirLigado(false)
+    await fluxo.enviar('outra mensagem durante OFF')
+    const antesOff = fluxo.exclusoes.length
+    await fluxo.enviar('/limpar-chat 1', '67890@lid')
+    assert.equal(fluxo.exclusoes.length, antesOff)
+    await fluxo.enviar('/limpar-chat 1', '12345@lid')
+    assert.equal(fluxo.exclusoes.length, antesOff + 1)
+    assert.equal(fluxo.exclusoes.at(-1).fromMe, false)
+  })
   await teste('OFF: sairgrupo real exige dono e confirmação, incluindo aliases', async () => {
     const sairGrupo = require('../comandos/menu-dono/sairgrupo')
     await estado.definirLigado(false)

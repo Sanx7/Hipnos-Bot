@@ -6,13 +6,13 @@ const { extrairTextoComando } = require('../../dados/texto-comando');
 module.exports = {
   nome: 'totag',
   aliases: ['notag2'],
-  descricao: 'Envia texto direto ou reenvia texto, vídeo ou áudio citado com menções ocultas (admin ou dono).',
+  descricao: 'Envia texto direto ou reenvia texto, imagem, vídeo ou áudio citado com menções ocultas (admin ou dono).',
 
   async executar(sock, jid, msg, text) {
     try {
       if (!String(jid || '').endsWith('@g.us')) {
         return await sock.sendMessage(jid, {
-          text: '🌑 Use /totag em um grupo: escreva um texto depois do comando ou responda a uma mensagem de texto, vídeo ou áudio.'
+          text: '🌑 Use /totag em um grupo: escreva um texto depois do comando ou responda a uma mensagem de texto, imagem, vídeo ou áudio.'
         }, { quoted: msg });
       }
 
@@ -57,15 +57,15 @@ module.exports = {
       const quoted = contexto?.quotedMessage;
       if (!quoted) {
         return await sock.sendMessage(jid, {
-          text: '📩 Use /totag seu texto (ou /notag2 seu texto).\n\nResponda a uma mensagem de texto, vídeo ou áudio e envie /totag sem texto para reenviá-la. Todos serão marcados silenciosamente.'
+          text: '📩 Use /totag seu texto (ou /notag2 seu texto).\n\nResponda a uma mensagem de texto, imagem, vídeo ou áudio e envie /totag sem texto para reenviá-la. Todos serão marcados silenciosamente.'
         }, { quoted: msg });
       }
 
       const original = normalizeMessageContent(quoted) || {};
       const tipo = getContentType(original);
-      if (!['conversation', 'extendedTextMessage', 'videoMessage', 'audioMessage'].includes(tipo)) {
+      if (!['conversation', 'extendedTextMessage', 'imageMessage', 'videoMessage', 'audioMessage'].includes(tipo)) {
         return await sock.sendMessage(jid, {
-          text: '📩 O /totag só funciona respondendo a texto, vídeo ou áudio. Imagens e figurinhas não são suportadas.'
+          text: '📩 O /totag só funciona respondendo a texto, imagem, vídeo ou áudio. Figurinhas não são suportadas.'
         }, { quoted: msg });
       }
 
@@ -89,7 +89,15 @@ module.exports = {
       const buffer = await downloadMediaMessage(alvo, 'buffer', {});
       if (!buffer || buffer.length === 0) throw new Error('Mídia vazia');
 
-      if (tipo === 'videoMessage') {
+      if (tipo === 'imageMessage') {
+        const imagem = original.imageMessage;
+        await sock.sendMessage(jid, {
+          image: buffer,
+          caption: imagem.caption,
+          mimetype: imagem.mimetype || 'image/jpeg',
+          ...marcacao
+        });
+      } else if (tipo === 'videoMessage') {
         const video = original.videoMessage;
         await sock.sendMessage(jid, {
           video: buffer,

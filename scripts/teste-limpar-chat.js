@@ -2,6 +2,8 @@
 process.env.OWNER_NUMBERS = '5511999990009'
 process.env.MONGODB_URI = ''
 const assert = require('node:assert/strict')
+const { EventEmitter } = require('node:events')
+const { proto, WAMessageStubType } = require('@whiskeysockets/baileys')
 const GRUPO = '123@g.us'
 const OUTRO = '456@g.us'
 const DONO = '5511999990009@s.whatsapp.net'
@@ -9,6 +11,8 @@ const LID = '12345@lid'
 const COMUM = '5511888880000@s.whatsapp.net'
 const ADMIN = '5511777770000@s.whatsapp.net'
 const LID_ADMIN = '54321@lid'
+const BOT = '5511666660000@s.whatsapp.net'
+const BOT_LID = '66666@lid'
 const lid = require('../lid')
 lid.__definirConsultaSessaoTeste(async () => null)
 let testes = 0
@@ -20,22 +24,32 @@ function cenario() {
   const envios = []
   let seq = 0
   const sock = {
+    ev: new EventEmitter(), user: { id: BOT, lid: BOT_LID },
+    confirmarExclusoes: true,
     falhar: null,
-    async groupMetadata() { return { participants: [{ id: LID, phoneNumber: DONO }] } },
+    async groupMetadata() { return { participants: [{ id: LID, phoneNumber: DONO }, { id: BOT_LID, phoneNumber: BOT, admin: 'admin' }] } },
     async sendMessage(jid, conteudo, opcoes) {
       assert.equal(this, sock)
       if (this.falhar?.(conteudo)) throw new Error('envio falhou')
       const key = { remoteJid: jid, id: String(++seq), fromMe: true }
       envios.push({ jid, conteudo, opcoes, key })
+      if (conteudo.delete && this.confirmarExclusoes) {
+        this.ev.emit('messages.update', [{ key: conteudo.delete, update: { message: null, messageStubType: WAMessageStubType.REVOKE } }])
+      }
       return { key }
     }
   }
   historico.acompanharSocket(sock)
-  const executar = (texto, sender = DONO, jid = GRUPO) => comando.executar(sock, jid, {
-    key: { remoteJid: jid, participant: sender }, message: { conversation: texto }
+  const executar = (texto, sender = DONO, jid = GRUPO, id = 'pedido') => comando.executar(sock, jid, {
+    key: { remoteJid: jid, participant: sender, id, fromMe: false }, message: { conversation: texto }
   }, texto)
   const deletadas = () => envios.filter(e => e.conteudo.delete).map(e => e.conteudo.delete)
-  return { sock, historico, envios, executar, deletadas }
+  const receber = (id, participant = COMUM, message = { conversation: 'recebida' }, remoteJid = GRUPO, extras = {}) => {
+    const msg = { key: { remoteJid, participant, id, fromMe: false }, message, ...extras }
+    sock.ev.emit('messages.upsert', { type: 'notify', messages: [msg] })
+    return msg
+  }
+  return { sock, historico, envios, executar, deletadas, receber }
 }
 async function teste(nome, fn) {
   await fn(cenario())
@@ -43,7 +57,7 @@ async function teste(nome, fn) {
   console.log(`✅ ${nome}`)
 }
 async function main() {
-  await teste('apaga somente últimas X do bot, na ordem recente, sem afetar outro grupo', async c => {
+  await teste('exclui últimas X do bot, na ordem recente, sem afetar outro grupo', async c => {
     await c.sock.sendMessage(GRUPO, { text: '1' })
     await c.sock.sendMessage(OUTRO, { text: 'outro grupo' })
     await c.sock.sendMessage(GRUPO, { text: '2' })
@@ -162,7 +176,7 @@ async function main() {
     await c.executar('/limpar-chat 2')
     assert.deepEqual(c.deletadas().map(k => k.id), ['1'])
     assert.ok(c.historico.recentes(GRUPO, 20).some(k => k.id === '2'))
-    assert.match(c.envios.at(-1).conteudo.text, /1 tentativa\(s\) falharam/)
+    assert.match(c.envios.at(-1).conteudo.text, /Falhas: 1/)
   })
   await teste('wrapper ignora ações, envios falhos e chaves de outros usuários', async c => {
     for (const conteudo of [{ delete: {} }, { react: {} }, { edit: {}, text: 'edit' }, { pin: {} }]) await c.sock.sendMessage(GRUPO, conteudo)
@@ -184,6 +198,169 @@ async function main() {
     for (let i = 0; i < 60; i++) await c.sock.sendMessage(OUTRO, { text: 'outro' })
     assert.equal(c.historico.recentes(OUTRO, 100).length, 50)
     assert.deepEqual(c.historico.recentes(GRUPO, 100), recentes)
+  })
+  await teste('exclusão de terceiro preserva key, fromMe false e participant LID', async c => {
+    const recebida = c.receber('alvo-lid', '98765@lid')
+    await c.executar('/limpar-chat 1')
+    assert.deepEqual(c.deletadas(), [recebida.key])
+    assert.equal(c.deletadas()[0].participant, '98765@lid')
+    assert.equal(c.deletadas()[0].fromMe, false)
+  })
+  await teste('histórico misto segue a ordem mais recente, independente do autor', async c => {
+    c.receber('joao'); c.receber('maria', ADMIN)
+    const enviada = await c.sock.sendMessage(GRUPO, { text: 'Bem-vindos' })
+    c.receber('pedro', LID_ADMIN); c.receber('ana', LID)
+    await c.executar('/limpar-chat 3')
+    assert.deepEqual(c.deletadas().map(k => k.id), ['ana', 'pedro', enviada.key.id])
+    assert.deepEqual(c.deletadas().map(k => k.fromMe), [false, false, true])
+    assert.match(c.envios.at(-1).conteudo.text, /Solicitadas: 3\n✅ Exclusões enviadas: 3\n⚠️ Falhas: 0/)
+  })
+  await teste('limite de 20 vale também para mensagens de participantes', async c => {
+    for (let i = 1; i <= 25; i++) c.receber(`recebida-${i}`)
+    await c.executar('/limpar-chat 20')
+    assert.equal(c.deletadas().length, 20)
+    assert.equal(c.deletadas()[0].id, 'recebida-25')
+    assert.equal(c.deletadas().at(-1).id, 'recebida-6')
+  })
+  await teste('histórico misto mantém no máximo 50 por grupo e guarda só metadados', async c => {
+    for (let i = 0; i < 60; i++) {
+      if (i % 2) await c.sock.sendMessage(GRUPO, { image: Buffer.from('não guardar') })
+      else c.receber(`r-${i}`, COMUM, { audioMessage: { url: 'não guardar' } })
+    }
+    const guardadas = c.historico.recentes(GRUPO, 100)
+    assert.equal(guardadas.length, 50)
+    for (const key of guardadas) assert.ok(Object.keys(key).every(campo => ['id', 'remoteJid', 'fromMe', 'participant'].includes(campo)))
+    assert.equal(guardadas.at(-1).id, 'r-10')
+  })
+  await teste('mensagens recebidas de outros grupos e privadas são isoladas', async c => {
+    c.receber('a'); c.receber('b', COMUM, { conversation: 'grupo diferente' }, OUTRO)
+    c.receber('privado', COMUM, { conversation: 'privado' }, COMUM)
+    await c.executar('/limpar-chat 20')
+    assert.deepEqual(c.deletadas().map(k => k.id), ['a'])
+    assert.equal(c.historico.recentes(OUTRO, 20)[0].id, 'b')
+    assert.equal(c.historico.recentes(COMUM, 20).length, 0)
+  })
+  await teste('mensagens duplicadas recebidas e eco dos envios não duplicam keys', async c => {
+    c.receber('duplicada'); c.receber('duplicada')
+    const enviada = await c.sock.sendMessage(GRUPO, { text: 'bot' })
+    c.sock.ev.emit('messages.upsert', { messages: [{ key: enviada.key, message: { conversation: 'eco' } }] })
+    assert.equal(c.historico.recentes(GRUPO, 20).length, 2)
+    await c.executar('/limpar-chat 20')
+    assert.equal(c.deletadas().length, 2)
+  })
+  await teste('bot sem ADM bloqueia limpeza com mensagens de terceiros', async c => {
+    c.receber('alvo')
+    c.sock.groupMetadata = async () => ({ participants: [{ id: BOT_LID, phoneNumber: BOT }, { id: ADMIN, admin: 'admin' }] })
+    await c.executar('/limpar-chat 1')
+    assert.equal(c.deletadas().length, 0)
+    assert.equal(c.envios.at(-1).conteudo.text, '⚠️ Preciso ser administrador do grupo para apagar mensagens de outros participantes.')
+    assert.ok(c.historico.recentes(GRUPO, 20).some(k => k.id === 'alvo'))
+  })
+  await teste('bot sem ADM continua podendo excluir seus próprios envios', async c => {
+    await c.sock.sendMessage(GRUPO, { text: 'bot' })
+    c.sock.groupMetadata = async () => ({ participants: [] })
+    await c.executar('/limpar-chat 1')
+    assert.equal(c.deletadas().length, 1)
+  })
+  await teste('prova de ADM do bot funciona só com sock.user.lid e metadata PN', async c => {
+    c.sock.user = { id: BOT_LID }
+    c.sock.groupMetadata = async () => ({ participants: [{ id: BOT, lid: BOT_LID, admin: 'superadmin' }] })
+    c.receber('alvo'); await c.executar('/limpar-chat 1')
+    assert.equal(c.deletadas().length, 1)
+  })
+  await teste('falha de metadata não concede ADM ao bot para terceiros', async c => {
+    c.receber('alvo')
+    c.sock.groupMetadata = async () => { throw new Error('offline') }
+    await c.executar('/limpar-chat 1')
+    assert.equal(c.deletadas().length, 0)
+    assert.match(c.envios.at(-1).conteudo.text, /Preciso ser administrador/)
+  })
+  await teste('dígitos de LID de outro ADM não são prova de ADM do bot', async c => {
+    c.sock.user = { id: BOT }
+    c.sock.groupMetadata = async () => ({ participants: [{ id: `${BOT.split('@')[0]}@lid`, phoneNumber: ADMIN, admin: 'admin' }] })
+    c.receber('alvo'); await c.executar('/limpar-chat 1')
+    assert.equal(c.deletadas().length, 0)
+  })
+  await teste('mensagens de sistema, reações e protocolos não viram alvos', async c => {
+    c.receber('stub', COMUM, { conversation: 'sistema' }, GRUPO, { messageStubType: 27 })
+    c.receber('protocolo', COMUM, { protocolMessage: { type: proto.Message.ProtocolMessage.Type.EPHEMERAL_SETTING } })
+    c.receber('reacao', COMUM, { reactionMessage: { text: '👍' } })
+    c.receber('chaves', COMUM, { senderKeyDistributionMessage: {} })
+    c.receber('sem-participant', '', { conversation: 'não identificável' })
+    c.receber('sem-conteudo', COMUM, undefined, GRUPO, { message: null })
+    assert.equal(c.historico.recentes(GRUPO, 100).length, 0)
+  })
+  await teste('mensagem temporária normal é capturada sem guardar conteúdo', async c => {
+    c.receber('efemera', COMUM, { ephemeralMessage: { message: { conversation: 'normal' } } })
+    assert.equal(c.historico.recentes(GRUPO, 20)[0].id, 'efemera')
+  })
+  await teste('evento de exclusão remove alvo confirmado e não vira novo registro', async c => {
+    c.receber('alvo')
+    c.receber('revogacao', ADMIN, { protocolMessage: { type: proto.Message.ProtocolMessage.Type.REVOKE, key: { remoteJid: GRUPO, id: 'alvo' } } })
+    assert.equal(c.historico.recentes(GRUPO, 20).length, 0)
+  })
+  await teste('aceitação do envio não equivale a revogação confirmada', async c => {
+    c.sock.confirmarExclusoes = false
+    c.receber('alvo'); await c.executar('/limpar-chat 1')
+    const key = { remoteJid: GRUPO, id: 'alvo' }
+    assert.equal(c.historico.recentes(GRUPO, 20).some(k => k.id === 'alvo'), false, 'solicitação não deve ser repetida')
+    c.receber('alvo')
+    assert.equal(c.historico.recentes(GRUPO, 20).some(k => k.id === 'alvo'), false, 'eco não confirma exclusão nem libera reenvio')
+    c.sock.ev.emit('messages.update', [{ key, update: { messageStubType: WAMessageStubType.REVOKE, message: null } }])
+    c.sock.ev.emit('messages.upsert', { messages: [{ key: { ...key, fromMe: false, participant: COMUM }, message: { conversation: 'registro após remoção confirmada' } }] })
+    assert.ok(c.historico.recentes(GRUPO, 20).some(k => k.id === 'alvo'), 'registro pode reaparecer somente após remoção da key confirmada')
+    assert.match(c.envios.find(e => e.conteudo.text?.includes('LIMPEZA DO CHAT')).conteudo.text, /Exclusões enviadas: 1/)
+  })
+  await teste('messages.delete remove somente keys do grupo correspondente', async c => {
+    c.receber('igual'); c.receber('igual', COMUM, { conversation: 'outro' }, OUTRO)
+    c.sock.ev.emit('messages.delete', { keys: [{ remoteJid: GRUPO, id: 'igual' }] })
+    assert.equal(c.historico.recentes(GRUPO, 20).length, 0)
+    assert.equal(c.historico.recentes(OUTRO, 20).length, 1)
+  })
+  await teste('solicitação não seleciona a si mesma nem itens posteriores do mesmo lote', async c => {
+    const antes = { key: { remoteJid: GRUPO, id: 'antes', fromMe: false, participant: COMUM }, message: { conversation: 'antes' } }
+    const pedido = { key: { remoteJid: GRUPO, id: 'pedido', fromMe: false, participant: DONO }, message: { conversation: '/limpar-chat 20' } }
+    const depois = { key: { remoteJid: GRUPO, id: 'depois', fromMe: false, participant: ADMIN }, message: { conversation: 'depois' } }
+    c.sock.ev.emit('messages.upsert', { messages: [antes, pedido, depois] })
+    await c.executar('/limpar-chat 20')
+    assert.deepEqual(c.deletadas().map(k => k.id), ['antes'])
+  })
+  await teste('lote acima de 50 não inclui mensagens posteriores se a key do pedido foi evictada', async c => {
+    const pedido = { key: { remoteJid: GRUPO, id: 'pedido-grande', fromMe: false, participant: DONO }, message: { conversation: '/limpar-chat 20' } }
+    const posteriores = Array.from({ length: 51 }, (_, i) => ({
+      key: { remoteJid: GRUPO, id: `depois-${i}`, fromMe: false, participant: COMUM },
+      message: { conversation: 'posterior' }
+    }))
+    c.receber('anterior')
+    c.sock.ev.emit('messages.upsert', { messages: [pedido, ...posteriores] })
+    await require('../comandos/menu-dono/limpar-chat').executar(c.sock, GRUPO, pedido, '/limpar-chat 20')
+    assert.equal(c.deletadas().length, 0)
+    assert.ok(c.historico.recentes(GRUPO, 100).some(k => k.id === 'depois-50'))
+  })
+  await teste('mensagens recebidas e enviadas durante autorização não entram no snapshot', async c => {
+    c.receber('antes')
+    let liberar, sinalizar
+    const consultando = new Promise(resolve => { sinalizar = resolve })
+    c.sock.groupMetadata = async () => { sinalizar(); return new Promise(resolve => { liberar = resolve }) }
+    const limpeza = c.executar('/limpar-chat 20')
+    await consultando
+    c.receber('durante'); await c.sock.sendMessage(GRUPO, { text: 'bot durante' })
+    liberar({ participants: [{ id: BOT, admin: 'admin' }] })
+    await limpeza
+    assert.deepEqual(c.deletadas().map(k => k.id), ['antes'])
+  })
+  await teste('falhas parciais em terceiros preservam apenas a key que falhou', async c => {
+    c.receber('a'); c.receber('b'); c.receber('c')
+    c.sock.falhar = conteudo => conteudo.delete?.id === 'b'
+    await c.executar('/limpar-chat 3')
+    assert.deepEqual(c.deletadas().map(k => k.id), ['c', 'a'])
+    assert.ok(c.historico.recentes(GRUPO, 20).some(k => k.id === 'b'))
+    assert.match(c.envios.at(-1).conteudo.text, /Exclusões enviadas: 2\n⚠️ Falhas: 1/)
+  })
+  await teste('histórico em RAM desaparece ao recarregar o módulo', async c => {
+    c.receber('antes-reinicio')
+    delete require.cache[require.resolve('../dados/mensagens-enviadas')]
+    assert.equal(require('../dados/mensagens-enviadas').recentes(GRUPO, 20).length, 0)
   })
   console.log(`\n${testes} testes passaram.`)
 }
