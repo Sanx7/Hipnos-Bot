@@ -157,7 +157,7 @@ async function main() {
   // Assim regressões de posicionamento da barreira quebram estes testes.
   function criarHandler() {
     const fonte = fs.readFileSync(require.resolve('../bot'), 'utf8')
-    const inicio = fonte.indexOf("sock.ev.on('messages.upsert', async ({ messages }) => {")
+    const inicio = fonte.indexOf("sock.ev.on('messages.upsert', async ({ messages, type }) => {")
     const fim = fonte.indexOf("sock.ev.on('connection.update'", inicio)
     assert.ok(inicio >= 0 && fim > inicio)
     const ouvintes = new Map()
@@ -173,6 +173,11 @@ async function main() {
     const registro = new Map([['mute', { mutedUsers: mutados }]])
     require('../dados/antilinkhard-config').__definirColecoesTeste({ config: require('./helpers/colecao-figurinhas-fake')(), eventos: require('./helpers/colecao-figurinhas-fake')(), travas: require('./helpers/colecao-figurinhas-fake')() })
     require('../dados/moderacao-antilinkhard').__limparCacheTeste()
+    const floodFake = require('./helpers/colecao-figurinhas-fake')
+    require('../dados/antiflood-config').__definirColecoesTeste({ config: floodFake(), eventos: floodFake(), cooldowns: floodFake() })
+    require('../dados/moderacao-antiflood').__limparTeste()
+    const antiflood = require('../comandos/admin/antiflood')
+    registro.set('antiflood', { executar: async (...args) => { eventos.push('comando:antiflood'); return antiflood.executar(...args) } })
     // Mock apenas do download usado pelo comando real; demais módulos usam o Baileys real.
     const entradaBaileys = require.resolve('@whiskeysockets/baileys')
     const baileysReal = require('@whiskeysockets/baileys')
@@ -275,6 +280,7 @@ async function main() {
       estadoBot: estado,
       respostaPrefixo: require('../dados/resposta-prefixo'),
       moderacaoFigurinhas,
+      moderacaoAntiflood: require('../dados/moderacao-antiflood'),
       moderacaoAntilinkHard: require('../dados/moderacao-antilinkhard'),
       temLinkBasico: require('../dados/deteccao-links').temLinkBasico,
       console,
@@ -313,7 +319,7 @@ async function main() {
       const mensagem = msg(sender)
       mensagem.key.remoteJid = jidDestino
       if (!jidDestino.endsWith('@g.us')) delete mensagem.key.participant
-      const lote = { messages: [{ ...mensagem, key: { ...mensagem.key, id: `recebida-${++sequencia}`, fromMe }, message: conteudo || { conversation: texto } }] }
+      const lote = { type: 'notify', messages: [{ ...mensagem, messageTimestamp: Math.floor(Date.now()/1000), key: { ...mensagem.key, id: `recebida-${++sequencia}`, fromMe }, message: conteudo || { conversation: texto } }] }
       for (const fn of ouvintes.get('messages.upsert') || []) await fn(lote)
       await Promise.resolve()
     } }
@@ -726,6 +732,59 @@ async function main() {
       await fluxo.enviar('!antilinkhard status', '12345@lid')
       assert.ok(fluxo.eventos.includes('comando:antilinkhard'))
       await fluxo.enviar('!antilinkhard off', '12345@lid')
+    } finally { require('../prefixo').__definirPrefixoTeste('/') }
+  })
+  await teste('OFF: antiflood real continua apagando; ranking mantido e jogos/IA bloqueados', async () => {
+    const conf = require('../dados/antiflood-config'), mod = require('../dados/moderacao-antiflood')
+    const original = fluxo.sock.groupMetadata
+    fluxo.sock.groupMetadata = async () => ({ participants: [
+      { id: '5511666660000@s.whatsapp.net', lid: '66666@lid', admin: 'admin' },
+      { id: `${comum}@s.whatsapp.net`, lid: '88888@lid' },
+      { id: `${dono}@s.whatsapp.net`, lid: '12345@lid' }
+    ] })
+    try {
+      await estado.definirLigado(false); mod.__limparTeste()
+      await conf.definir(grupo, { ativo:true, acao:'apagar' }, dono)
+      for(let i=0;i<6;i++) await fluxo.enviar('texto')
+      await fluxo.enviar('/menu')
+      assert.ok(fluxo.eventos.includes('delete'))
+      assert.ok(fluxo.eventos.includes('ranking'))
+      assert.ok(!fluxo.eventos.some(e=>e==='jogo'||e==='ia'||e==='comando:menu'))
+    } finally { fluxo.sock.groupMetadata = original; await conf.definir(grupo,{ativo:false},dono); mod.__limparTeste() }
+  })
+  await teste('ON: mensagem excedente não executa comando nem jogos/IA', async () => {
+    const conf = require('../dados/antiflood-config'), mod = require('../dados/moderacao-antiflood'), original = fluxo.sock.groupMetadata
+    fluxo.sock.groupMetadata = async () => ({ participants: [ { id:'5511666660000@s.whatsapp.net',lid:'66666@lid',admin:'admin' }, { id:`${comum}@s.whatsapp.net` } ] })
+    try {
+      await estado.definirLigado(true); mod.__limparTeste(); await conf.definir(grupo,{ativo:true,acao:'apagar'},dono)
+      for(let i=0;i<6;i++) await fluxo.enviar('texto')
+      await fluxo.enviar('/menu'); assert.ok(fluxo.eventos.includes('delete')); assert.ok(!fluxo.eventos.some(e=>e==='comando:menu'||e==='jogo'||e==='ia'))
+    } finally { fluxo.sock.groupMetadata=original; await conf.definir(grupo,{ativo:false},dono); mod.__limparTeste() }
+  })
+  await teste('handler: link na sétima recebe somente punição hard', async () => {
+    const conf = require('../dados/antiflood-config'), hard = require('../dados/antilinkhard-config'), mod = require('../dados/moderacao-antiflood')
+    const meta=fluxo.sock.groupMetadata, remover=fluxo.sock.groupParticipantsUpdate; let remocoes=0
+    const fake = require('./helpers/colecao-figurinhas-fake')
+    hard.__definirColecoesTeste({ config:fake(), eventos:fake(), travas:fake() })
+    fluxo.sock.groupMetadata=async()=>({participants:[{id:'5511666660000@s.whatsapp.net',lid:'66666@lid',admin:'admin'},{id:`${comum}@s.whatsapp.net`}]})
+    fluxo.sock.groupParticipantsUpdate=async(jid,alvos)=>{remocoes++;return alvos.map(jid=>({jid,status:'200'}))}
+    try {
+      await estado.definirLigado(false); mod.__limparTeste(); require('../dados/moderacao-antilinkhard').__limparCacheTeste()
+      await conf.definir(grupo,{ativo:true,acao:'adv'},dono); await hard.definir(grupo,true,dono)
+      for(let i=0;i<6;i++)await fluxo.enviar('texto')
+      await fluxo.enviar('https://example.com')
+      assert.equal(remocoes,1); assert.equal(fluxo.eventos.filter(e=>e==='delete').length,1); assert.equal(fluxo.eventos.filter(e=>e==='resposta').length,1)
+      await fluxo.enviar('continuação'); assert.equal(fluxo.eventos.filter(e=>e==='delete').length,1); assert.ok(!fluxo.eventos.includes('resposta'))
+    } finally { fluxo.sock.groupMetadata=meta; fluxo.sock.groupParticipantsUpdate=remover; await hard.definir(grupo,false,dono); await conf.definir(grupo,{ativo:false},dono); mod.__limparTeste() }
+  })
+  await teste('OFF: antiflood configuração bloqueia ADM e libera dono com prefixo dinâmico', async () => {
+    const conf = require('../dados/antiflood-config')
+    await estado.definirLigado(false)
+    await fluxo.enviar('/antiflood on','67890@lid'); assert.ok(!fluxo.eventos.includes('comando:antiflood')); assert.equal((await conf.obter(grupo)).ativo,false)
+    require('../prefixo').__definirPrefixoTeste('!')
+    try {
+      await fluxo.enviar('!antiflood on','12345@lid'); assert.ok(fluxo.eventos.includes('comando:antiflood')); assert.equal((await conf.obter(grupo)).ativo,true)
+      await fluxo.enviar('!antiflood off','12345@lid'); assert.equal((await conf.obter(grupo)).ativo,false)
     } finally { require('../prefixo').__definirPrefixoTeste('/') }
   })
   await teste('OFF mantém ranking, captura diária, cache e atualização AFK sem avisos', async () => {

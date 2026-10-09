@@ -190,6 +190,7 @@ async function main() {
       welcomeHabilitado: async () => false,
       antiApagadaHabilitada: async () => false,
       moderacaoFigurinhas: { processarLote: async () => new Set() },
+      moderacaoAntiflood: { processarLote: async () => new Set() },
       moderacaoAntilinkHard: { processarLote: async () => new Set() },
       temLinkBasico: require('../dados/deteccao-links').temLinkBasico,
       rankingRegistro: { registrarComNumeroReal: async () => {} },

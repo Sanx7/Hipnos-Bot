@@ -25,6 +25,11 @@ module.exports = {
 
 ════════════════════
 
+🌙 /antiflood on · off · status · config
+➥ Proteção por grupo: padrão desligado, 6 mensagens em 10s, ação adv.
+➥ /antiflood limite 6 10 · /antiflood acao apagar · adv · ban
+➥ ADM ou dono; cooldown de 30s, advertências no contador existente.
+
 👥 GESTÃO DE MEMBROS
 
 💤 /inativos [página]

@@ -65,6 +65,7 @@ const { tratarRevogacao } = require('./dados/reenvio-apagadas')
 const { antiApagadaHabilitada } = require('./configuracoes-grupo')
 const moderacaoFigurinhas = require('./dados/moderacao-figurinhas')
 const moderacaoAntilinkHard = require('./dados/moderacao-antilinkhard')
+const moderacaoAntiflood = require('./dados/moderacao-antiflood')
 const { temLinkBasico } = require('./dados/deteccao-links')
 
 // ⚙️ Configurações globais do bot
@@ -469,11 +470,12 @@ async function startBot() {
     }
   });
 
-  sock.ev.on('messages.upsert', async ({ messages }) => {
+  sock.ev.on('messages.upsert', async ({ messages, type }) => {
     try {
       // Moderação do lote inteiro, inclusive em OFF. Hard assume os links antes das demais regras.
       const linksTratados = await moderacaoAntilinkHard.processarLote(sock, messages)
-      const figurinhasTratadas = await moderacaoFigurinhas.processarLote(sock, messages.filter(msg => !linksTratados.has(`${msg?.key?.remoteJid}:${msg?.key?.id}`)))
+      const floodsTratados = await moderacaoAntiflood.processarLote(sock, messages, type, linksTratados)
+      const figurinhasTratadas = await moderacaoFigurinhas.processarLote(sock, messages.filter(msg => !linksTratados.has(`${msg?.key?.remoteJid}:${msg?.key?.id}`) && !floodsTratados.has(`${msg?.key?.remoteJid}:${msg?.key?.id}`)))
       const msg = messages[0]
 
       if (!msg?.message) return
@@ -520,7 +522,7 @@ async function startBot() {
       }
 
       // 🪐 GUARDIÕES DO LIMBO (MONITORES DE GRUPO)
-      if (linksTratados.has(`${jid}:${msg.key.id}`) || figurinhasTratadas.has(`${jid}:${msg.key.id}`)) return
+      if (linksTratados.has(`${jid}:${msg.key.id}`) || floodsTratados.has(`${jid}:${msg.key.id}`) || figurinhasTratadas.has(`${jid}:${msg.key.id}`)) return
       if (jid.endsWith('@g.us')) {
         const caminhoConfigs = path.join(__dirname, 'comandos', 'dados', 'antias.json');
         if (fs.existsSync(caminhoConfigs)) {
