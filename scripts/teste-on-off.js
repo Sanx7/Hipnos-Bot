@@ -171,6 +171,8 @@ async function main() {
     const mapaAfk = new Map()
     const mutados = new Map()
     const registro = new Map([['mute', { mutedUsers: mutados }]])
+    require('../dados/antilinkhard-config').__definirColecoesTeste({ config: require('./helpers/colecao-figurinhas-fake')(), eventos: require('./helpers/colecao-figurinhas-fake')(), travas: require('./helpers/colecao-figurinhas-fake')() })
+    require('../dados/moderacao-antilinkhard').__limparCacheTeste()
     // Mock apenas do download usado pelo comando real; demais módulos usam o Baileys real.
     const entradaBaileys = require.resolve('@whiskeysockets/baileys')
     const baileysReal = require('@whiskeysockets/baileys')
@@ -207,6 +209,8 @@ async function main() {
         return cmd.executar(...args)
       } })
     }
+    const antilinkhard = require('../comandos/admin/antilinkhard')
+    for (const nome of [antilinkhard.nome, ...antilinkhard.aliases]) registro.set(nome, { executar: async (...args) => { eventos.push('comando:antilinkhard'); return antilinkhard.executar(...args) } })
     registro.set('limpar-chat', { executar: async (...args) => {
       eventos.push('comando:limpar-chat')
       return limparChat.executar(...args)
@@ -271,6 +275,8 @@ async function main() {
       estadoBot: estado,
       respostaPrefixo: require('../dados/resposta-prefixo'),
       moderacaoFigurinhas,
+      moderacaoAntilinkHard: require('../dados/moderacao-antilinkhard'),
+      temLinkBasico: require('../dados/deteccao-links').temLinkBasico,
       console,
       path: require('node:path'),
       __dirname: require('node:path').dirname(require.resolve('../bot')),
@@ -659,6 +665,68 @@ async function main() {
     await fluxo.enviar('', `${comum}@s.whatsapp.net`, { audioMessage: { mimetype: 'audio/ogg' } })
     assert.ok(fluxo.eventos.includes('delete'))
     delete fluxo.protecoes.antiAudio
+  })
+  // Integração real: o hard recebe prioridade antes do antilink JSON e do OFF.
+  for (const [basico, hard] of [[true, false], [false, true], [true, true]]) {
+    await teste(`handler: antilink=${basico}, hard=${hard}, sem efeitos duplicados`, async () => {
+      const conf = require('../dados/antilinkhard-config'), mod = require('../dados/moderacao-antilinkhard')
+      conf.__definirColecoesTeste({ config: require('./helpers/colecao-figurinhas-fake')(), eventos: require('./helpers/colecao-figurinhas-fake')(), travas: require('./helpers/colecao-figurinhas-fake')() })
+      mod.__limparCacheTeste()
+      await conf.definir(grupo, hard, dono)
+      const originalMeta = fluxo.sock.groupMetadata, originalRemover = fluxo.sock.groupParticipantsUpdate
+      fluxo.sock.groupMetadata = async () => ({ participants: [
+        { id: '5511666660000@s.whatsapp.net', lid: '66666@lid', admin: 'admin' },
+        { id: `${comum}@s.whatsapp.net` }, { id: `${dono}@s.whatsapp.net` }
+      ] })
+      let remocoes = 0
+      fluxo.sock.groupParticipantsUpdate = async (_, ids) => { remocoes++; return ids.map(jid => ({ jid, status: '200' })) }
+      if (basico) fluxo.protecoes.antiLink = [grupo]; else delete fluxo.protecoes.antiLink
+      try {
+        await estado.definirLigado(false)
+        await fluxo.enviar('https://example.com', `${comum}@s.whatsapp.net`)
+        assert.equal(fluxo.eventos.filter(e => e === 'delete').length, 1)
+        assert.equal(remocoes, hard ? 1 : 0)
+        assert.equal(fluxo.eventos.filter(e => e === 'resposta').length, hard ? 1 : 0)
+        assert.ok(!fluxo.eventos.includes('jogo'))
+        if (basico && hard) {
+          await conf.definir(grupo, false, dono)
+          await fluxo.enviar('https://example.com', `${comum}@s.whatsapp.net`)
+          assert.equal(fluxo.eventos.filter(e => e === 'delete').length, 1)
+          assert.equal(remocoes, 1)
+          assert.deepEqual(fluxo.protecoes.antiLink, [grupo])
+        }
+        if (basico && !hard) {
+          for (const conteudo of [{ conversation: 'example.com' }, { imageMessage: { caption: 'https://example.com' } }]) {
+            await fluxo.enviar('', `${comum}@s.whatsapp.net`, conteudo)
+            assert.ok(!fluxo.eventos.includes('delete'), 'antilink básico preserva escopo original')
+          }
+        }
+      } finally {
+        fluxo.sock.groupMetadata = originalMeta; fluxo.sock.groupParticipantsUpdate = originalRemover
+        delete fluxo.protecoes.antiLink; await conf.definir(grupo, false, dono)
+      }
+    })
+  }
+  await teste('OFF: comando hard e aliases bloqueiam ADM e autorizam dono; prefixo dinâmico', async () => {
+    const conf = require('../dados/antilinkhard-config')
+    await estado.definirLigado(false)
+    for (const nome of ['antilinkhard', 'antilink-hard', 'antilinkban']) {
+      await fluxo.enviar(`/${nome} on`, '67890@lid')
+      assert.ok(!fluxo.eventos.includes('comando:antilinkhard'))
+      assert.equal(await conf.obter(grupo), false)
+      await fluxo.enviar(`/${nome} on`, '12345@lid')
+      assert.ok(fluxo.eventos.includes('comando:antilinkhard'))
+      assert.equal(await conf.obter(grupo), true)
+      await fluxo.enviar(`/${nome} off`, '12345@lid')
+    }
+    require('../prefixo').__definirPrefixoTeste('!')
+    try {
+      await fluxo.enviar('!antilinkhard on', '12345@lid')
+      assert.equal(await conf.obter(grupo), true)
+      await fluxo.enviar('!antilinkhard status', '12345@lid')
+      assert.ok(fluxo.eventos.includes('comando:antilinkhard'))
+      await fluxo.enviar('!antilinkhard off', '12345@lid')
+    } finally { require('../prefixo').__definirPrefixoTeste('/') }
   })
   await teste('OFF mantém ranking, captura diária, cache e atualização AFK sem avisos', async () => {
     fluxo.mapaAfk.set(comum, { desde: Date.now() - 60000 })

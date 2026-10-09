@@ -66,14 +66,7 @@ async function banirDoGrupo(sock, jid, alvoJid, numeroParaBlacklist, opcoes = {}
   const alvoLimpo = alvo.numero;
   // Automações podem exigir prova recente de membro/ADM. O status retornado
   // pelo WhatsApp sempre é verificado antes da blacklist e do arquivamento.
-  if (opcoes.validar) await opcoes.validar();
-  if (opcoes.antesRemover) await opcoes.antesRemover();
-  const resultado = await sock.groupParticipantsUpdate(jid, [alvoJid], 'remove');
-  if (!resultado?.length || resultado.length !== 1 || resultado.some(r => String(r.status) !== '200')) {
-    const erro = new Error('Remoção recusada ou não confirmada pelo WhatsApp');
-    erro.remocaoRecusada = Boolean(resultado?.length && resultado.every(r => r.status != null && String(r.status) !== '200'));
-    throw erro;
-  }
+  await removerDoGrupoConfirmado(sock, jid, alvoJid, opcoes);
   // Somente uma remoção aceita pode gerar blacklist. Não migra o JSON existente.
   try {
     if (opcoes.aoConfirmar) await opcoes.aoConfirmar();
@@ -82,11 +75,25 @@ async function banirDoGrupo(sock, jid, alvoJid, numeroParaBlacklist, opcoes = {}
   return alvoLimpo;
 }
 
+async function removerDoGrupoConfirmado(sock, jid, alvoJid, opcoes = {}) {
+  if (await ehProprioBot(sock, jid, alvoJid)) throw new Error(respostaAutoexpulsao());
+  if (opcoes.validar) await opcoes.validar();
+  if (opcoes.antesRemover) await opcoes.antesRemover();
+  const resultado = await sock.groupParticipantsUpdate(jid, [alvoJid], 'remove');
+  if (!resultado?.length || resultado.length !== 1 || resultado.some(r => String(r.status) !== '200')) {
+    const erro = new Error('Remoção recusada ou não confirmada pelo WhatsApp');
+    erro.remocaoRecusada = Boolean(resultado?.length && resultado.every(r => r.status != null && String(r.status) !== '200'));
+    throw erro;
+  }
+  return resultado;
+}
+
 module.exports = {
   nome: 'ban',
   // ♻️ Helpers exportados: o /adv reusa `banirDoGrupo` no ban automático
   // das 3 advertências (o loader ignora propriedades extras).
   banirDoGrupo,
+  removerDoGrupoConfirmado,
   adicionarNaBlacklist,
   __definirGravacaoBlacklistTeste,
   async executar(sock, jid, msg, text) {

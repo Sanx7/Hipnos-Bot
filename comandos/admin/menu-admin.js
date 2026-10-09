@@ -146,6 +146,9 @@ module.exports = {
 📅 /antievento (1 ou 0)
 ➥ Cancela e apaga convites de eventos.
 
+⚖️ /antilinkhard on • /antilinkhard off • /antilinkhard status
+➥ Apaga links e expulsa membros comuns após confirmação (ADM ou dono). Independente de /antilink; donos, administradores e Hipnos protegidos.
+
 🔗 /antilink (1 ou 0)
 ➥ Destrói links externos enviados.
 

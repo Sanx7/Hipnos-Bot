@@ -64,6 +64,8 @@ const cacheMensagens = require('./dados/cache-mensagens')
 const { tratarRevogacao } = require('./dados/reenvio-apagadas')
 const { antiApagadaHabilitada } = require('./configuracoes-grupo')
 const moderacaoFigurinhas = require('./dados/moderacao-figurinhas')
+const moderacaoAntilinkHard = require('./dados/moderacao-antilinkhard')
+const { temLinkBasico } = require('./dados/deteccao-links')
 
 // ⚙️ Configurações globais do bot
 // - OWNER_NUMBERS: lista de donos SEMPRE pode usar os comandos (mesmo no modo restrito)
@@ -469,8 +471,9 @@ async function startBot() {
 
   sock.ev.on('messages.upsert', async ({ messages }) => {
     try {
-      // Todos os stickers do lote, inclusive em OFF e além de messages[0].
-      const figurinhasTratadas = await moderacaoFigurinhas.processarLote(sock, messages)
+      // Moderação do lote inteiro, inclusive em OFF. Hard assume os links antes das demais regras.
+      const linksTratados = await moderacaoAntilinkHard.processarLote(sock, messages)
+      const figurinhasTratadas = await moderacaoFigurinhas.processarLote(sock, messages.filter(msg => !linksTratados.has(`${msg?.key?.remoteJid}:${msg?.key?.id}`)))
       const msg = messages[0]
 
       if (!msg?.message) return
@@ -517,7 +520,7 @@ async function startBot() {
       }
 
       // 🪐 GUARDIÕES DO LIMBO (MONITORES DE GRUPO)
-      if (figurinhasTratadas.has(`${jid}:${msg.key.id}`)) return
+      if (linksTratados.has(`${jid}:${msg.key.id}`) || figurinhasTratadas.has(`${jid}:${msg.key.id}`)) return
       if (jid.endsWith('@g.us')) {
         const caminhoConfigs = path.join(__dirname, 'comandos', 'dados', 'antias.json');
         if (fs.existsSync(caminhoConfigs)) {
@@ -549,7 +552,7 @@ async function startBot() {
        
           if (configAtiva(configs, 'antiLink', 'antilink', jid)) {
             const conteudoTexto = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
-            const temLink = /(https?:\/\/[^\s]+|www\.[^\s]+|wa\.me\/[^\s]+)/i.test(conteudoTexto);
+            const temLink = temLinkBasico(conteudoTexto);
             
             if (temLink) {
               await sock.sendMessage(jid, { delete: { remoteJid: jid, fromMe: false, id: msg.key.id, participant: sender } });

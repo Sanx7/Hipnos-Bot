@@ -161,7 +161,7 @@ async function main() {
     for (let i = 0; i < 3; i++) await mod.processar(c.sock, c.msg())
     assert.equal(c.advs.docs.filter(d => d.ativa).length, 3)
     assert.ok(c.envios.every(e => !e.text?.includes('BANIDO POR')))
-    assert.match(c.envios.at(-1).text, /WhatsApp recusou/)
+    assert.match(c.envios.at(-1).text, /expulsão não foi confirmada/)
   })
   await teste('promoção ao ler motivos da terceira advertência impede blacklist e expulsão', async c => {
     await regras.cadastrar(G, hash, 'adv', ADM)

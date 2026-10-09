@@ -71,7 +71,7 @@ const comunicado = require('../comandos/menu-dono/comunicado')
 for (const nome of [comunicado.nome, ...comunicado.aliases]) {
   if (comandos.get(nome) !== comunicado) process.exitCode = 1
 }
-for (const cmd of [require('../comandos/menu-brincadeiras/enquete')[0], require('../comandos/admin/enquete-admin')[0], require('../comandos/menu-brincadeiras/eununca'), require('../comandos/admin/totag')]) {
+for (const cmd of [require('../comandos/menu-brincadeiras/enquete')[0], require('../comandos/admin/enquete-admin')[0], require('../comandos/menu-brincadeiras/eununca'), require('../comandos/admin/totag'), require('../comandos/admin/antilinkhard')]) {
   for (const nome of [cmd.nome, ...cmd.aliases]) {
     if (comandos.get(nome) !== cmd) process.exitCode = 1
   }
