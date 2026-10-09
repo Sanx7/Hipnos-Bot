@@ -22,14 +22,14 @@
 // Este arquivo exporta também os helpers de parse usados pelos comandos
 // /advs e /remadv (o loader ignora propriedades extras, como no /ban).
 
-const { ehDonoDoBot, limparNumero } = require('../../config')
-const { resolverNumeroAlvo } = require('../../lid')
+const { identificar, autorizado, extrairAlvo } = require('../../dados/advertencias-contexto')
 const {
   criarAdvertencia,
   listarAdvertencias,
   arquivarAdvertencias,
   formatarData,
-  LIMITE_ADVERTENCIAS
+  LIMITE_ADVERTENCIAS, obterLimiteAdvertencias, comAdvertenciasSerializadas,
+  registrarRemocaoConfirmada, reterOperacao, concluirOperacao
 } = require('../../advertencias')
 const { banirDoGrupo } = require('./ban')
 const { ehProprioBot, respostaAutoexpulsao } = require('../../dados/protecao-bot')
@@ -73,11 +73,6 @@ const AVISO_ERRO_BANCO =
 // ─── 🎯 Parse do alvo e do motivo ───
 
 // Alvo = menção (@) ou a mensagem respondida (reply). null se não houver.
-function extrairAlvo (msg) {
-  const contexto = msg?.message?.extendedTextMessage?.contextInfo
-  return contexto?.mentionedJid?.[0] || contexto?.participant || null
-}
-
 // Motivo = o texto depois do comando, sem as menções e sem o número do alvo
 // (o WhatsApp escreve "@5511999999999" no corpo da mensagem, e isso não faz
 // parte da justificativa). Funciona tanto com menção quanto com reply.
@@ -97,16 +92,14 @@ function extrairMotivo (text, alvoBruto) {
 
 // 🔎 Resolve o JID (número real ou LID) para o NÚMERO real via lid.js.
 // Devolve null quando não foi possível — o chamador NÃO deve gravar o LID.
-async function resolverNumeroReal (participants, jidBruto) {
-  const { numero, via } = await resolverNumeroAlvo(participants, jidBruto)
-  if (!numero || !via) return null
-  return numero
+async function resolverNumeroReal(participants, jidBruto) {
+  return (await identificar(participants, jidBruto)).numero
 }
 
 // ─── ✍️ Mensagens da rodada de advertência ───
 
-function montarConfirmacao ({ alvoNumero, motivo, aplicadoPor, total, data }) {
-  const restantes = Math.max(0, LIMITE_ADVERTENCIAS - total)
+function montarConfirmacao ({ alvoNumero, motivo, aplicadoPor, total, data, limite = LIMITE_ADVERTENCIAS }) {
+  const restantes = Math.max(0, limite - total)
   const aviso = restantes > 0
     ? `⚠️ Faltam *${restantes}* advertência${restantes === 1 ? '' : 's'} para o ban automático.`
     : '☠️ Limite atingido!'
@@ -116,18 +109,18 @@ function montarConfirmacao ({ alvoNumero, motivo, aplicadoPor, total, data }) {
     `📝 Motivo: ${motivo}\n` +
     `🛡️ Aplicada por: @${aplicadoPor}\n` +
     `🗓️ Data: ${formatarData(data)}\n` +
-    `📊 Advertências ativas: *${total}/${LIMITE_ADVERTENCIAS}*\n\n` +
+    `📊 Advertências ativas: *${total}/${limite}*\n\n` +
     aviso
 }
 
-function montarBanimento ({ alvoNumero, motivos, aplicadoPor }) {
+function montarBanimento ({ alvoNumero, motivos, aplicadoPor, limite = LIMITE_ADVERTENCIAS }) {
   // Ordem cronológica (1ª → 3ª): listarAdvertencias devolve mais-recente-primeiro.
   const lista = [...motivos].reverse()
     .map((m, i) => `${i + 1}. ${m.motivo}\n   ↳ por @${m.aplicado_por} em ${formatarData(m.data)}`)
     .join('\n')
 
-  return '☠️ *BANIDO POR ' + LIMITE_ADVERTENCIAS + ' ADVERTÊNCIAS* ☠️\n\n' +
-    `👤 @${alvoNumero} atingiu o limite e foi lançado na blacklist.\n\n` +
+  return '☠️ *BANIDO POR ' + limite + ' ADVERTÊNCIAS* ☠️\n\n' +
+    `👤 @${alvoNumero} atingiu o limite e foi removido após confirmação do WhatsApp.\n\n` +
     '📜 *Motivos acumulados:*\n' + lista + '\n\n' +
     `🗓️ Banido em ${formatarData(Date.now())} por @${aplicadoPor}.`
 }
@@ -135,16 +128,16 @@ function montarBanimento ({ alvoNumero, motivos, aplicadoPor }) {
 // ⚔️ Aviso quando o limite estourou mas o WhatsApp recusou a expulsão
 // (normalmente porque o bot não é admin). As advertências NÃO são arquivadas
 // nesse caso — a punição fica pendente para o /ban manual.
-function montarFalhaBan ({ alvoNumero, motivos, aplicadoPor }) {
+function montarFalhaBan ({ alvoNumero, motivos, aplicadoPor, limite = LIMITE_ADVERTENCIAS }) {
   const lista = motivos
     .map((m, i) => `${i + 1}. ${m.motivo}\n   ↳ por @${m.aplicado_por} em ${formatarData(m.data)}`)
     .join('\n')
 
   return '⚠️ *LIMITE DE ADVERTÊNCIAS ATINGIDO* ⚠️\n\n' +
-    `👤 @${alvoNumero} chegou a *${LIMITE_ADVERTENCIAS}* advertências, mas o WhatsApp recusou a expulsão ` +
+    `👤 @${alvoNumero} chegou a *${limite}* advertências, mas o WhatsApp recusou a expulsão ` +
     '(provavelmente eu não sou administrador do grupo).\n\n' +
     '📜 *Motivos acumulados:*\n' + lista + '\n\n' +
-    '⚔️ Remova manualmente com `/ban @membro` — as advertências seguem ativas até isso acontecer.\n' +
+    '⚔️ Remova manualmente com `/ban @membro` — as advertências seguem ativas; consulte /historicoadv antes de nova ação.\n' +
     `🗓️ Aviso gerado por @${aplicadoPor} em ${formatarData(Date.now())}.`
 }
 
@@ -153,39 +146,40 @@ function montarFalhaBan ({ alvoNumero, motivos, aplicadoPor }) {
 // ARQUIVA as advertências do alvo neste grupo (histórico preservado, contagem
 // zerada). O sucesso/falha do WhatsApp decide entre a mensagem de banimento e
 // o aviso de falha acima.
-async function aplicarBanAutomatico (sock, jid, msg, alvoBruto, alvoReal, autorReal, opcoesBan) {
-  // 📜 Histórico lido ANTES de arquivar (é ele que vai na mensagem)
-  let motivos = []
-  try {
-    motivos = await listarAdvertencias(alvoReal, jid)
-  } catch (erro) {
-    console.error('[adv] ⚠️ não consegui listar os motivos do ban:', erro?.message || erro)
-  }
-  if (!motivos.length) motivos = [{ motivo: 'Sem motivo registrado', aplicado_por: autorReal, data: Date.now() }]
-
-  let banido = true
-  try {
-    console.log(`[adv] 🚨 ${alvoReal} atingiu ${LIMITE_ADVERTENCIAS} advertências em ${jid} — ban automático`)
-    await banirDoGrupo(sock, jid, alvoBruto, alvoReal, opcoesBan)
-  } catch (erro) {
-    banido = false
-    console.error('[adv] 💥 o WhatsApp recusou a expulsão automática:', erro?.message || erro)
-  }
-
-  if (banido) {
+async function aplicarBanAutomatico(sock, jid, msg, alvoBruto, alvoReal, autorReal, opcoesBan = {}) {
+  return comAdvertenciasSerializadas(alvoReal, jid, async () => {
+    const limite = opcoesBan.limite ?? await obterLimiteAdvertencias(jid)
+    const motivos = await listarAdvertencias(alvoReal, jid)
+    if (motivos.length < limite) return
+    let confirmado = false, pendencia = ''
     try {
-      const total = await arquivarAdvertencias(alvoReal, jid)
-      console.log(`[adv] 📦 ${total} advertência(s) de ${alvoReal} arquivadas após o ban`)
+      await banirDoGrupo(sock, jid, alvoBruto, alvoReal, {
+        ...opcoesBan,
+        antesRemover: async () => { reterOperacao(); await opcoesBan.antesRemover?.() },
+        aoConfirmar: async () => { await registrarRemocaoConfirmada(alvoReal, jid); await opcoesBan.aoConfirmar?.() }
+      })
+      confirmado = true
     } catch (erro) {
-      console.error('[adv] ⚠️ ban feito, mas falhou ao arquivar as advertências:', erro?.message || erro)
+      confirmado = Boolean(erro.remocaoConfirmada)
+      if (erro.remocaoRecusada) concluirOperacao()
+      if (confirmado) pendencia = '\n⚠️ Remoção confirmada, mas há uma falha no registro da blacklist/operação. Solicite revisão ao dono.'
+      else console.error('[adv] remoção não confirmada:', erro.message)
     }
-  }
-
-  const texto = banido
-    ? montarBanimento({ alvoNumero: alvoReal, motivos, aplicadoPor: autorReal })
-    : montarFalhaBan({ alvoNumero: alvoReal, motivos, aplicadoPor: autorReal })
-
-  return await sock.sendMessage(jid, { text: texto, mentions: [alvoBruto] }, { quoted: msg })
+    if (confirmado) {
+      try {
+        await arquivarAdvertencias(alvoReal, jid, autorReal)
+        // A falha ao gravar confirmação/blacklist mantém a reserva para revisão.
+        if (!pendencia) concluirOperacao()
+      } catch (erro) {
+        reterOperacao()
+        pendencia += '\n⚠️ Não consegui arquivar os registros. A operação ficará bloqueada para evitar uma expulsão repetida.'
+      }
+    }
+    const texto = confirmado
+      ? montarBanimento({ alvoNumero: alvoReal, motivos, aplicadoPor: autorReal, limite })
+      : montarFalhaBan({ alvoNumero: alvoReal, motivos, aplicadoPor: autorReal, limite })
+    return sock.sendMessage(jid, { text: texto + pendencia, mentions: [alvoBruto] }, { quoted: msg })
+  })
 }
 
 // ─── 📤 Envio padronizado (sempre citando a mensagem do comando) ───
@@ -222,8 +216,7 @@ module.exports = {
       const participantes = metadados?.participants || []
 
       // 3️⃣ Permissão: SOMENTE admin (mesmo critério do /ban)
-      const dadosSender = participantes.find((p) => p.id === sender)
-      if (!(isAdmin(dadosSender) || metadados?.owner === sender)) {
+      if (!await autorizado(metadados, sender)) {
         return await enviar(sock, jid, msg, AVISO_SEM_PERMISSAO)
       }
 
@@ -235,13 +228,16 @@ module.exports = {
       }
 
       // 5️⃣ Não advertir a si mesmo
-      if (limparNumero(alvoBruto) === limparNumero(sender)) {
+      const alvo = await identificar(participantes, alvoBruto)
+      const autor = await identificar(participantes, sender)
+      if (!alvo.numero || !alvo.participante || !autor.numero) return await enviar(sock, jid, msg, AVISO_LID)
+      if (alvo.numero === autor.numero) {
         return await enviar(sock, jid, msg, AVISO_AUTO_ADV)
       }
 
       // 6️⃣ 👑 Proteção do dono do bot (PROOF-LID — mesma do /ban e /kick).
       // Nada é gravado no Mongo antes desta checagem.
-      if (ehDonoDoBot(participantes, alvoBruto)) {
+      if (alvo.dono) {
         return await enviar(sock, jid, msg, AVISO_DONO)
       }
 
@@ -253,12 +249,14 @@ module.exports = {
       const alvoReal = await resolverNumeroReal(participantes, alvoBruto)
       if (!alvoReal) return await enviar(sock, jid, msg, AVISO_LID)
 
-      let autorReal = await resolverNumeroReal(participantes, sender)
-      if (!autorReal) {
-        console.log('[adv] 🪪 número de quem aplicou não resolvido — gravando "desconhecido"')
-        autorReal = 'desconhecido'
-      }
+      const autorReal = autor.numero
 
+      return await comAdvertenciasSerializadas(alvoReal, jid, async () => {
+      const recentes = await sock.groupMetadata(jid)
+      const atual = await identificar(recentes.participants || [], alvoBruto)
+      if (!atual.participante || atual.numero !== alvoReal || atual.dono || !await autorizado(recentes, sender)) {
+        return enviar(sock, jid, msg, '🔒 O alvo ou a permissão mudou. Nenhuma advertência foi aplicada.')
+      }
       // 9️⃣ Gravação no Mongo
       let resultado = null
       try {
@@ -274,21 +272,31 @@ module.exports = {
       }
       if (!resultado) return await enviar(sock, jid, msg, AVISO_ERRO_BANCO)
 
-      const { total, doc } = resultado
-      console.log(`[adv] ⚠️ ${alvoReal} advertido em ${jid} (${total}/${LIMITE_ADVERTENCIAS}) por ${autorReal}`)
+      const { total, doc, limite } = resultado
+      console.log(`[adv] ⚠️ ${alvoReal} advertido em ${jid} (${total}/${limite}) por ${autorReal}`)
 
       // 🔟 Limite atingido → ban automático (senão, confirmação normal)
-      if (total >= LIMITE_ADVERTENCIAS) {
-        return await aplicarBanAutomatico(sock, jid, msg, alvoBruto, alvoReal, autorReal)
+      if (total >= limite) {
+        return await aplicarBanAutomatico(sock, jid, msg, alvo.participante.id, alvoReal, autorReal, {
+          limite,
+          validar: async () => {
+            const recentes = await sock.groupMetadata(jid)
+            const atual = await identificar(recentes.participants || [], alvo.participante.id)
+            if (!atual.participante || atual.numero !== alvoReal || atual.dono) throw new Error('Alvo protegido ou ausente')
+            if (!await autorizado(recentes, sender)) throw new Error('Autor perdeu a permissão administrativa')
+          }
+        })
       }
 
       return await sock.sendMessage(jid, {
-        text: montarConfirmacao({ alvoNumero: alvoReal, motivo, aplicadoPor: autorReal, total, data: doc.data }),
+        text: montarConfirmacao({ alvoNumero: alvoReal, motivo, aplicadoPor: autorReal, total, data: doc.data, limite }),
         mentions: [alvoBruto, sender]
       }, { quoted: msg })
+      })
 
     } catch (err) {
-      console.error('Erro no comando adv:', err)
+      console.error('Erro no comando adv:', err.message)
+      await enviar(sock, jid, msg, '🌫️ Não consegui concluir a operação. Os registros foram preservados; tente consultar /historicoadv.').catch(() => {})
     }
   }
 }

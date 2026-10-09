@@ -4,6 +4,7 @@ const path = require('path');
 // Configuração global do bot (helper de dono — PROOF-LID)
 const { ehDonoDoBot, limparNumero } = require('../../config');
 const { ehProprioBot, respostaAutoexpulsao } = require('../../dados/protecao-bot');
+const { identificar, autorizado, extrairAlvo } = require('../../dados/advertencias-contexto');
 
 // Caminho da lista negra (comandos/dados/blacklist.json)
 const BANCO_BLACKLIST = path.join(__dirname, '..', 'dados', 'blacklist.json');
@@ -12,7 +13,7 @@ function isAdmin(p) {
   return p?.admin === 'admin' || p?.admin === 'superadmin';
 }
 
-// Adiciona o número na lista negra antes de expulsar
+// Adiciona o número na lista negra após confirmar a expulsão
 // (exportada: o /adv REUSA esta gravação no ban automático das 3 advertências).
 function adicionarNaBlacklist(numero) {
   try {
@@ -28,6 +29,7 @@ function adicionarNaBlacklist(numero) {
     }
   } catch (erro) {
     console.error('Erro ao salvar blacklist no ban:', erro);
+    throw erro;
   }
 }
 
@@ -40,7 +42,7 @@ function __definirGravacaoBlacklistTeste(fn) {
   gravarNaBlacklist = typeof fn === 'function' ? fn : adicionarNaBlacklist;
 }
 
-// ☠️ PUNIÇÃO MÁXIMA reutilizável: grava na blacklist e expulsa do grupo.
+// ☠️ PUNIÇÃO MÁXIMA reutilizável: confirma a expulsão e então grava blacklist.
 // Extraída do executar() para que o /adv aplique EXATAMENTE a mesma punição
 // no ban automático das 3 advertências (nada de lógica duplicada).
 // `numeroParaBlacklist` (opcional) permite gravar na lista negra o NÚMERO
@@ -52,15 +54,27 @@ async function banirDoGrupo(sock, jid, alvoJid, numeroParaBlacklist, opcoes = {}
   if (await ehProprioBot(sock, jid, alvoJid)) {
     throw new Error(respostaAutoexpulsao());
   }
-  const alvoLimpo = limparNumero(numeroParaBlacklist || alvoJid);
+  const participantes = (await sock.groupMetadata(jid))?.participants || [];
+  const alvo = await identificar(participantes, alvoJid);
+  if (!alvo.numero || alvo.dono || (numeroParaBlacklist && limparNumero(numeroParaBlacklist) !== alvo.numero)) {
+    throw new Error('Alvo protegido ou identidade não comprovada');
+  }
+  const alvoLimpo = alvo.numero;
   // Automações podem exigir prova recente de membro/ADM e validar o status
   // retornado pelo WhatsApp, antes de arquivar advertências como banidas.
   if (opcoes.validar) await opcoes.validar();
-  gravarNaBlacklist(alvoLimpo);
+  if (opcoes.antesRemover) await opcoes.antesRemover();
   const resultado = await sock.groupParticipantsUpdate(jid, [alvoJid], 'remove');
-  if (opcoes.verificarStatus && (!resultado?.length || resultado.some(r => String(r.status) !== '200'))) {
-    throw new Error('Remoção recusada pelo WhatsApp');
+  if (!resultado?.length || resultado.length !== 1 || resultado.some(r => String(r.status) !== '200')) {
+    const erro = new Error('Remoção recusada ou não confirmada pelo WhatsApp');
+    erro.remocaoRecusada = Boolean(resultado?.length && resultado.every(r => r.status != null && String(r.status) !== '200'));
+    throw erro;
   }
+  // Somente uma remoção aceita pode gerar blacklist. Não migra o JSON existente.
+  try {
+    if (opcoes.aoConfirmar) await opcoes.aoConfirmar();
+    gravarNaBlacklist(alvoLimpo);
+  } catch (erro) { erro.remocaoConfirmada = true; throw erro; }
   return alvoLimpo;
 }
 
@@ -79,8 +93,7 @@ module.exports = {
       }
 
       const sender = msg.key.participant || msg.key.remoteJid;
-      const contextInfo = msg.message.extendedTextMessage?.contextInfo;
-      let alvo = contextInfo?.mentionedJid?.[0] || contextInfo?.participant;
+      const alvo = extrairAlvo(msg);
 
       if (!alvo) {
         return await sock.sendMessage(jid, { text: 'Você precisa marcar alguém com @ ou responder à mensagem da pessoa para eu chutar daqui! 🥱' }, { quoted: msg });
@@ -91,8 +104,7 @@ module.exports = {
       if (await ehProprioBot(sock, jid, alvo, metadados.participants)) {
         return await sock.sendMessage(jid, { text: respostaAutoexpulsao() }, { quoted: msg });
       }
-      const dadosSender = metadados.participants.find(p => p.id === sender);
-      const ehAdmin = isAdmin(dadosSender) || metadados.owner === sender;
+      const ehAdmin = await autorizado(metadados, sender);
 
       if (!ehAdmin) {
         return await sock.sendMessage(jid, { text: '❌ Apenas administradores podem usar este comando.' }, { quoted: msg });
@@ -102,16 +114,17 @@ module.exports = {
       // A checagem é sobre QUEM É O ALVO — vale para admin, outro dono ou
       // até o próprio bot processando o comando por engano. Nada é gravado
       // na blacklist nem removido antes desta verificação.
-      if (ehDonoDoBot(metadados.participants, alvo)) {
+      if ((await identificar(metadados.participants, alvo)).dono) {
         return await sock.sendMessage(jid, { text: '⛔ Não é possível executar essa ação contra o dono do bot.' }, { quoted: msg });
       }
 
-      // Adiciona o alvo à blacklist antes de expulsar + execução do banimento
+      // Confirma a remoção antes de adicionar o alvo à blacklist
       // (mesma função usada pelo /adv no ban automático das 3 advertências)
       try {
         await banirDoGrupo(sock, jid, alvo);
         return await sock.sendMessage(jid, { text: 'Pronto. Mais um insolente removido do recinto e lançado na blacklist. 🥱' });
       } catch (wsError) {
+        if (wsError.remocaoConfirmada) return await sock.sendMessage(jid, { text: '⚠️ Participante removido, mas não consegui concluir o registro na blacklist. Solicite revisão ao dono.' }, { quoted: msg });
         // Se falhar, significa que o bot não é admin no grupo real
         return await sock.sendMessage(jid, { text: 'Eu tentei chutar ele, mas o WhatsApp não deixou. Me dê administrador de verdade primeiro. 🥱' }, { quoted: msg });
       }

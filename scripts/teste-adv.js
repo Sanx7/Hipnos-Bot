@@ -51,7 +51,6 @@ function montarParticipantes () {
     { id: ADMIN2, admin: 'admin', phoneNumber: undefined },
     { id: COMUM, admin: null, phoneNumber: undefined },
     { id: MEMBRO, admin: null, phoneNumber: undefined },
-    { id: ALVO, admin: null, phoneNumber: undefined },
     { id: DONO_JID, admin: 'admin', phoneNumber: undefined },
     { id: LID_ALVO, admin: null, phoneNumber: ALVO }
   ]
@@ -197,7 +196,7 @@ function criarSock (opcoes = {}) {
     async groupParticipantsUpdate (jid, alvos, acao) {
       if (opcoes.expulsaoErro) throw new Error('o bot não é admin')
       expulsoes.push({ jid, alvos, acao })
-      return []
+      return alvos.map(jid => ({ jid, status: "200" }))
     }
   }
 }
@@ -231,6 +230,7 @@ async function aplicarAdv (sock, motivo, { autor = ADMIN, alvo = ALVO } = {}) {
 function limpar () {
   colecao.documentos.length = 0
   blacklistGravada.length = 0
+  dadosAdv.__definirColecaoTeste(colecao)
 }
 
 // ============================================
@@ -338,7 +338,7 @@ async function principal () {
 
     // ☠️ Punição reusada do /ban
     igual(sock.expulsoes.length, 1, 'deve expulsar uma vez')
-    igual(sock.expulsoes[0].alvos[0], ALVO, 'expulsa o JID do alvo')
+    igual(sock.expulsoes[0].alvos[0], LID_ALVO, 'expulsa o ID canônico do participante')
     igual(sock.expulsoes[0].acao, 'remove', 'ação de expulsão')
     igual(blacklistGravada.length, 1, 'grava uma vez na blacklist')
     igual(blacklistGravada[0], ALVO_NUMERO, 'blacklist com o número real (sem @)')
@@ -380,8 +380,8 @@ async function principal () {
     contem(texto, 'LIMITE DE ADVERTÊNCIAS ATINGIDO', 'aviso de falha na expulsão')
     contem(texto, '/ban @membro', 'sugere o ban manual')
     igual(ativasDe(ALVO_NUMERO).length, 3, 'as 3 continuam ATIVAS até o ban manual')
-    // Igual ao /ban: a blacklist é gravada antes da tentativa de remoção
-    igual(blacklistGravada.length, 1, 'blacklist gravada antes da expulsão')
+    // Uma tentativa recusada não representa banimento confirmado.
+    igual(blacklistGravada.length, 0, 'falha não gera blacklist')
   })
 
   // ─────────────────────────────────────────────────────────

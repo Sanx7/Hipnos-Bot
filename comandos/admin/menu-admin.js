@@ -40,13 +40,19 @@ module.exports = {
 ➥ Enquete nativa de decisão: ADM ou dono abre; 2 a 12 opções e um voto por pessoa. Apuração por 2 min; /encerrar-enquete fecha antes. Para banir por votação: /enquete-admin-ban @membro | sim | não — se o "sim" ganhar, o bot bane sozinho (nunca um dono do bot; empate não decide).
 
 ⚠️ /adv @membro motivo
-➥ Adverte um mortal com justificativa. Na 3ª advertência ativa ele é expulso e jogado na blacklist automaticamente. (Também: /advertir e /warn.)
+➥ Adverte um mortal com justificativa. Ao atingir o limite do grupo (padrão 3), tenta a expulsão; blacklist somente após confirmação. (Também: /advertir e /warn.)
 
 📜 /advs @membro
 ➥ Mostra as advertências ativas do mortal neste grupo: motivo, quem aplicou e quando. (Também: /advertencias.)
 
 🕊️ /remadv @membro
 ➥ Perdoa a advertência mais recente do mortal neste grupo. (Também: /removeradv.)
+
+⚖️ /historicoadv @membro [página]
+➥ Histórico de advertências ativas, perdoadas e arquivadas (ADM ou dono).
+
+📦 /zeraradv @membro
+➥ Arquiva as advertências ativas, preservando responsáveis e datas (ADM ou dono).
 
 👑 /promover @membro
 ➥ Eleva um mortal à administração.
@@ -122,7 +128,7 @@ module.exports = {
 🌑 FIGURINHAS DO LIMBO (ADM ou dono)
 ➥ Responda à figurinha para gravar uma única regra por grupo:
 ☠️ /figban — remove quem reenviar (protege ADM e dono).
-⚠️ /figadv — usa as advertências existentes, com o limite de 3.
+⚠️ /figadv — usa as advertências existentes e o limite configurado do grupo.
 🗑️ /figdel — solicita apenas a exclusão da figurinha.
 🕊️ /delfigban · /delfigadv · /delfigdel — removem a regra correspondente por reply.
 📜 /figlistanegra [página] — lista os hashes e ações deste grupo.

@@ -18,12 +18,12 @@
 // Reusa os helpers de parse do /adv (isAdmin/extrairAlvo/resolverNumeroReal)
 // e a camada de dados advertencias.js.
 
-const { limparNumero } = require('../../config')
+const { autorizado, identificar } = require('../../dados/advertencias-contexto')
 const {
   listarAdvertencias,
   removerUltimaAdvertencia,
   formatarData,
-  LIMITE_ADVERTENCIAS
+  LIMITE_ADVERTENCIAS, obterLimiteAdvertencias, comAdvertenciasSerializadas
 } = require('../../advertencias')
 const { isAdmin, extrairAlvo, resolverNumeroReal } = require('./adv')
 
@@ -45,8 +45,8 @@ const AVISO_ERRO_BANCO =
   'Tente novamente em instantes.'
 
 // ✍️ Confirmação do perdão (mostra o que foi removido e o saldo restante)
-function montarPerdao ({ alvoNumero, removida, total }) {
-  const restantes = Math.max(0, LIMITE_ADVERTENCIAS - total)
+function montarPerdao ({ alvoNumero, removida, total, limite = LIMITE_ADVERTENCIAS }) {
+  const restantes = Math.max(0, limite - total)
   const aviso = restantes > 0
     ? `⚠️ Faltam *${restantes}* advertência${restantes === 1 ? '' : 's'} para o ban automático.`
     : '☠️ Limite atingido!'
@@ -56,7 +56,7 @@ function montarPerdao ({ alvoNumero, removida, total }) {
     `📝 Motivo perdoado: ${removida.motivo}\n` +
     `🛡️ Aplicada por: @${removida.aplicado_por}\n` +
     `🗓️ Data: ${formatarData(removida.data)}\n` +
-    `📊 Advertências ativas: *${total}/${LIMITE_ADVERTENCIAS}*\n\n` +
+    `📊 Advertências ativas: *${total}/${limite}*\n\n` +
     aviso
 }
 
@@ -84,8 +84,7 @@ module.exports = {
       const participantes = metadados?.participants || []
 
       // 3️⃣ Permissão: SOMENTE admin (mesmo critério do /adv e /ban)
-      const dadosSender = participantes.find((p) => p.id === sender)
-      if (!(isAdmin(dadosSender) || metadados?.owner === sender)) {
+      if (!await autorizado(metadados, sender)) {
         return await sock.sendMessage(jid, { text: AVISO_SEM_PERMISSAO }, { quoted: msg })
       }
 
@@ -101,10 +100,13 @@ module.exports = {
         return await sock.sendMessage(jid, { text: AVISO_LID }, { quoted: msg })
       }
 
+      const autor = await identificar(participantes, sender)
+      return await comAdvertenciasSerializadas(alvoReal, jid, async () => {
+      const limite = await obterLimiteAdvertencias(jid)
       // 6️⃣ Remove a ativa mais recente
       let removida = null
       try {
-        removida = await removerUltimaAdvertencia(alvoReal, jid)
+        removida = await removerUltimaAdvertencia(alvoReal, jid, autor.numero)
       } catch (erro) {
         console.error('[remadv] 💥 erro ao remover no Mongo:', erro?.stack || erro)
         return await sock.sendMessage(jid, { text: AVISO_ERRO_BANCO }, { quoted: msg })
@@ -118,23 +120,25 @@ module.exports = {
       }
 
       // 7️⃣ Saldo restante (relê do Mongo logo após o delete)
-      let total = 0
+      let total
       try {
         total = (await listarAdvertencias(alvoReal, jid)).length
       } catch (erro) {
         console.error('[remadv] ⚠️ não consegui recarregar o total:', erro?.message || erro)
+        return sock.sendMessage(jid, { text: '🕊️ Advertência perdoada e histórico preservado. ⚠️ Não consegui consultar o saldo restante agora.', mentions: [alvoBruto] }, { quoted: msg })
       }
 
       console.log(`[remadv] 🕊️ advertência de ${alvoReal} perdoada em ${jid} (restam ${total})`)
-      void limparNumero
 
       return await sock.sendMessage(jid, {
-        text: montarPerdao({ alvoNumero: alvoReal, removida, total }),
+        text: montarPerdao({ alvoNumero: alvoReal, removida, total, limite }),
         mentions: [alvoBruto, sender]
       }, { quoted: msg })
+      })
 
     } catch (err) {
-      console.error('Erro no comando remadv:', err)
+      console.error('Erro no comando remadv:', err.message)
+      await sock.sendMessage(jid, { text: AVISO_ERRO_BANCO }, { quoted: msg }).catch(() => {})
     }
   }
 }

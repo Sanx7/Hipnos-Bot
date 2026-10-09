@@ -20,7 +20,7 @@
 //     ativa:       true               // false = arquivada (após o ban)
 //   }
 //
-// REGRA DAS 3 ADVERTÊNCIAS: quando a 3ª advertência ATIVA da mesma pessoa
+// REGRA DO LIMITE CONFIGURADO (padrão 3): quando a 3ª advertência ATIVA da mesma pessoa
 // no mesmo grupo é gravada, o comando /adv dispara o ban automático e
 // ARQUIVA as advertências dela nesse grupo (ativa: false) — o histórico
 // não é apagado, mas a contagem volta a zero.
@@ -35,6 +35,8 @@
 
 const { MongoClient } = require('mongodb')
 const { limparNumero } = require('./config')
+const { AsyncLocalStorage } = require('node:async_hooks')
+const { randomUUID } = require('node:crypto')
 
 const NOME_BANCO = process.env.MONGODB_DB || 'whatsapp'
 const NOME_COLECAO = process.env.MONGODB_COLLECTION_ADV || 'advertencias'
@@ -53,7 +55,14 @@ let modoTeste = false
 // Obtém a collection de advertências, conectando se necessário. Valida a
 // conexão com ping antes de reusar e reconecta se a anterior morreu.
 // -------------------------------------------------------------------
+let conectando
 async function obterColecaoAdvertencias () {
+  if (modoTeste && colecaoCacheada) return colecaoCacheada
+  if (conectando) return conectando
+  conectando = conectarAdvertencias()
+  try { return await conectando } finally { conectando = null }
+}
+async function conectarAdvertencias () {
   // 🧪 No modo teste, devolve a collection injetada SEM tocar em rede.
   if (modoTeste && colecaoCacheada) return colecaoCacheada
 
@@ -121,95 +130,121 @@ async function obterColecaoAdvertencias () {
 // grupo (o total é o que decide o ban automático).
 // Retorno: { total, doc } | null (dados inválidos)
 // -------------------------------------------------------------------
-async function criarAdvertencia ({ numero, grupoId, motivo, aplicadoPor, data }) {
-  const numeroLimpo = limparNumero(numero)
-  if (!numeroLimpo || !grupoId) return null
-
-  const doc = {
-    numero: numeroLimpo,
-    grupo_id: String(grupoId),
-    motivo: String(motivo || '').trim() || 'Sem motivo informado',
-    aplicado_por: limparNumero(aplicadoPor) || 'desconhecido',
-    data: Number(data) || Date.now(),
-    ativa: true
+// Serialização por pessoa/grupo, também entre processos: reserva única no Mongo.
+// Sem expiração automática: um crash durante efeito WhatsApp é ambíguo e exige
+// reconciliação, em vez de repetir uma expulsão que pode ter sido aceita.
+const operacao = new AsyncLocalStorage()
+const filas = new Map()
+let auxiliaresTeste
+function fakeAuxiliar() {
+  const docs = new Map()
+  return {
+    async insertOne(doc) { if (docs.has(doc._id)) { const e = new Error('Reserva ocupada'); e.code = 11000; throw e } docs.set(doc._id, { ...doc }) },
+    async deleteOne(f) { const d = docs.get(f._id); if (d && (!f.token || d.token === f.token)) docs.delete(f._id) },
+    async findOne(f) { return docs.get(f._id) || null },
+    async updateOne(f, u) { docs.set(f._id, { _id: f._id, ...docs.get(f._id), ...u.$set }) }
   }
-
-  const colecao = await obterColecaoAdvertencias()
-  await colecao.insertOne(doc)
-  const total = await contarAdvertencias(numeroLimpo, grupoId)
-  return { total, doc }
 }
-
-// -------------------------------------------------------------------
-// 📜 Lista as advertências ATIVAS do alvo no grupo, da mais recente para
-// a mais antiga.
-// -------------------------------------------------------------------
-async function listarAdvertencias (numero, grupoId) {
-  const numeroLimpo = limparNumero(numero)
-  if (!numeroLimpo || !grupoId) return []
-
-  const colecao = await obterColecaoAdvertencias()
-  const docs = await colecao
-    .find({ numero: numeroLimpo, grupo_id: String(grupoId), ativa: true })
-    .sort({ data: -1, _id: -1 })
-    .toArray()
-  return Array.isArray(docs) ? docs : []
+async function auxiliar(nome) {
+  await obterColecaoAdvertencias()
+  if (modoTeste) return auxiliaresTeste[nome]
+  return clienteMongo.db(NOME_BANCO).collection(nome)
 }
-
-// -------------------------------------------------------------------
-// 🔢 Conta quantas advertências ATIVAS o alvo tem no grupo.
-// -------------------------------------------------------------------
-async function contarAdvertencias (numero, grupoId) {
-  const numeroLimpo = limparNumero(numero)
-  if (!numeroLimpo || !grupoId) return 0
-
-  const colecao = await obterColecaoAdvertencias()
-  return await colecao.countDocuments({
-    numero: numeroLimpo,
-    grupo_id: String(grupoId),
-    ativa: true
+async function comAdvertenciasSerializadas(numero, grupoId, executar) {
+  const chave = `${grupoId}:${limparNumero(numero)}`
+  if (operacao.getStore()?.chave === chave) return executar()
+  const anterior = filas.get(chave) || Promise.resolve()
+  const trabalho = anterior.catch(() => {}).then(async () => {
+    const reservas = await auxiliar('advertenciasOperacoes')
+    const token = randomUUID()
+    try { await reservas.insertOne({ _id: chave, token, numero: limparNumero(numero), grupo_id: String(grupoId), data: Date.now(), estado: 'em_andamento' }) }
+    catch (erro) {
+      if (erro.code === 11000) throw new Error('Há uma operação pendente para este mortal. Aguarde ou solicite reconciliação ao dono.')
+      throw erro
+    }
+    const contexto = { chave, reter: false }
+    try { return await operacao.run(contexto, executar) }
+    finally { if (!contexto.reter) await reservas.deleteOne({ _id: chave, token }) }
+  })
+  filas.set(chave, trabalho)
+  try { return await trabalho } finally { if (filas.get(chave) === trabalho) filas.delete(chave) }
+}
+async function registrarRemocaoConfirmada(numero, grupoId) {
+  const contexto = operacao.getStore()
+  if (contexto) contexto.reter = true
+  await (await auxiliar('advertenciasOperacoes')).updateOne(
+    { _id: `${grupoId}:${limparNumero(numero)}` },
+    { $set: { estado: 'remocao_confirmada', confirmado_em: Date.now() } }
+  )
+}
+function reterOperacao() { const contexto = operacao.getStore(); if (contexto) contexto.reter = true }
+function concluirOperacao() { const contexto = operacao.getStore(); if (contexto) contexto.reter = false }
+async function obterLimiteAdvertencias(grupoId) {
+  const doc = await (await auxiliar('configAdvertencias')).findOne({ _id: String(grupoId) })
+  if (!doc) return LIMITE_ADVERTENCIAS
+  if (!Number.isInteger(doc.limite) || doc.limite < 1 || doc.limite > 10) throw new Error('Limite inválido no banco')
+  return doc.limite
+}
+async function definirLimiteAdvertencias(grupoId, limite, autor) {
+  if (!String(grupoId).endsWith('@g.us') || !Number.isInteger(limite) || limite < 1 || limite > 10) throw new Error('Limite deve ser de 1 a 10')
+  await (await auxiliar('configAdvertencias')).updateOne({ _id: String(grupoId) }, {
+    $set: { limite, atualizado_por: limparNumero(autor), atualizado_em: Date.now() }
+  }, { upsert: true })
+}
+function filtroAtivas(numero, grupoId) {
+  return { numero: limparNumero(numero), grupo_id: String(grupoId), ativa: true }
+}
+async function criarAdvertencia({ numero, grupoId, motivo, aplicadoPor, data }) {
+  if (!limparNumero(numero) || !grupoId) return null
+  return comAdvertenciasSerializadas(numero, grupoId, async () => {
+    const limite = await obterLimiteAdvertencias(grupoId)
+    const doc = {
+      ...filtroAtivas(numero, grupoId), estado: 'ativa',
+      motivo: String(motivo || '').trim() || 'Sem motivo informado',
+      aplicado_por: limparNumero(aplicadoPor) || 'desconhecido', data: Number(data) || Date.now()
+    }
+    await (await obterColecaoAdvertencias()).insertOne(doc)
+    return { total: await contarAdvertencias(numero, grupoId), doc, limite }
   })
 }
-
-// -------------------------------------------------------------------
-// 🧹 Remove a advertência ATIVA mais recente (usada pelo /remadv).
-// Retorno: documento removido | null (não havia nenhuma)
-// -------------------------------------------------------------------
-async function removerUltimaAdvertencia (numero, grupoId) {
-  const ativas = await listarAdvertencias(numero, grupoId)
-  if (!ativas.length) return null
-
-  const alvo = ativas[0]
-  const colecao = await obterColecaoAdvertencias()
-  // Remove pelo _id quando o driver devolveu um; senão cai no filtro lógico.
-  const filtro = alvo._id !== undefined && alvo._id !== null
-    ? { _id: alvo._id }
-    : { numero: alvo.numero, grupo_id: alvo.grupo_id, motivo: alvo.motivo, data: alvo.data }
-  await colecao.deleteOne(filtro)
-  return alvo
+async function listarAdvertencias(numero, grupoId) {
+  if (!limparNumero(numero) || !grupoId) return []
+  return (await obterColecaoAdvertencias()).find(filtroAtivas(numero, grupoId)).sort({ data: -1, _id: -1 }).toArray()
 }
-
-// -------------------------------------------------------------------
-// 📦 ARQUIVA todas as advertências ativas do alvo no grupo (ativa: false).
-// Usado no ban automático: zera a contagem SEM apagar o histórico.
-// Retorno: quantas foram arquivadas
-// -------------------------------------------------------------------
-async function arquivarAdvertencias (numero, grupoId) {
-  const numeroLimpo = limparNumero(numero)
-  if (!numeroLimpo || !grupoId) return 0
-
-  const colecao = await obterColecaoAdvertencias()
-  const agora = Date.now()
-  const resultado = await colecao.updateMany(
-    { numero: numeroLimpo, grupo_id: String(grupoId), ativa: true },
-    { $set: { ativa: false, arquivada_em: agora } }
-  )
-  return resultado?.modifiedCount ?? resultado?.matchedCount ?? 0
+async function contarAdvertencias(numero, grupoId) {
+  if (!limparNumero(numero) || !grupoId) return 0
+  return (await obterColecaoAdvertencias()).countDocuments(filtroAtivas(numero, grupoId))
 }
+async function removerUltimaAdvertencia(numero, grupoId, autor) {
+  return comAdvertenciasSerializadas(numero, grupoId, async () => {
+    const alvo = (await listarAdvertencias(numero, grupoId))[0]
+    if (!alvo) return null
+    const filtro = alvo._id != null ? { _id: alvo._id, ativa: true } : { ...filtroAtivas(numero, grupoId), motivo: alvo.motivo, data: alvo.data }
+    const mudanca = { ativa: false, estado: 'perdoada', removido_por: limparNumero(autor) || 'desconhecido', removida_em: Date.now() }
+    const resultado = await (await obterColecaoAdvertencias()).updateMany(filtro, { $set: mudanca })
+    if (!resultado.modifiedCount) return null
+    return { ...alvo, ...mudanca }
+  })
+}
+async function arquivarAdvertencias(numero, grupoId, autor, ids) {
+  if (!limparNumero(numero) || !grupoId) return 0
+  return comAdvertenciasSerializadas(numero, grupoId, async () => {
+    const filtro = filtroAtivas(numero, grupoId)
+    if (ids) filtro._id = { $in: ids }
+    const resultado = await (await obterColecaoAdvertencias()).updateMany(filtro, { $set: {
+      ativa: false, estado: 'arquivada', arquivada_em: Date.now(), arquivada_por: limparNumero(autor) || 'desconhecido'
+    } })
+    return resultado.modifiedCount
+  })
+}
+async function listarHistorico(numero, grupoId, pagina = 1) {
+  if (!Number.isSafeInteger(pagina) || pagina < 1 || pagina > 100000) throw new Error('Página inválida')
+  const registros = await (await obterColecaoAdvertencias()).find({ numero: limparNumero(numero), grupo_id: String(grupoId) })
+    .sort({ data: -1, _id: -1 }).skip((pagina - 1) * 5).limit(6).toArray()
+  return { registros: registros.slice(0, 5), temProxima: registros.length > 5 }
+}
+function estadoAdvertencia(doc) { return doc.estado || (doc.ativa ? 'ativa' : 'arquivada') }
 
-// -------------------------------------------------------------------
-// 🗓️ Formata ms como "dd/mm/aaaa às hh:mm" (horário local).
-// -------------------------------------------------------------------
 function formatarData (ms) {
   const d = new Date(Number(ms) || Date.now())
   const dd = String(d.getDate()).padStart(2, '0')
@@ -226,7 +261,8 @@ function formatarData (ms) {
 // Passando `null`, o modo teste é desligado e o módulo volta a exigir
 // MONGODB_URI (útil p/ provar que o erro sem URI é ruidoso).
 // -------------------------------------------------------------------
-function __definirColecaoTeste (colecao) {
+function __definirColecaoTeste (colecao, auxiliares) {
+  auxiliaresTeste = auxiliares || { configAdvertencias: fakeAuxiliar(), advertenciasOperacoes: fakeAuxiliar() }
   if (colecao) {
     colecaoCacheada = colecao
     clienteMongo = null
@@ -239,6 +275,14 @@ function __definirColecaoTeste (colecao) {
 }
 
 module.exports = {
+  comAdvertenciasSerializadas,
+  obterLimiteAdvertencias,
+  definirLimiteAdvertencias,
+  listarHistorico,
+  estadoAdvertencia,
+  registrarRemocaoConfirmada,
+  reterOperacao,
+  concluirOperacao,
   criarAdvertencia,
   listarAdvertencias,
   contarAdvertencias,

@@ -14,8 +14,8 @@
 // Reusa os helpers de parse do /adv (extrairAlvo/resolverNumeroReal/isAdmin)
 // e a camada de dados advertencias.js.
 
-const { ehDonoDoBot, limparNumero } = require('../../config')
-const { listarAdvertencias, formatarData, LIMITE_ADVERTENCIAS } = require('../../advertencias')
+const { autorizado } = require('../../dados/advertencias-contexto')
+const { listarAdvertencias, formatarData, LIMITE_ADVERTENCIAS, obterLimiteAdvertencias } = require('../../advertencias')
 const { isAdmin, extrairAlvo, resolverNumeroReal } = require('./adv')
 
 const AVISO_SO_GRUPO = 'Este comando só serve para grupos, gênio. 🥱'
@@ -36,19 +36,19 @@ const AVISO_ERRO_BANCO =
   'Tente novamente em instantes.'
 
 // 🧾 Ficha com todas as advertências ativas
-function montarLista ({ alvoNumero, advertencias }) {
+function montarLista ({ alvoNumero, advertencias, limite = LIMITE_ADVERTENCIAS }) {
   const linhas = advertencias
     .map((a, i) => `${i + 1}. 📝 ${a.motivo}\n   ↳ por @${a.aplicado_por} em ${formatarData(a.data)}`)
     .join('\n')
 
-  const restantes = Math.max(0, LIMITE_ADVERTENCIAS - advertencias.length)
+  const restantes = Math.max(0, limite - advertencias.length)
   const aviso = restantes > 0
     ? `⚠️ Faltam *${restantes}* advertência${restantes === 1 ? '' : 's'} para o ban automático.`
     : '☠️ Limite atingido!'
 
   return '📜 *ADVERTÊNCIAS ATIVAS* 📜\n\n' +
     `👤 Alvo: @${alvoNumero}\n` +
-    `📊 Total: *${advertencias.length}/${LIMITE_ADVERTENCIAS}*\n\n` +
+    `📊 Total: *${advertencias.length}/${limite}*\n\n` +
     linhas + '\n\n' +
     aviso
 }
@@ -75,13 +75,7 @@ module.exports = {
       const participantes = metadados?.participants || []
 
       // 🔒 Admin do grupo OU dono do bot (mesmo critério de moderação)
-      const dadosSender = participantes.find((p) => p.id === sender)
-      const autorizado =
-        isAdmin(dadosSender) ||
-        metadados?.owner === sender ||
-        ehDonoDoBot(participantes, sender)
-
-      if (!autorizado) {
+      if (!await autorizado(metadados, sender, true)) {
         return await sock.sendMessage(jid, { text: AVISO_SEM_PERMISSAO }, { quoted: msg })
       }
 
@@ -96,6 +90,7 @@ module.exports = {
         return await sock.sendMessage(jid, { text: AVISO_LID }, { quoted: msg })
       }
 
+      const limite = await obterLimiteAdvertencias(jid)
       let advertencias = []
       try {
         advertencias = await listarAdvertencias(alvoReal, jid)
@@ -112,12 +107,13 @@ module.exports = {
       }
 
       return await sock.sendMessage(jid, {
-        text: montarLista({ alvoNumero: alvoReal, advertencias }),
+        text: montarLista({ alvoNumero: alvoReal, advertencias, limite }),
         mentions: [alvoBruto]
       }, { quoted: msg })
 
     } catch (err) {
-      console.error('Erro no comando advs:', err)
+      console.error('Erro no comando advs:', err.message)
+      await sock.sendMessage(jid, { text: AVISO_ERRO_BANCO }, { quoted: msg }).catch(() => {})
     }
   }
 }

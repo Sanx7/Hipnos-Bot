@@ -57,6 +57,9 @@ Roblox e velocidade de vídeo (também: /menudownload e /menu-downloads).
 
 ════════════════════
 
+⚖️ /minhaspunicoes
+➥ Consulte suas advertências ativas e o limite do grupo.
+
 🌤️ UTILITÁRIOS
 
 🧰 /menu-utilitario

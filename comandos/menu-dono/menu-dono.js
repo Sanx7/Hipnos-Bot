@@ -65,6 +65,9 @@ module.exports = {
 ➥ Ligada: Hipnos responde sozinho quando alguém menciona o bot ou responde a uma mensagem dele
    (máximo 1 resposta a cada 30s por pessoa, sem histórico de conversa).
 
+⚖️ /setlimiteadv 5
+➥ Define o limite de advertências DESTE grupo (1 a 10, padrão 3; somente dono). Não expulsa retroativamente.
+
 🔤 /set-prefix <símbolo>
 ➥ Troca o prefixo de TODOS os comandos (ex.: de / para !) — só dono do bot, e vale na hora, sem reiniciar.
 ➥ Sem argumento mostra o atual; /set-prefix reset volta para "/". A "/" antiga continua funcionando.

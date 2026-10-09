@@ -2,7 +2,7 @@
 module.exports = function colecaoFake() {
   const docs = []
   let leituras = 0, seq = 0
-  const casa = (doc, filtro) => Object.entries(filtro).every(([k, v]) => doc[k] === v)
+  const casa = (doc, filtro) => Object.entries(filtro).every(([k, v]) => v && typeof v === 'object' && '$in' in v ? v.$in.includes(doc[k]) : doc[k] === v)
   const api = {
     docs, get leituras() { return leituras }, falhar: false,
     async findOne(filtro) { if (api.falhar) throw new Error('Mongo offline'); leituras++; return docs.find(d => casa(d, filtro)) || null },
@@ -38,9 +38,9 @@ module.exports = function colecaoFake() {
         async toArray() { return encontrados.map(d => ({ ...d })) }
       }
     },
-    async insertOne(doc) { if (api.falhar) throw new Error('Mongo offline'); docs.push({ ...doc, _id: ++seq }); return { insertedId: seq } },
+    async insertOne(doc) { if (api.falhar) throw new Error('Mongo offline'); const id = doc._id ?? ++seq; if (docs.some(d => d._id === id)) { const e = new Error('duplicado'); e.code = 11000; throw e }; docs.push({ ...doc, _id: id }); return { insertedId: id } },
     async countDocuments(filtro) { if (api.falhar) throw new Error('Mongo offline'); return docs.filter(d => casa(d, filtro)).length },
-    async updateMany(filtro, mudanca) { let n = 0; for (const d of docs) if (casa(d, filtro)) { Object.assign(d, mudanca.$set); n++ } return { modifiedCount: n } }
+    async updateMany(filtro, mudanca) { if (api.falhar) throw new Error('Mongo offline'); let n = 0; for (const d of docs) if (casa(d, filtro)) { Object.assign(d, mudanca.$set); n++ } return { modifiedCount: n } }
   }
   return api
 }

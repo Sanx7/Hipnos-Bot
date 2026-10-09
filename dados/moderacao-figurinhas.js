@@ -1,7 +1,6 @@
 const { createHash } = require('node:crypto')
 const { downloadMediaMessage, normalizeMessageContent } = require('@whiskeysockets/baileys')
-const { limparNumero, OWNER_NUMBERS } = require('../config')
-const { ehLid, resolverNumeroAlvo } = require('../lid')
+const { identificar } = require('./identidade-participante')
 const { ehProprioBot } = require('./protecao-bot')
 const regras = require('./figurinhas-regras')
 const advertencias = require('../advertencias')
@@ -57,29 +56,6 @@ async function calcularHash(msg) {
   // Só hash/promessa em RAM; os bytes são consumidos e descartados no stream.
   return msg.key?.id ? cachear(hashes, key, trabalho) : trabalho
 }
-function identidade(jid) {
-  if (!/@(?:lid|s\.whatsapp\.net)$/.test(String(jid || ''))) return ''
-  return `${ehLid(jid) ? 'lid' : 'pn'}:${limparNumero(jid)}`
-}
-async function identificar(participantes, jid) {
-  const chave = identidade(jid)
-  if (!chave) return { participante: null, numero: null, admin: false, dono: false }
-  const exatos = participantes.filter(p => [p.id, p.phoneNumber, p.lid && `${limparNumero(p.lid)}@lid`].some(id => identidade(id) === chave))
-  // O Baileys também pode informar id=PN + lid em campo separado. Entregar
-  // esse par comprovado ao helper existente, sem comparar dígitos de namespaces.
-  const pares = exatos.map(p => ({
-    ...p,
-    id: ehLid(jid) && identidade(p.lid && `${limparNumero(p.lid)}@lid`) === chave ? jid : p.id,
-    phoneNumber: p.phoneNumber || (identidade(p.id).startsWith('pn:') ? p.id : undefined)
-  }))
-  const numero = await resolverNumeroAlvo(pares, jid)
-  const real = numero.via && numero.numero || null
-  const encontrados = exatos.length ? exatos : real ? participantes.filter(p =>
-    [p.id, p.phoneNumber].some(id => identidade(id) === `pn:${real}`)) : []
-  // Identidade ambígua não autoriza comandos nem uma punição.
-  const participante = encontrados.length === 1 ? encontrados[0] : null
-  return { participante, numero: real, admin: participante?.admin === 'admin' || participante?.admin === 'superadmin', dono: Boolean(real && OWNER_NUMBERS.includes(real)) }
-}
 async function botAdmin(sock, jid, participantes) {
   for (const p of participantes) {
     if (p.admin !== 'admin' && p.admin !== 'superadmin') continue
@@ -121,16 +97,19 @@ async function executarAcao(sock, msg, hash, acao) {
       await sock.sendMessage(jid, { text: '🌑 *Hipnos:* A figurinha proibida abriu as portas do limbo. Seu autor foi removido do recinto.' })
       return true
     }
+    return await advertencias.comAdvertenciasSerializadas(alvo.numero, jid, async () => {
+    const recente = await estadoAlvo(sock, jid, sender)
+    if (!recente || recente.numero !== alvo.numero || recente.admin || recente.dono) { estado = 'protegido_ou_ausente'; return true }
     const bot = await identificar(alvo.participantes, sock.user?.id)
     const motivo = 'Figurinha proibida pela moderação do grupo'
     const resultado = await advertencias.criarAdvertencia({ numero: alvo.numero, grupoId: jid, motivo, aplicadoPor: bot.numero })
     if (!resultado) throw new Error('Advertência não registrada')
     estado = 'advertencia_registrada'
-    if (resultado.total >= advertencias.LIMITE_ADVERTENCIAS) {
+    if (resultado.total >= resultado.limite) {
       const atual = await estadoAlvo(sock, jid, sender)
       if (atual?.botAdmin && !atual.admin && !atual.dono) {
         await adv.aplicarBanAutomatico(sock, jid, msg, atual.participante.id, atual.numero, bot.numero || 'desconhecido', {
-          verificarStatus: true,
+          verificarStatus: true, limite: resultado.limite,
           validar: async () => {
             const final = await estadoAlvo(sock, jid, sender)
             if (!final || final.admin || final.dono || !final.botAdmin) throw new Error('Remoção não autorizada')
@@ -140,10 +119,11 @@ async function executarAcao(sock, msg, hash, acao) {
       }
     }
     await sock.sendMessage(jid, {
-      text: adv.montarConfirmacao({ alvoNumero: alvo.numero, motivo, aplicadoPor: bot.numero || 'desconhecido', total: resultado.total, data: resultado.doc.data }),
+      text: adv.montarConfirmacao({ alvoNumero: alvo.numero, motivo, aplicadoPor: bot.numero || 'desconhecido', total: resultado.total, data: resultado.doc.data, limite: resultado.limite }),
       mentions: [sender]
     }, { quoted: msg })
     return true
+    })
   } catch (_) {
     estado = `${estado}_falha`
     console.warn('[figurinhas] A ocorrência não pôde ser concluída; sem repetição automática.')

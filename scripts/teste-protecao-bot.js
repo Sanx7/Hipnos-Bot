@@ -31,7 +31,7 @@ function criarSock() {
   return {
     user: { id: '5511000000000:12@s.whatsapp.net', lid: BOT_LID },
     membros: [ { id: BOT_LID, phoneNumber: BOT, admin: 'admin' }, { id: ADMIN, admin: 'admin' },
-      { id: COMUM }, { id: DONO }, { id: DONO2 }, { id: DONO_LID, phoneNumber: DONO } ],
+      { id: COMUM }, { id: DONO2 }, { id: DONO_LID, phoneNumber: DONO } ],
     envios, remocoes, saidas, eventos,
     async groupMetadata() { return { participants: this.membros, owner: ADMIN } },
     async sendMessage(jid, conteudo) { envios.push({ jid, ...conteudo }); eventos.push('envio'); return { key: { id: 'mock' } } },
@@ -78,7 +78,7 @@ async function main() {
   })
   await teste('Respostas entre comandos diferentes também não repetem nem revelam saída', async () => {
     const sock = criarSock()
-    sock.membros.find(p => p.id === DONO).admin = 'admin'
+    sock.membros.find(p => p.phoneNumber === DONO).admin = 'admin'
     let anterior
     for (const nome of ['ban', 'kick', 'addblacklist', 'adv']) {
       if (nome === 'kick') delete require.cache[require.resolve('../comandos/admin/kick')]
@@ -100,7 +100,7 @@ async function main() {
     assert.equal(blacklist.length, 0); afirmarRespostaProtecao(texto(sock))
   })
   await teste('Dono também não pode banir o bot', async () => {
-    const sock = criarSock(); sock.membros.find(p => p.id === DONO).admin = 'admin'
+    const sock = criarSock(); sock.membros.find(p => p.phoneNumber === DONO).admin = 'admin'
     await ban.executar(sock, GRUPO, mensagem(DONO, BOT_LID), '/ban @bot')
     afirmarRespostaProtecao(texto(sock)); assert.equal(sock.remocoes.length, 0)
   })
