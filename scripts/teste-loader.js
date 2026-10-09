@@ -7,6 +7,9 @@
 //
 // Uso (na raiz do projeto):  node scripts/teste-loader.js
 // ============================================================
+// Não permitir que config.js carregue credenciais reais do .env neste teste.
+process.env.MONGODB_URI = ''
+process.env.MONGO_URI_RPG = ''
 const fs = require('fs')
 const path = require('path')
 const { comandos } = require('../comandos-registry')
@@ -56,8 +59,12 @@ console.log('📊 Entradas no registro (comandos + aliases):', comandos.size)
 console.log('🎧 /play registrado?', comandos.has('play') ? '✅ SIM' : '❌ NÃO')
 
 if (process.exitCode !== 1 && !comandos.has('play')) process.exitCode = 1
-for (const nome of ['ranking', 'rankativo', 'inativos', 'sairgrupo', 'sairdogrupo', 'sairgp', 'leavegp']) {
+for (const nome of ['ranking', 'rankativo', 'inativos', 'sairgrupo', 'sairdogrupo', 'sairgp', 'leavegp', 'comunicado', 'avisogeral', 'broadcast', 'anunciar']) {
   if (typeof comandos.get(nome)?.executar !== 'function') process.exitCode = 1
+}
+const comunicado = require('../comandos/menu-dono/comunicado')
+for (const nome of [comunicado.nome, ...comunicado.aliases]) {
+  if (comandos.get(nome) !== comunicado) process.exitCode = 1
 }
 for (const cmd of require('../comandos/admin/figurinhas-moderacao')) {
   if (comandos.get(cmd.nome) !== cmd) {

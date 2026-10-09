@@ -45,6 +45,11 @@ module.exports = {
 🌙 /sairgrupo
 ➥ Retira o Hipnos do grupo mediante confirmação (somente dono, prazo de 30 segundos).
 
+🌙 /comunicado — Envia comunicados oficiais a todos os grupos do Hipnos.
+➥ Só dono; aceita texto ou resposta a imagem. Prévia com confirmação em 60 segundos.
+➥ /comunicado confirmar • /comunicado cancelar • /comunicado parar
+➥ Funciona em manutenção; não altera o estado ON/OFF.
+
 👑 /seradm @membro
 ➥ Promove o autor (ou a @menção) a administrador DO GRUPO.
 ➥ Sem menção, promove quem chamou o comando.

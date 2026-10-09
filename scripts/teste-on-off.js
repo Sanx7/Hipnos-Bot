@@ -188,6 +188,13 @@ async function main() {
       registro.set(nome, { executar: async () => eventos.push(`comando:${nome}`) })
     }
     const sairGrupo = require('../comandos/menu-dono/sairgrupo')
+    const comunicado = require('../comandos/menu-dono/comunicado')
+    for (const nome of [comunicado.nome, ...comunicado.aliases]) {
+      registro.set(nome, { executar: async (...args) => {
+        eventos.push('comando:comunicado')
+        return comunicado.executar(...args)
+      } })
+    }
     require('../prefixo').__definirPrefixoTeste('/')
     for (const nome of [sairGrupo.nome, ...sairGrupo.aliases]) {
       registro.set(nome, { executar: async (...args) => {
@@ -200,6 +207,7 @@ async function main() {
         if (!ouvintes.has(evento)) ouvintes.set(evento, [])
         ouvintes.get(evento).push(fn)
       } },
+        async groupFetchAllParticipating() { return { [grupo]: { id: grupo } } },
         async groupLeave(jid) { assert.equal(jid, grupo); eventos.push('saida-grupo') },
         async sendMessage(jid, conteudo) {
           eventos.push(conteudo.delete ? 'delete' : 'resposta')
@@ -361,6 +369,55 @@ async function main() {
     for (const comando of ['menu', 'ping', 'on', 'off']) {
       await fluxo.enviar(`/${comando}`, `${dono}@s.whatsapp.net`)
       assert.ok(fluxo.eventos.includes(`comando:${comando}`))
+    }
+  })
+  await teste('OFF: comunicado real prepara, confirma e relata via handler para dono LID', async () => {
+    await estado.definirLigado(false)
+    for (const acao of ['Aviso de manutenção', 'confirmar']) {
+      await fluxo.enviar(`/comunicado ${acao}`, '12345@lid')
+      assert.ok(fluxo.eventos.includes('comando:comunicado'))
+    }
+    await require('../comunicados').sistema.aguardarConclusao()
+    assert.equal(await estado.obterLigado(), false)
+    for (const sender of [`${comum}@s.whatsapp.net`, '67890@lid']) {
+      await fluxo.enviar('/broadcast proibido', sender)
+      assert.ok(!fluxo.eventos.includes('comando:comunicado'))
+    }
+  })
+  await teste('OFF: parar chega ao envio real em andamento pelo handler', async () => {
+    const enviarOriginal = fluxo.sock.sendMessage
+    let concluirEnvio
+    const espera = new Promise(resolve => { concluirEnvio = resolve })
+    const relatorios = []
+    fluxo.sock.sendMessage = async (jid, conteudo, opcoes) => {
+      if (conteudo.text?.startsWith('🌙 *HIPNOS —')) await espera
+      if (conteudo.text?.includes('RELATÓRIO DO COMUNICADO')) relatorios.push(conteudo.text)
+      return enviarOriginal(jid, conteudo, opcoes)
+    }
+    try {
+      await fluxo.enviar('/avisogeral Manutenção', '12345@lid')
+      await fluxo.enviar('/anunciar confirmar', '12345@lid')
+      await fluxo.enviar('/comunicado parar', '12345@lid')
+      assert.ok(fluxo.eventos.includes('comando:comunicado'))
+      concluirEnvio()
+      await require('../comunicados').sistema.aguardarConclusao()
+      assert.match(relatorios[0], /Interrompido pelo dono/)
+      assert.equal(await estado.obterLigado(), false)
+    } finally { concluirEnvio(); fluxo.sock.sendMessage = enviarOriginal }
+  })
+  await teste('modo somente admin permite dono LID resolvido pela sessão sem metadados', async () => {
+    fluxo.protecoes.onlyAdmin = [grupo]
+    const obterMetadata = fluxo.sock.groupMetadata
+    fluxo.sock.groupMetadata = async () => { throw new Error('metadata offline') }
+    lid.__definirConsultaSessaoTeste(async id => id === '98765' ? dono : null)
+    try {
+      await fluxo.enviar('/comunicado Manutenção', '98765@lid')
+      assert.ok(fluxo.eventos.includes('comando:comunicado'))
+      await fluxo.enviar('/comunicado cancelar', '98765@lid')
+    } finally {
+      fluxo.sock.groupMetadata = obterMetadata
+      delete fluxo.protecoes.onlyAdmin
+      lid.__definirConsultaSessaoTeste(async () => null)
     }
   })
   await teste('OFF mantém antilink e antiáudio executando no handler real', async () => {

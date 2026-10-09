@@ -828,10 +828,9 @@ async function startBot() {
             // Quando ativo, apenas administradores (ou o dono do bot) podem usar
             // os comandos. Não-admins são ignorados (ou avisados, se config).
             // (dono = qualquer número da lista OWNER_NUMBERS do config.js)
-            // O 1º teste é direto (número real, zero custo de API). Se não
-            // bater, buscamos os metadados e resolvemos via ehDonoDoBot —
-            // cobre o caso do WhatsApp entregar o remetente como "@lid".
-            if (!OWNER_NUMBERS.includes(limparNumero(sender))) {
+            // Reutiliza a autorização JID/LID da manutenção, incluindo a
+            // sessão quando os metadados não trazem o telefone do dono.
+            if (!(await estadoBot.remetenteEhDono(sock, jid, sender))) {
               let metadados = null
               try {
                 metadados = await sock.groupMetadata(jid)
@@ -840,10 +839,9 @@ async function startBot() {
                 console.error('Erro ao buscar metadados no modo restrito:', err)
               }
 
-              const ehDono = ehDonoDoBot(metadados?.participants, sender)
               const ehAdmin = ehAdminDoGrupo(metadados?.participants, sender)
 
-              if (!ehDono && !ehAdmin) {
+              if (!ehAdmin) {
                 if (AVISAR_BLOQUEIO) {
                   await sock.sendMessage(jid, {
                     text: '🛡️ *MODO RESTRITO ATIVO*\n\nApenas *administradores do grupo* podem invocar os comandos de Hipnos enquanto o /soadm estiver ativo neste recinto. 💤'

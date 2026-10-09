@@ -72,7 +72,7 @@ async function definirLigado(ligado) {
 }
 
 // Compartilhado pelo handler e /on /off. Nunca compara LID cru com telefone.
-async function remetenteEhDono(sock, jid, sender) {
+async function obterNumeroDono(sock, jid, sender) {
   try {
     let participantes = []
     if (ehLid(sender) && String(jid || '').endsWith('@g.us')) {
@@ -81,10 +81,14 @@ async function remetenteEhDono(sock, jid, sender) {
       participantes = participantes.filter(p => ehLid(p?.id) && limparNumero(p.id) === limparNumero(sender))
     }
     const alvo = await resolverNumeroAlvo(participantes, sender)
-    return Boolean(alvo.via && OWNER_NUMBERS.includes(alvo.numero))
+    return alvo.via && OWNER_NUMBERS.includes(alvo.numero) ? alvo.numero : null
   } catch (_) {
-    return false
+    return null
   }
+}
+
+async function remetenteEhDono(sock, jid, sender) {
+  return Boolean(await obterNumeroDono(sock, jid, sender))
 }
 
 async function permitirMensagem(sock, jid, sender) {
@@ -96,6 +100,7 @@ module.exports = {
   obterLigado,
   definirLigado,
   remetenteEhDono,
+  obterNumeroDono,
   permitirMensagem,
   // Coleção offline e reinício do cache para testar persistência sem rede.
   __definirColecaoTeste(colecao) {
