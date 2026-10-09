@@ -98,31 +98,31 @@ async function executarAcao(sock, msg, hash, acao) {
       return true
     }
     return await advertencias.comAdvertenciasSerializadas(alvo.numero, jid, async () => {
-    const recente = await estadoAlvo(sock, jid, sender)
-    if (!recente || recente.numero !== alvo.numero || recente.admin || recente.dono) { estado = 'protegido_ou_ausente'; return true }
-    const bot = await identificar(alvo.participantes, sock.user?.id)
-    const motivo = 'Figurinha proibida pela moderação do grupo'
-    const resultado = await advertencias.criarAdvertencia({ numero: alvo.numero, grupoId: jid, motivo, aplicadoPor: bot.numero })
-    if (!resultado) throw new Error('Advertência não registrada')
-    estado = 'advertencia_registrada'
-    if (resultado.total >= resultado.limite) {
-      const atual = await estadoAlvo(sock, jid, sender)
-      if (atual?.botAdmin && !atual.admin && !atual.dono) {
-        await adv.aplicarBanAutomatico(sock, jid, msg, atual.participante.id, atual.numero, bot.numero || 'desconhecido', {
-          verificarStatus: true, limite: resultado.limite,
-          validar: async () => {
-            const final = await estadoAlvo(sock, jid, sender)
-            if (!final || final.admin || final.dono || !final.botAdmin) throw new Error('Remoção não autorizada')
-          }
-        })
-        return true
+      const recente = await estadoAlvo(sock, jid, sender)
+      if (!recente || recente.numero !== alvo.numero || recente.admin || recente.dono) { estado = 'protegido_ou_ausente'; return true }
+      const bot = await identificar(alvo.participantes, sock.user?.id)
+      const motivo = 'Figurinha proibida pela moderação do grupo'
+      const resultado = await advertencias.criarAdvertencia({ numero: alvo.numero, grupoId: jid, motivo, aplicadoPor: bot.numero })
+      if (!resultado) throw new Error('Advertência não registrada')
+      estado = 'advertencia_registrada'
+      if (resultado.total >= resultado.limite) {
+        const atual = await estadoAlvo(sock, jid, sender)
+        if (atual?.botAdmin && !atual.admin && !atual.dono) {
+          await adv.aplicarBanAutomatico(sock, jid, msg, atual.participante.id, atual.numero, bot.numero || 'desconhecido', {
+            verificarStatus: true, limite: resultado.limite,
+            validar: async () => {
+              const final = await estadoAlvo(sock, jid, sender)
+              if (!final || final.admin || final.dono || !final.botAdmin) throw new Error('Remoção não autorizada')
+            }
+          })
+          return true
+        }
       }
-    }
-    await sock.sendMessage(jid, {
-      text: adv.montarConfirmacao({ alvoNumero: alvo.numero, motivo, aplicadoPor: bot.numero || 'desconhecido', total: resultado.total, data: resultado.doc.data, limite: resultado.limite }),
-      mentions: [sender]
-    }, { quoted: msg })
-    return true
+      await sock.sendMessage(jid, {
+        text: adv.montarConfirmacao({ alvoNumero: alvo.numero, motivo, aplicadoPor: bot.numero || 'desconhecido', total: resultado.total, data: resultado.doc.data, limite: resultado.limite }),
+        mentions: [sender]
+      }, { quoted: msg })
+      return true
     })
   } catch (_) {
     estado = `${estado}_falha`

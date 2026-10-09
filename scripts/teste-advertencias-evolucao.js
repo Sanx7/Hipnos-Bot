@@ -2,6 +2,9 @@ process.env.OWNER_NUMBERS = '5511999990009'
 process.env.MONGODB_URI = ''
 process.env.MONGO_URI_RPG = ''
 const assert = require('node:assert/strict')
+const fs = require('node:fs')
+const path = require('node:path')
+const { createRequire } = require('node:module')
 const { Readable } = require('node:stream')
 const { createHash } = require('node:crypto')
 const fake = require('./helpers/colecao-figurinhas-fake')
@@ -58,6 +61,25 @@ function cenario() {
 async function teste(nome, fn) { await fn(cenario()); total++; console.log(`✅ ${nome}`) }
 async function main() {
   await teste('comandos únicos sem aliases duplicados', async () => assert.deepEqual(novos.map(c => c.nome), ['minhaspunicoes', 'historicoadv', 'zeraradv', 'setlimiteadv']))
+  for (const modo of ['sucesso', 'json inválido', 'rename falhou']) await teste(`blacklist JSON segura: ${modo}`, async () => {
+    const arquivo = require.resolve('../comandos/admin/ban')
+    const destino = path.join(path.dirname(arquivo), '..', 'dados', 'blacklist.json')
+    const original = modo === 'json inválido' ? '{"registro":"preservar"}' : '["numero-antigo"]'
+    const arquivos = new Map([[destino, original]])
+    const simulado = {
+      existsSync: nome => arquivos.has(nome), readFileSync: nome => arquivos.get(nome),
+      writeFileSync: (nome, bytes) => arquivos.set(nome, bytes),
+      renameSync: (origem, alvo) => { if (modo === 'rename falhou') throw new Error('disco offline'); arquivos.set(alvo, arquivos.get(origem)); arquivos.delete(origem) },
+      unlinkSync: nome => arquivos.delete(nome)
+    }
+    const modulo = { exports: {} }, realRequire = createRequire(arquivo)
+    new Function('require', 'module', '__dirname', 'console', fs.readFileSync(arquivo, 'utf8'))(
+      nome => nome === 'fs' ? simulado : realRequire(nome), modulo, path.dirname(arquivo), { error() {} }
+    )
+    if (modo === 'sucesso') { modulo.exports.adicionarNaBlacklist('numero-novo'); assert.deepEqual(JSON.parse(arquivos.get(destino)), ['numero-antigo', 'numero-novo']) }
+    else { assert.throws(() => modulo.exports.adicionarNaBlacklist('numero-novo')); assert.equal(arquivos.get(destino), original) }
+    assert.equal(arquivos.size, 1)
+  })
   await teste('documentos antigos ativos e arquivados permanecem consultáveis', async c => {
     c.colecao.docs.push({ _id: 40, numero: numero(ALVO), grupo_id: G, motivo: 'legado ativo', data: 1, ativa: true }, { _id: 41, numero: numero(ALVO), grupo_id: G, motivo: 'legado arquivado', data: 2, ativa: false })
     assert.equal(await dados.contarAdvertencias(numero(ALVO), G), 1)
@@ -205,6 +227,12 @@ async function main() {
   await teste('duas remoções simultâneas perdoam registros distintos', async c => {
     await c.criar(); await c.criar(); await Promise.all([c.executar('remadv'), c.executar('remadv')])
     assert.equal(c.colecao.docs.length, 2); assert.ok(c.colecao.docs.every(d => d.estado === 'perdoada'))
+  })
+  await teste('permissão perdida durante espera impede perdão', async c => {
+    await c.criar()
+    const original = c.sock.groupMetadata.bind(c.sock); let chamadas = 0
+    c.sock.groupMetadata = async () => { if (++chamadas === 2) c.sock.participantes.find(p => p.id === ADM).admin = null; return original() }
+    await c.executar('remadv'); assert.equal(await dados.contarAdvertencias(numero(ALVO), G), 1); assert.match(c.texto(), /administradores/)
   })
   await teste('reserva no Mongo impede outro processo de operar o mesmo alvo', async c => {
     let liberar, pronta

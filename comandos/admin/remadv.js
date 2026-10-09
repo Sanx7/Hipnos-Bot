@@ -25,7 +25,7 @@ const {
   formatarData,
   LIMITE_ADVERTENCIAS, obterLimiteAdvertencias, comAdvertenciasSerializadas
 } = require('../../advertencias')
-const { isAdmin, extrairAlvo, resolverNumeroReal } = require('./adv')
+const { extrairAlvo, resolverNumeroReal } = require('./adv')
 
 const AVISO_SO_GRUPO = 'Este comando só serve para grupos, gênio. 🥱'
 
@@ -102,38 +102,40 @@ module.exports = {
 
       const autor = await identificar(participantes, sender)
       return await comAdvertenciasSerializadas(alvoReal, jid, async () => {
-      const limite = await obterLimiteAdvertencias(jid)
-      // 6️⃣ Remove a ativa mais recente
-      let removida = null
-      try {
-        removida = await removerUltimaAdvertencia(alvoReal, jid, autor.numero)
-      } catch (erro) {
-        console.error('[remadv] 💥 erro ao remover no Mongo:', erro?.stack || erro)
-        return await sock.sendMessage(jid, { text: AVISO_ERRO_BANCO }, { quoted: msg })
-      }
+        const atuais = await sock.groupMetadata(jid)
+        if (!await autorizado(atuais, sender)) return sock.sendMessage(jid, { text: AVISO_SEM_PERMISSAO }, { quoted: msg })
+        const limite = await obterLimiteAdvertencias(jid)
+        // 6️⃣ Remove a ativa mais recente
+        let removida = null
+        try {
+          removida = await removerUltimaAdvertencia(alvoReal, jid, autor.numero)
+        } catch (erro) {
+          console.error('[remadv] 💥 erro ao remover no Mongo:', erro?.stack || erro)
+          return await sock.sendMessage(jid, { text: AVISO_ERRO_BANCO }, { quoted: msg })
+        }
 
-      if (!removida) {
+        if (!removida) {
+          return await sock.sendMessage(jid, {
+            text: `✨ @${alvoReal} está com a ficha limpa — nenhuma advertência ativa neste grupo para perdoar.`,
+            mentions: [alvoBruto]
+          }, { quoted: msg })
+        }
+
+        // 7️⃣ Saldo restante (relê do Mongo logo após o perdão)
+        let total
+        try {
+          total = (await listarAdvertencias(alvoReal, jid)).length
+        } catch (erro) {
+          console.error('[remadv] ⚠️ não consegui recarregar o total:', erro?.message || erro)
+          return sock.sendMessage(jid, { text: '🕊️ Advertência perdoada e histórico preservado. ⚠️ Não consegui consultar o saldo restante agora.', mentions: [alvoBruto] }, { quoted: msg })
+        }
+
+        console.log(`[remadv] 🕊️ advertência de ${alvoReal} perdoada em ${jid} (restam ${total})`)
+
         return await sock.sendMessage(jid, {
-          text: `✨ @${alvoReal} está com a ficha limpa — nenhuma advertência ativa neste grupo para perdoar.`,
-          mentions: [alvoBruto]
+          text: montarPerdao({ alvoNumero: alvoReal, removida, total, limite }),
+          mentions: [alvoBruto, sender]
         }, { quoted: msg })
-      }
-
-      // 7️⃣ Saldo restante (relê do Mongo logo após o delete)
-      let total
-      try {
-        total = (await listarAdvertencias(alvoReal, jid)).length
-      } catch (erro) {
-        console.error('[remadv] ⚠️ não consegui recarregar o total:', erro?.message || erro)
-        return sock.sendMessage(jid, { text: '🕊️ Advertência perdoada e histórico preservado. ⚠️ Não consegui consultar o saldo restante agora.', mentions: [alvoBruto] }, { quoted: msg })
-      }
-
-      console.log(`[remadv] 🕊️ advertência de ${alvoReal} perdoada em ${jid} (restam ${total})`)
-
-      return await sock.sendMessage(jid, {
-        text: montarPerdao({ alvoNumero: alvoReal, removida, total, limite }),
-        mentions: [alvoBruto, sender]
-      }, { quoted: msg })
       })
 
     } catch (err) {

@@ -201,6 +201,12 @@ async function main() {
         return cmd.executar(...args)
       } })
     }
+    for (const cmd of [require('../comandos/admin/adv'), require('../comandos/admin/remadv'), require('../comandos/admin/advs'), ...require('../comandos/admin/advertencias-consultas')]) {
+      for (const nome of [cmd.nome, ...(cmd.aliases || [])]) registro.set(nome, { executar: async (...args) => {
+        eventos.push(`comando:${cmd.nome}`)
+        return cmd.executar(...args)
+      } })
+    }
     registro.set('limpar-chat', { executar: async (...args) => {
       eventos.push('comando:limpar-chat')
       return limparChat.executar(...args)
@@ -380,6 +386,23 @@ async function main() {
       await fluxo.enviar(`/${nome}`)
       assert.ok(fluxo.eventos.includes(`comando:${nome}`))
     }
+    await estado.definirLigado(false)
+  })
+  await teste('OFF: comandos reais de advertência e aliases bloqueiam ADM e permitem dono no roteador', async () => {
+    const dados = require('../advertencias')
+    dados.__definirColecaoTeste(require('./helpers/colecao-figurinhas-fake')())
+    await estado.definirLigado(false)
+    for (const nome of ['adv', 'advertir', 'warn', 'remadv', 'removeradv', 'perdoaradv', 'advs', 'advertencias', 'warns', 'minhaspunicoes', 'historicoadv', 'zeraradv', 'setlimiteadv']) {
+      await fluxo.enviar(`/${nome}`, '67890@lid')
+      assert.ok(!fluxo.eventos.some(e => e.startsWith('comando:')))
+      await fluxo.enviar(`/${nome}`, '12345@lid')
+      assert.ok(fluxo.eventos.some(e => e.startsWith('comando:')))
+    }
+    await fluxo.enviar('/setlimiteadv 5', '12345@lid')
+    assert.equal(await dados.obterLimiteAdvertencias(grupo), 5)
+    await estado.definirLigado(true)
+    await fluxo.enviar('/minhaspunicoes', `${comum}@s.whatsapp.net`)
+    assert.ok(fluxo.eventos.includes('comando:minhaspunicoes'))
     await estado.definirLigado(false)
   })
   await teste('ON + ADM: limpar-chat real apaga 10 mensagens via handler', async () => {

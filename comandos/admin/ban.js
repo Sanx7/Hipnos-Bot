@@ -1,31 +1,35 @@
 const fs = require('fs');
 const path = require('path');
+const { randomUUID } = require('node:crypto');
 
 // Configuração global do bot (helper de dono — PROOF-LID)
-const { ehDonoDoBot, limparNumero } = require('../../config');
+const { limparNumero } = require('../../config');
 const { ehProprioBot, respostaAutoexpulsao } = require('../../dados/protecao-bot');
 const { identificar, autorizado, extrairAlvo } = require('../../dados/advertencias-contexto');
 
 // Caminho da lista negra (comandos/dados/blacklist.json)
 const BANCO_BLACKLIST = path.join(__dirname, '..', 'dados', 'blacklist.json');
 
-function isAdmin(p) {
-  return p?.admin === 'admin' || p?.admin === 'superadmin';
-}
-
 // Adiciona o número na lista negra após confirmar a expulsão
-// (exportada: o /adv REUSA esta gravação no ban automático das 3 advertências).
+// (exportada: o /adv REUSA esta gravação no ban automático por advertências).
 function adicionarNaBlacklist(numero) {
   try {
     let lista = [];
     if (fs.existsSync(BANCO_BLACKLIST)) {
       lista = JSON.parse(fs.readFileSync(BANCO_BLACKLIST, 'utf8'));
     }
-    if (!Array.isArray(lista)) lista = [];
+    if (!Array.isArray(lista)) throw new Error('Blacklist inválida; arquivo existente preservado.');
 
     if (!lista.includes(numero)) {
       lista.push(numero);
-      fs.writeFileSync(BANCO_BLACKLIST, JSON.stringify(lista, null, 2));
+      // Substituição atômica no mesmo diretório; uma falha não trunca o JSON atual.
+      const temporario = `${BANCO_BLACKLIST}.${randomUUID()}.tmp`;
+      try {
+        fs.writeFileSync(temporario, JSON.stringify(lista, null, 2), { flag: 'wx' });
+        fs.renameSync(temporario, BANCO_BLACKLIST);
+      } finally {
+        if (fs.existsSync(temporario)) fs.unlinkSync(temporario);
+      }
     }
   } catch (erro) {
     console.error('Erro ao salvar blacklist no ban:', erro);
@@ -44,7 +48,7 @@ function __definirGravacaoBlacklistTeste(fn) {
 
 // ☠️ PUNIÇÃO MÁXIMA reutilizável: confirma a expulsão e então grava blacklist.
 // Extraída do executar() para que o /adv aplique EXATAMENTE a mesma punição
-// no ban automático das 3 advertências (nada de lógica duplicada).
+// no ban automático por advertências (nada de lógica duplicada).
 // `numeroParaBlacklist` (opcional) permite gravar na lista negra o NÚMERO
 // REAL resolvido (lid.js) quando o alvo veio como "@lid" — sem isso, o /adv
 // gravaria o LID cru, contrariando a correção já aplicada em VIP/RPG.
@@ -60,8 +64,8 @@ async function banirDoGrupo(sock, jid, alvoJid, numeroParaBlacklist, opcoes = {}
     throw new Error('Alvo protegido ou identidade não comprovada');
   }
   const alvoLimpo = alvo.numero;
-  // Automações podem exigir prova recente de membro/ADM e validar o status
-  // retornado pelo WhatsApp, antes de arquivar advertências como banidas.
+  // Automações podem exigir prova recente de membro/ADM. O status retornado
+  // pelo WhatsApp sempre é verificado antes da blacklist e do arquivamento.
   if (opcoes.validar) await opcoes.validar();
   if (opcoes.antesRemover) await opcoes.antesRemover();
   const resultado = await sock.groupParticipantsUpdate(jid, [alvoJid], 'remove');
@@ -119,7 +123,7 @@ module.exports = {
       }
 
       // Confirma a remoção antes de adicionar o alvo à blacklist
-      // (mesma função usada pelo /adv no ban automático das 3 advertências)
+      // (mesma função usada pelo /adv no ban automático por advertências)
       try {
         await banirDoGrupo(sock, jid, alvo);
         return await sock.sendMessage(jid, { text: 'Pronto. Mais um insolente removido do recinto e lançado na blacklist. 🥱' });

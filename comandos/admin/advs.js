@@ -16,7 +16,7 @@
 
 const { autorizado } = require('../../dados/advertencias-contexto')
 const { listarAdvertencias, formatarData, LIMITE_ADVERTENCIAS, obterLimiteAdvertencias } = require('../../advertencias')
-const { isAdmin, extrairAlvo, resolverNumeroReal } = require('./adv')
+const { extrairAlvo, resolverNumeroReal } = require('./adv')
 
 const AVISO_SO_GRUPO = 'Este comando só serve para grupos, gênio. 🥱'
 

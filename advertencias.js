@@ -1,37 +1,8 @@
-// ============================================
-// ⚠️ advertencias.js — Sistema de advertências (MongoDB)
-// ============================================
-// Módulo responsável por TODA a lógica de advertências do bot. Segue o
-// MESMO padrão de conexão do vip.js / database.js (ranking):
-//   - Collection dedicada: banco "whatsapp" (MONGODB_DB), collection
-//     "advertencias" (sobrescrevível via MONGODB_COLLECTION_ADV);
-//   - SINGLETON: um único MongoClient criado uma vez no processo;
-//   - PING DE SAÚDE a cada uso + reconexão automática se a conexão morreu;
-//   - ERROS RUIDOSOS: falha de conexão é logada com causa provável e
-//     RELANÇADA (os comandos /adv, /advs e /remadv tratam).
-//
-// ESTRUTURA DO DOCUMENTO (collection "advertencias"):
-//   {
-//     numero:      "5511999999999",   // só dígitos (número REAL, nunca LID)
-//     grupo_id:    "12036...@g.us",   // grupo onde a advertência vale
-//     motivo:      "texto informado pelo admin",
-//     aplicado_por:"5511888888888",   // quem aplicou (número real)
-//     data:        1700000000000,     // quando aplicou (ms)
-//     ativa:       true               // false = arquivada (após o ban)
-//   }
-//
-// REGRA DO LIMITE CONFIGURADO (padrão 3): quando a 3ª advertência ATIVA da mesma pessoa
-// no mesmo grupo é gravada, o comando /adv dispara o ban automático e
-// ARQUIVA as advertências dela nesse grupo (ativa: false) — o histórico
-// não é apagado, mas a contagem volta a zero.
-//
-// Funções:
-//   1. criarAdvertencia({numero, grupoId, motivo, aplicadoPor}) → {total, doc}
-//   2. listarAdvertencias(numero, grupoId) → [] (mais recente primeiro)
-//   3. contarAdvertencias(numero, grupoId) → number
-//   4. removerUltimaAdvertencia(numero, grupoId) → doc removido | null
-//   5. arquivarAdvertencias(numero, grupoId) → quantos foram arquivados
-// ============================================
+// Advertências persistentes no MongoDB: coleção existente, sem migração.
+// Cada registro pertence a um telefone real e grupo. `ativa: true` mantém
+// compatibilidade com documentos antigos; perdão e arquivo preservam histórico.
+// Limites ficam em configAdvertencias (padrão único abaixo), por grupo.
+// Aplicação manual e automática compartilham a serialização de operações.
 
 const { MongoClient } = require('mongodb')
 const { limparNumero } = require('./config')

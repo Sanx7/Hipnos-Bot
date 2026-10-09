@@ -8,12 +8,12 @@
 //
 // Regras:
 //   - SOMENTE admin do grupo (mesmo critério do /ban, /kick e /soadm);
-//   - o alvo NUNCA pode ser o dono do bot (ehDonoDoBot — mesma proteção do
+//   - o alvo NUNCA pode ser o dono do bot (identidade resolvida — proteção do
 //     /ban e /kick);
 //   - motivo é OBRIGATÓRIO (sem ele o comando recusa e mostra o uso);
 //   - o número do alvo é RESOLVIDO antes de gravar (lid.js): nunca gravamos
 //     LID cru no Mongo — mesma correção aplicada em VIP/RPG;
-//   - a 3ª advertência ATIVA no mesmo grupo dispara o BAN automático
+//   - atingir o limite configurado do grupo dispara a tentativa de BAN automático
 //     reutilizando `banirDoGrupo` do /ban (blacklist + expulsão) e ARQUIVA
 //     as advertências (histórico preservado, contagem zerada).
 //
@@ -114,7 +114,7 @@ function montarConfirmacao ({ alvoNumero, motivo, aplicadoPor, total, data, limi
 }
 
 function montarBanimento ({ alvoNumero, motivos, aplicadoPor, limite = LIMITE_ADVERTENCIAS }) {
-  // Ordem cronológica (1ª → 3ª): listarAdvertencias devolve mais-recente-primeiro.
+  // Ordem cronológica (mais antiga → mais recente): listarAdvertencias devolve mais-recente-primeiro.
   const lista = [...motivos].reverse()
     .map((m, i) => `${i + 1}. ${m.motivo}\n   ↳ por @${m.aplicado_por} em ${formatarData(m.data)}`)
     .join('\n')
@@ -134,8 +134,8 @@ function montarFalhaBan ({ alvoNumero, motivos, aplicadoPor, limite = LIMITE_ADV
     .join('\n')
 
   return '⚠️ *LIMITE DE ADVERTÊNCIAS ATINGIDO* ⚠️\n\n' +
-    `👤 @${alvoNumero} chegou a *${limite}* advertências, mas o WhatsApp recusou a expulsão ` +
-    '(provavelmente eu não sou administrador do grupo).\n\n' +
+    `👤 @${alvoNumero} atingiu o limite de *${limite}* advertências, mas a expulsão não foi confirmada.\n` +
+    '⚠️ Verifique permissões, conexão e operações pendentes antes de tentar novamente.\n\n' +
     '📜 *Motivos acumulados:*\n' + lista + '\n\n' +
     '⚔️ Remova manualmente com `/ban @membro` — as advertências seguem ativas; consulte /historicoadv antes de nova ação.\n' +
     `🗓️ Aviso gerado por @${aplicadoPor} em ${formatarData(Date.now())}.`
@@ -252,46 +252,46 @@ module.exports = {
       const autorReal = autor.numero
 
       return await comAdvertenciasSerializadas(alvoReal, jid, async () => {
-      const recentes = await sock.groupMetadata(jid)
-      const atual = await identificar(recentes.participants || [], alvoBruto)
-      if (!atual.participante || atual.numero !== alvoReal || atual.dono || !await autorizado(recentes, sender)) {
-        return enviar(sock, jid, msg, '🔒 O alvo ou a permissão mudou. Nenhuma advertência foi aplicada.')
-      }
-      // 9️⃣ Gravação no Mongo
-      let resultado = null
-      try {
-        resultado = await criarAdvertencia({
-          numero: alvoReal,
-          grupoId: jid,
-          motivo,
-          aplicadoPor: autorReal
-        })
-      } catch (erro) {
-        console.error('[adv] 💥 erro ao gravar a advertência:', erro?.stack || erro)
-        return await enviar(sock, jid, msg, AVISO_ERRO_BANCO)
-      }
-      if (!resultado) return await enviar(sock, jid, msg, AVISO_ERRO_BANCO)
+        const recentes = await sock.groupMetadata(jid)
+        const atual = await identificar(recentes.participants || [], alvoBruto)
+        if (!atual.participante || atual.numero !== alvoReal || atual.dono || !await autorizado(recentes, sender)) {
+          return enviar(sock, jid, msg, '🔒 O alvo ou a permissão mudou. Nenhuma advertência foi aplicada.')
+        }
+        // 9️⃣ Gravação no Mongo
+        let resultado = null
+        try {
+          resultado = await criarAdvertencia({
+            numero: alvoReal,
+            grupoId: jid,
+            motivo,
+            aplicadoPor: autorReal
+          })
+        } catch (erro) {
+          console.error('[adv] 💥 erro ao gravar a advertência:', erro?.stack || erro)
+          return await enviar(sock, jid, msg, AVISO_ERRO_BANCO)
+        }
+        if (!resultado) return await enviar(sock, jid, msg, AVISO_ERRO_BANCO)
 
-      const { total, doc, limite } = resultado
-      console.log(`[adv] ⚠️ ${alvoReal} advertido em ${jid} (${total}/${limite}) por ${autorReal}`)
+        const { total, doc, limite } = resultado
+        console.log(`[adv] ⚠️ ${alvoReal} advertido em ${jid} (${total}/${limite}) por ${autorReal}`)
 
-      // 🔟 Limite atingido → ban automático (senão, confirmação normal)
-      if (total >= limite) {
-        return await aplicarBanAutomatico(sock, jid, msg, alvo.participante.id, alvoReal, autorReal, {
-          limite,
-          validar: async () => {
-            const recentes = await sock.groupMetadata(jid)
-            const atual = await identificar(recentes.participants || [], alvo.participante.id)
-            if (!atual.participante || atual.numero !== alvoReal || atual.dono) throw new Error('Alvo protegido ou ausente')
-            if (!await autorizado(recentes, sender)) throw new Error('Autor perdeu a permissão administrativa')
-          }
-        })
-      }
+        // 🔟 Limite atingido → ban automático (senão, confirmação normal)
+        if (total >= limite) {
+          return await aplicarBanAutomatico(sock, jid, msg, alvo.participante.id, alvoReal, autorReal, {
+            limite,
+            validar: async () => {
+              const recentes = await sock.groupMetadata(jid)
+              const atual = await identificar(recentes.participants || [], alvo.participante.id)
+              if (!atual.participante || atual.numero !== alvoReal || atual.dono) throw new Error('Alvo protegido ou ausente')
+              if (!await autorizado(recentes, sender)) throw new Error('Autor perdeu a permissão administrativa')
+            }
+          })
+        }
 
-      return await sock.sendMessage(jid, {
-        text: montarConfirmacao({ alvoNumero: alvoReal, motivo, aplicadoPor: autorReal, total, data: doc.data, limite }),
-        mentions: [alvoBruto, sender]
-      }, { quoted: msg })
+        return await sock.sendMessage(jid, {
+          text: montarConfirmacao({ alvoNumero: alvoReal, motivo, aplicadoPor: autorReal, total, data: doc.data, limite }),
+          mentions: [alvoBruto, sender]
+        }, { quoted: msg })
       })
 
     } catch (err) {

@@ -32,7 +32,16 @@ module.exports = function colecaoFake() {
       leituras++
       let encontrados = docs.filter(d => casa(d, filtro))
       return {
-        sort(spec) { const [k, ordem] = Object.entries(spec)[0]; encontrados.sort((a, b) => (a[k] < b[k] ? -1 : a[k] > b[k] ? 1 : 0) * ordem); return this },
+        sort(spec) {
+          encontrados.sort((a, b) => {
+            for (const [k, ordem] of Object.entries(spec)) {
+              const resultado = (a[k] < b[k] ? -1 : a[k] > b[k] ? 1 : 0) * ordem
+              if (resultado) return resultado
+            }
+            return 0
+          })
+          return this
+        },
         skip(n) { encontrados = encontrados.slice(n); return this },
         limit(n) { encontrados = encontrados.slice(0, n); return this },
         async toArray() { return encontrados.map(d => ({ ...d })) }
