@@ -164,10 +164,30 @@ async function main() {
     const exclusoes = []
     const eventos = []
     const polls = []
+    const imagensTotag = []
+    const downloadsTotag = []
     const protecoes = {}
     const mapaAfk = new Map()
     const mutados = new Map()
     const registro = new Map([['mute', { mutedUsers: mutados }]])
+    // Mock apenas do download usado pelo comando real; demais módulos usam o Baileys real.
+    const entradaBaileys = require.resolve('@whiskeysockets/baileys')
+    const baileysReal = require('@whiskeysockets/baileys')
+    const cacheBaileys = require.cache[entradaBaileys]
+    let totag
+    try {
+      require.cache[entradaBaileys] = { exports: { ...baileysReal, downloadMediaMessage: async (...args) => {
+        downloadsTotag.push(args)
+        return Buffer.from('imagem-totag-offline')
+      } } }
+      totag = require('../comandos/admin/totag')
+    } finally { require.cache[entradaBaileys] = cacheBaileys }
+    for (const nome of [totag.nome, ...totag.aliases]) {
+      registro.set(nome, { executar: async (...args) => {
+        eventos.push('comando:totag')
+        return totag.executar(...args)
+      } })
+    }
     const limparChat = require('../comandos/menu-dono/limpar-chat')
     const regrasFigurinhas = require('../dados/figurinhas-regras')
     const moderacaoFigurinhas = require('../dados/moderacao-figurinhas')
@@ -220,6 +240,7 @@ async function main() {
         async groupLeave(jid) { assert.equal(jid, grupo); eventos.push('saida-grupo') },
         async sendMessage(jid, conteudo) {
           if (conteudo.poll) polls.push(conteudo.poll)
+          if (conteudo.image && conteudo.contextInfo?.mentionedJid) imagensTotag.push(conteudo)
           eventos.push(conteudo.delete ? 'delete' : 'resposta')
           if (conteudo.delete) {
             exclusoes.push(conteudo.delete)
@@ -265,7 +286,7 @@ async function main() {
     }
     require('../dados/mensagens-enviadas').acompanharSocket(contexto.sock)
     vm.runInNewContext(fonte.slice(inicio, fim), contexto)
-    return { eventos, exclusoes, protecoes, mapaAfk, mutados, polls, sock: contexto.sock, async enviar(texto, sender = `${comum}@s.whatsapp.net`, conteudo, fromMe = false) {
+    return { eventos, exclusoes, protecoes, mapaAfk, mutados, polls, imagensTotag, downloadsTotag, sock: contexto.sock, async enviar(texto, sender = `${comum}@s.whatsapp.net`, conteudo, fromMe = false) {
       eventos.length = 0
       const mensagem = msg(sender)
       const lote = { messages: [{ ...mensagem, key: { ...mensagem.key, id: `recebida-${++sequencia}`, fromMe }, message: conteudo || { conversation: texto } }] }
@@ -385,6 +406,42 @@ async function main() {
       await fluxo.enviar(`/${comando}`, `${dono}@s.whatsapp.net`)
       assert.ok(fluxo.eventos.includes(`comando:${comando}`))
     }
+  })
+  await teste('OFF: totag/notag2 com imagem citada bloqueia ADM e permite dono LID', async () => {
+    await estado.definirLigado(false)
+    for (const nome of ['totag', 'notag2']) {
+      const message = { ephemeralMessage: { message: { imageMessage: { caption: `/${nome}`, contextInfo: {
+        stanzaId: 'imagem-original', participant: `${comum}@s.whatsapp.net`,
+        quotedMessage: { imageMessage: { caption: 'Legenda original', mimetype: 'image/jpeg', url: 'https://example.invalid/original' } }
+      } } } } }
+      const antes = fluxo.downloadsTotag.length
+      for (const sender of [`${comum}@s.whatsapp.net`, '67890@lid']) {
+        await fluxo.enviar('', sender, message)
+        assert.ok(!fluxo.eventos.includes('comando:totag'))
+      }
+      assert.equal(fluxo.downloadsTotag.length, antes)
+      await fluxo.enviar('', '12345@lid', message)
+      assert.ok(fluxo.eventos.includes('comando:totag'))
+      assert.equal(fluxo.downloadsTotag.length, antes + 1)
+      assert.equal(fluxo.downloadsTotag.at(-1)[0].key.id, 'imagem-original')
+      const envio = fluxo.imagensTotag.at(-1)
+      assert.deepEqual(envio.image, Buffer.from('imagem-totag-offline'))
+      assert.equal(envio.caption, 'Legenda original')
+      assert.deepEqual(envio.contextInfo.mentionedJid, (await fluxo.sock.groupMetadata(grupo)).participants.map(p => p.id))
+      assert.equal(await estado.obterLigado(), false)
+    }
+  })
+  await teste('ON: ADM LID reenvia imagem por totag no handler', async () => {
+    await estado.definirLigado(true)
+    const antes = fluxo.downloadsTotag.length
+    await fluxo.enviar('/totag', '67890@lid', { extendedTextMessage: { text: '/totag', contextInfo: {
+      stanzaId: 'imagem-sem-legenda', participant: `${comum}@s.whatsapp.net`,
+      quotedMessage: { imageMessage: { mimetype: 'image/png', url: 'https://example.invalid/original' } }
+    } } })
+    assert.equal(fluxo.downloadsTotag.length, antes + 1)
+    assert.ok(fluxo.eventos.includes('comando:totag'))
+    assert.equal(fluxo.imagensTotag.at(-1).caption, undefined)
+    await estado.definirLigado(false)
   })
   await teste('OFF preserva gate das enquetes nativas e aliases no handler real', async () => {
     const jogos = require('../dados/jogos-ativos')

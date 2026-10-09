@@ -1,7 +1,25 @@
-const { downloadMediaMessage, normalizeMessageContent, getContentType } = require('@whiskeysockets/baileys');
+const { downloadMediaMessage, normalizeMessageContent, getContentType, jidNormalizedUser } = require('@whiskeysockets/baileys');
 const { ehAdminDoGrupo, ehDonoDoBot } = require('../../config');
 const { resolverNumeroAlvo } = require('../../lid');
 const { extrairTextoComando } = require('../../dados/texto-comando');
+
+function contextoCitado(message) {
+  // O roteador aceita comandos em texto e em legendas. A citação pertence
+  // ao nó que contém o comando, não necessariamente a extendedTextMessage.
+  const conteudo = normalizeMessageContent(message) || {};
+  for (const valor of Object.values(conteudo)) {
+    if (valor?.contextInfo?.quotedMessage) return valor.contextInfo;
+  }
+  return null;
+}
+
+function visualizacaoUnica(conteudo, profundidade = 0) {
+  if (!conteudo || typeof conteudo !== 'object') return false;
+  if (profundidade > 10) return true;
+  if (conteudo.viewOnceMessage || conteudo.viewOnceMessageV2 || conteudo.viewOnceMessageV2Extension) return true;
+  return Object.values(conteudo).some(valor => valor?.viewOnce === true ||
+    (valor?.message && visualizacaoUnica(valor.message, profundidade + 1)));
+}
 
 module.exports = {
   nome: 'totag',
@@ -30,12 +48,15 @@ module.exports = {
       // Mesma autorização de /hidetag: ADM OU dono, usando JID cru e
       // telefone comprovado pelos metadados ou pelo mapeamento da sessão.
       const sender = msg?.key?.participant || msg?.key?.remoteJid || '';
-      const resolucao = await resolverNumeroAlvo(participantes, sender);
-      const candidatos = [sender];
-      if (resolucao.via !== null && resolucao.numero) {
-        candidatos.push(`${resolucao.numero}@s.whatsapp.net`);
-      }
-      if (!candidatos.some((c) => ehAdminDoGrupo(participantes, c) || ehDonoDoBot(participantes, c))) {
+      const doRemetente = jid => participantes.filter(p => [p.id, p.phoneNumber].filter(Boolean)
+        .some(id => jidNormalizedUser(id) === jidNormalizedUser(jid)));
+      const resolucao = /@(lid|s\.whatsapp\.net)$/.test(sender)
+        ? await resolverNumeroAlvo(doRemetente(sender), sender) : { via: null };
+      const telefone = resolucao.via && resolucao.numero ? `${resolucao.numero}@s.whatsapp.net` : null;
+      const admin = ehAdminDoGrupo(doRemetente(sender), sender) ||
+        (telefone && ehAdminDoGrupo(doRemetente(telefone), telefone));
+      const dono = telefone && ehDonoDoBot([], telefone);
+      if (!admin && !dono) {
         return await sock.sendMessage(jid, {
           text: '🔒 Só administradores do grupo ou donos do bot podem usar /totag.'
         }, { quoted: msg });
@@ -52,12 +73,19 @@ module.exports = {
         return;
       }
 
-      const conteudo = normalizeMessageContent(msg.message) || {};
-      const contexto = conteudo.extendedTextMessage?.contextInfo;
+      const contexto = contextoCitado(msg.message);
       const quoted = contexto?.quotedMessage;
       if (!quoted) {
         return await sock.sendMessage(jid, {
           text: '📩 Use /totag seu texto (ou /notag2 seu texto).\n\nResponda a uma mensagem de texto, imagem, vídeo ou áudio e envie /totag sem texto para reenviá-la. Todos serão marcados silenciosamente.'
+        }, { quoted: msg });
+      }
+
+      // Normalizar remove o envelope viewOnce. Conferir antes de normalizar
+      // impede transformar mídia de visualização única em cópia permanente.
+      if (visualizacaoUnica(quoted)) {
+        return await sock.sendMessage(jid, {
+          text: '🔒 Essa mídia é de visualização única e não pode ser reenviada por /totag. Peça ao autor uma imagem, vídeo ou áudio comum.'
         }, { quoted: msg });
       }
 
@@ -93,7 +121,7 @@ module.exports = {
         const imagem = original.imageMessage;
         await sock.sendMessage(jid, {
           image: buffer,
-          caption: imagem.caption,
+          caption: imagem.caption ?? undefined,
           mimetype: imagem.mimetype || 'image/jpeg',
           ...marcacao
         });
@@ -101,7 +129,7 @@ module.exports = {
         const video = original.videoMessage;
         await sock.sendMessage(jid, {
           video: buffer,
-          caption: video.caption,
+          caption: video.caption ?? undefined,
           mimetype: video.mimetype || 'video/mp4',
           gifPlayback: video.gifPlayback === true,
           ...marcacao

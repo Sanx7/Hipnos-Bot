@@ -217,10 +217,84 @@ async function main() {
       const quoted = { [envelope]: { message: IMAGEM } };
       const message = msg(quoted);
       message.message = { ephemeralMessage: { message: message.message } };
+      if (envelope !== 'ephemeralMessage') {
+        recusa(await executar(message), /visualização única/);
+        return;
+      }
       const c = reenvio(await executar(message));
       assert.equal(c.image, BYTES);
       assert.equal(c.caption, IMAGEM.imageMessage.caption);
       assert.equal(baixadas[0][0].message, quoted);
+    });
+  }
+  // Metadados de mídia no formato do protocolo; nenhum URL é acessado.
+  const imagemReal = { imageMessage: {
+    url: 'https://example.invalid/imagem-original', directPath: '/midia-original',
+    mediaKey: Buffer.alloc(32, 1), fileSha256: Buffer.alloc(32, 2), fileEncSha256: Buffer.alloc(32, 3),
+    fileLength: BYTES.length, mimetype: 'image/jpeg', caption: 'Legenda original',
+    width: 640, height: 480
+  } };
+  function comandoProtocolado(tipo, citado, comando = '/totag', envelope) {
+    const corpo = tipo === 'extendedTextMessage' ? { text: comando } : { caption: comando, mimetype: tipo === 'imageMessage' ? 'image/jpeg' : 'video/mp4' };
+    const generated = baileys.generateWAMessageFromContent(GRUPO, { [tipo]: corpo }, {
+      userJid: ADMIN, quoted: { key: { remoteJid: GRUPO, id: 'ORIGINAL', participant: COMUM, fromMe: false }, message: citado }
+    });
+    generated.key.participant = LID_ADMIN;
+    generated.key.fromMe = false;
+    if (envelope) generated.message = { [envelope]: { message: generated.message } };
+    const proto = baileys.proto.WebMessageInfo;
+    return proto.decode(proto.encode(generated).finish());
+  }
+  for (const tipo of ['extendedTextMessage', 'imageMessage', 'videoMessage', 'documentMessage']) {
+    for (const legenda of [undefined, 'Legenda original']) {
+      await testar(`protocolo real: ${tipo}.contextInfo cita imagem ${legenda ? 'com' : 'sem'} legenda`, async () => {
+        const original = { imageMessage: { ...imagemReal.imageMessage, caption: legenda } };
+        const message = comandoProtocolado(tipo, original);
+        const c = reenvio(await executar(message));
+        assert.equal(c.image, BYTES);
+        assert.equal(c.caption, legenda);
+        assert.equal(c.text, undefined);
+        assert.equal(baixadas.length, 1);
+        const [alvo, formato] = baixadas[0];
+        assert.equal(formato, 'buffer');
+        assert.deepEqual(alvo.key, { remoteJid: GRUPO, id: 'ORIGINAL', participant: COMUM, fromMe: false });
+        assert.equal(alvo.message.imageMessage.url, imagemReal.imageMessage.url);
+        assert.deepEqual(Buffer.from(alvo.message.imageMessage.mediaKey), imagemReal.imageMessage.mediaKey);
+        assert.equal(alvo.message.imageMessage.caption ?? undefined, legenda);
+      });
+    }
+  }
+  for (const envelope of ['ephemeralMessage', 'viewOnceMessage', 'viewOnceMessageV2', 'viewOnceMessageV2Extension', 'associatedChildMessage']) {
+    await testar(`comando com imageMessage.contextInfo dentro de ${envelope}`, async () => {
+      const message = comandoProtocolado('imageMessage', imagemReal, '/notag2', envelope);
+      assert.equal(reenvio(await executar(message)).image, BYTES);
+      assert.equal(baixadas.length, 1);
+    });
+  }
+  for (const tipo of ['imageMessage', 'videoMessage', 'audioMessage']) {
+    await testar(`flag ${tipo}.viewOnce não é removida para reenviar`, async () => {
+      const message = comandoProtocolado('extendedTextMessage', { [tipo]: { viewOnce: true, mimetype: 'image/jpeg' } });
+      recusa(await executar(message), /visualização única/);
+    });
+  }
+  await testar('imagem viewOnce dentro de ephemeral é recusada antes do download', async () => {
+    const original = { ephemeralMessage: { message: { viewOnceMessageV2: { message: imagemReal } } } };
+    const message = msg(baileys.proto.Message.decode(baileys.proto.Message.encode(baileys.proto.Message.fromObject(original)).finish()));
+    recusa(await executar(message), /visualização única/);
+  });
+  await testar('imageMessage.contextInfo sem quotedMessage mostra ajuda', async () => {
+    const message = msg();
+    message.message = { imageMessage: { caption: '/totag', contextInfo: { stanzaId: 'ausente' } } };
+    recusa(await executar(message), /Use \/totag seu texto/);
+  });
+  await testar('texto direto em legenda prevalece sobre imagem citada', async () => {
+    const message = comandoProtocolado('imageMessage', imagemReal, '/notag2 Apenas este texto');
+    assert.equal(reenvio(await executar(message)).text, 'Apenas este texto');
+    assert.equal(baixadas.length, 0);
+  });
+  for (const sender of [`${DONO.split('@')[0]}@lid`, `${ADMIN.split('@')[0]}@lid`]) {
+    await testar(`LID sem resolução não herda permissão pelos dígitos ${sender}`, async () => {
+      recusa(await executar(msg(imagemReal, sender)), /Só administradores/);
     });
   }
   await testar('notag2 reenvia imagem sem legenda nem texto extra', async () => {
