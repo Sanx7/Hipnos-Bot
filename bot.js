@@ -160,6 +160,7 @@ const { comandos } = require('./comandos-registry')
 // (troca em tempo real pelo /set-prefix, sem reiniciar o bot). Validação,
 // persistência e cache vivem todos em prefixo.js — aqui só consumimos.
 const prefixoComandos = require('./prefixo')
+const respostaPrefixo = require('./dados/resposta-prefixo')
 const estadoBot = require('./estado-bot')
 const mensagensEnviadas = require('./dados/mensagens-enviadas')
 
@@ -774,6 +775,10 @@ async function startBot() {
       // OFF bloqueia só a interação manual: comandos, palpites e IA.
       // Donos (JID/LID) continuam acessando inclusive /on. Sem aviso/spam.
       if (!podeInteragir) return
+
+      // Consulta pública sem prefixo. Moderação e manutenção já verificadas;
+      // consumir também em cooldown impede votos/palpites e respostas da IA.
+      if (await respostaPrefixo.processar(sock, jid, msg, text)) return
 
       // 🎮 TEXTO LIVRE PARA JOGOS — mensagens que NÃO são comandos (isto é,
       //      que não começam com o prefixo configurado) podem ser palpites de

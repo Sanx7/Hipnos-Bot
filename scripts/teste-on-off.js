@@ -164,6 +164,7 @@ async function main() {
     const exclusoes = []
     const eventos = []
     const polls = []
+    const respostasPrefixo = []
     const imagensTotag = []
     const downloadsTotag = []
     const protecoes = {}
@@ -209,6 +210,13 @@ async function main() {
       registro.set(nome, { executar: async () => eventos.push(`comando:${nome}`) })
     }
     const sairGrupo = require('../comandos/menu-dono/sairgrupo')
+    const setPrefix = require('../comandos/menu-dono/set-prefix')
+    for (const nome of [setPrefix.nome, ...setPrefix.aliases]) {
+      registro.set(nome, { executar: async (...args) => {
+        eventos.push('comando:set-prefix')
+        return setPrefix.executar(...args)
+      } })
+    }
     for (const cmd of [require('../comandos/menu-brincadeiras/enquete')[0], require('../comandos/admin/enquete-admin')[0]]) {
       for (const nome of [cmd.nome, ...cmd.aliases]) {
         registro.set(nome, { executar: async (...args) => {
@@ -239,6 +247,7 @@ async function main() {
         async groupFetchAllParticipating() { return { [grupo]: { id: grupo } } },
         async groupLeave(jid) { assert.equal(jid, grupo); eventos.push('saida-grupo') },
         async sendMessage(jid, conteudo) {
+          if (conteudo.text?.includes('Meu prefixo atual é:')) respostasPrefixo.push({ jid, texto: conteudo.text })
           if (conteudo.poll) polls.push(conteudo.poll)
           if (conteudo.image && conteudo.contextInfo?.mentionedJid) imagensTotag.push(conteudo)
           eventos.push(conteudo.delete ? 'delete' : 'resposta')
@@ -254,6 +263,7 @@ async function main() {
         }
       },
       estadoBot: estado,
+      respostaPrefixo: require('../dados/resposta-prefixo'),
       moderacaoFigurinhas,
       console,
       path: require('node:path'),
@@ -276,7 +286,7 @@ async function main() {
       buscarVariosAfk: async () => { eventos.push('afk'); return mapaAfk },
       removerAfk: async () => eventos.push('afk-removido'),
       formatarDuracao: () => '1 minuto', MOTIVO_PADRAO: 'ausente',
-      prefixoComandos: { obterPrefixo: async () => '/', resolverNomeComando: text => text.startsWith('/') ? text.slice(1).split(' ')[0] : null },
+      prefixoComandos: require('../prefixo'),
       processarMensagemLivre: async (...args) => {
         eventos.push('jogo')
         const jogos = require('../dados/jogos-ativos')
@@ -286,9 +296,11 @@ async function main() {
     }
     require('../dados/mensagens-enviadas').acompanharSocket(contexto.sock)
     vm.runInNewContext(fonte.slice(inicio, fim), contexto)
-    return { eventos, exclusoes, protecoes, mapaAfk, mutados, polls, imagensTotag, downloadsTotag, sock: contexto.sock, async enviar(texto, sender = `${comum}@s.whatsapp.net`, conteudo, fromMe = false) {
+    return { eventos, exclusoes, protecoes, mapaAfk, mutados, polls, imagensTotag, downloadsTotag, respostasPrefixo, sock: contexto.sock, async enviar(texto, sender = `${comum}@s.whatsapp.net`, conteudo, fromMe = false, jidDestino = grupo) {
       eventos.length = 0
       const mensagem = msg(sender)
+      mensagem.key.remoteJid = jidDestino
+      if (!jidDestino.endsWith('@g.us')) delete mensagem.key.participant
       const lote = { messages: [{ ...mensagem, key: { ...mensagem.key, id: `recebida-${++sequencia}`, fromMe }, message: conteudo || { conversation: texto } }] }
       for (const fn of ouvintes.get('messages.upsert') || []) await fn(lote)
       await Promise.resolve()
@@ -406,6 +418,93 @@ async function main() {
       await fluxo.enviar(`/${comando}`, `${dono}@s.whatsapp.net`)
       assert.ok(fluxo.eventos.includes(`comando:${comando}`))
     }
+  })
+  await teste('ON: prefixo isolado responde uma vez, após moderação e antes de jogos/IA', async () => {
+    await estado.definirLigado(true)
+    const cooldowns = require('../dados/cooldowns')
+    fluxo.protecoes.onlyAdmin = [grupo]
+    try {
+      for (const palavra of ['prefixo', 'PREFIXO', ' Prefixo ', 'PrEfIxO']) {
+        cooldowns.limpar()
+        const antes = fluxo.respostasPrefixo.length
+        await fluxo.enviar(palavra)
+        assert.equal(fluxo.respostasPrefixo.length, antes + 1)
+        assert.ok(!fluxo.eventos.includes('jogo'))
+        assert.ok(!fluxo.eventos.includes('ia'))
+        for (const evento of ['revogacao', 'ranking', 'jornal', 'cache']) assert.ok(fluxo.eventos.includes(evento), evento)
+      }
+    } finally { delete fluxo.protecoes.onlyAdmin; cooldowns.limpar(); await estado.definirLigado(false) }
+  })
+  await teste('ON: frases não acionam prefixo e continuam nos jogos/IA', async () => {
+    await estado.definirLigado(true)
+    const antes = fluxo.respostasPrefixo.length
+    for (const frase of ['qual é o prefixo?', 'me fala o prefixo', 'prefixos']) {
+      await fluxo.enviar(frase)
+      assert.equal(fluxo.respostasPrefixo.length, antes)
+      assert.ok(fluxo.eventos.includes('jogo')); assert.ok(fluxo.eventos.includes('ia'))
+    }
+    await estado.definirLigado(false)
+  })
+  await teste('ON: consulta funciona no privado e cooldown é por conversa', async () => {
+    await estado.definirLigado(true)
+    const cooldowns = require('../dados/cooldowns')
+    cooldowns.limpar()
+    const antes = fluxo.respostasPrefixo.length
+    await fluxo.enviar('prefixo')
+    await fluxo.enviar('PREFIXO', '67890@lid')
+    assert.equal(fluxo.respostasPrefixo.length, antes + 1)
+    assert.ok(!fluxo.eventos.includes('jogo')); assert.ok(!fluxo.eventos.includes('ia'))
+    await fluxo.enviar('prefixo', `${comum}@s.whatsapp.net`, undefined, false, `${comum}@s.whatsapp.net`)
+    assert.equal(fluxo.respostasPrefixo.length, antes + 2)
+    assert.equal(fluxo.respostasPrefixo.at(-1).jid, `${comum}@s.whatsapp.net`)
+    cooldowns.limpar(); await estado.definirLigado(false)
+  })
+  await teste('prefixo global alterado por set-prefix real aparece na consulta e no roteador', async () => {
+    const prefixo = require('../prefixo')
+    const cooldowns = require('../dados/cooldowns')
+    let documento = { prefixo: '/' }, escritas = 0
+    prefixo.__definirColecaoTeste({
+      findOne: async () => documento,
+      updateOne: async (_, atualizacao) => { documento = atualizacao.$set; escritas++ }
+    })
+    await estado.definirLigado(true)
+    try {
+      await fluxo.enviar('/set-prefix !', `${dono}@s.whatsapp.net`)
+      assert.ok(fluxo.eventos.includes('comando:set-prefix'))
+      cooldowns.limpar()
+      await fluxo.enviar('prefixo')
+      assert.match(fluxo.respostasPrefixo.at(-1).texto, /Use !menu/)
+      await fluxo.enviar('!menu')
+      assert.ok(fluxo.eventos.includes('comando:menu'))
+      await fluxo.enviar('/prefixo', `${dono}@s.whatsapp.net`)
+      assert.ok(fluxo.eventos.includes('comando:set-prefix'), 'alias existente preservado')
+      assert.equal(escritas, 1)
+    } finally {
+      cooldowns.limpar(); prefixo.__definirColecaoTeste(null); prefixo.__definirPrefixoTeste('/')
+      await estado.definirLigado(false)
+    }
+  })
+  await teste('OFF: consulta bloqueada para comum, ADM e VIP em grupo e privado', async () => {
+    await estado.definirLigado(false)
+    const antes = fluxo.respostasPrefixo.length
+    for (const sender of [`${comum}@s.whatsapp.net`, '67890@lid', '5511555550000@s.whatsapp.net']) {
+      await fluxo.enviar('prefixo', sender)
+      await fluxo.enviar('prefixo', sender, undefined, false, sender)
+      assert.equal(fluxo.respostasPrefixo.length, antes)
+    }
+  })
+  await teste('OFF: dono consulta por JID/LID no grupo e no privado', async () => {
+    const cooldowns = require('../dados/cooldowns')
+    lid.__definirConsultaSessaoTeste(async id => id === '98765' ? dono : null)
+    try {
+      for (const [sender, jid] of [['12345@lid', grupo], [`${dono}@s.whatsapp.net`, `${dono}@s.whatsapp.net`], ['98765@lid', '98765@lid']]) {
+        cooldowns.limpar()
+        const antes = fluxo.respostasPrefixo.length
+        await fluxo.enviar(' Prefixo ', sender, undefined, false, jid)
+        assert.equal(fluxo.respostasPrefixo.length, antes + 1)
+        assert.equal(await estado.obterLigado(), false)
+      }
+    } finally { cooldowns.limpar(); lid.__definirConsultaSessaoTeste(async () => null) }
   })
   await teste('OFF: totag/notag2 com imagem citada bloqueia ADM e permite dono LID', async () => {
     await estado.definirLigado(false)
