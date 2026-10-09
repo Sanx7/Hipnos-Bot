@@ -152,7 +152,7 @@ module.exports = {
 ➥ Calcula a compatibilidade entre duas pessoas, em % — com 1 menção compara com você, com 2 compara as duas. O veredito é do *par* e trava por dia (também: /match).
 
 📊 /enquete pergunta | opção 1 | opção 2
-➥ Enquete de opinião: qualquer membro abre, o grupo vota mandando o NÚMERO da opção (2 a 6 opções, 2 min). /encerrar-enquete fecha antes (só quem criou).
+➥ Enquete nativa de opinião: qualquer membro abre; 2 a 12 opções e um voto por pessoa. Apuração por 2 min; /encerrar-enquete fecha antes (só quem criou).
 
 🧩 /adivinha-emoji
 ➥ Adivinhe o filme, expressão ou frase pelos emojis — quem acertar primeiro vence (um jogo por grupo, ~90s por rodada; também: /emojiadivinha, /adivinheemoji).

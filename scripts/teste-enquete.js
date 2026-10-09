@@ -5,8 +5,8 @@
 // timer real de 2 minutos é criado).
 // ⚠️ MONGODB_URI zerada no TOPO (o config.js carrega o .env da raiz).
 //
-// Cobre: criação (pergunta + opções numeradas), votos por número e por
-// texto, troca de voto, resultado com vencedora, empate, encerramento
+// Cobre: criação nativa, votos cifrados no protocolo real do Baileys,
+// troca de voto, resultado com vencedora, empate, encerramento
 // por TEMPO e MANUAL, bloqueio de enquete duplicada, bloqueio cruzado
 // com outro jogo, limites de opções, fora de grupo e erro de rede.
 // Uso: node scripts/teste-enquete.js
@@ -16,6 +16,7 @@ process.env.MONGODB_URI = ''
 process.env.MONGO_URI_RPG = ''
 
 const jogosAtivos = require('../dados/jogos-ativos')
+const protocolo = require('./helpers/enquete-nativa-fake')
 const modulos = require('../comandos/menu-brincadeiras/enquete')
 const enquete = modulos[0]          // /enquete
 const encerrarCmd = modulos[1]      // /encerrar-enquete
@@ -35,7 +36,7 @@ function criarSock () {
   const enviadas = []
   return {
     enviadas,
-    sock: { sendMessage: async (para, conteudo, extra) => { enviadas.push({ para, conteudo, extra }); return { key: { id: 'e' + enviadas.length } } } }
+    sock: { user: { id: protocolo.BOT }, sendMessage: async (para, conteudo, extra) => { enviadas.push({ para, conteudo, extra }); return protocolo.mensagemEnviada(para, conteudo) } }
   }
 }
 
@@ -61,7 +62,12 @@ async function abrir (pergunta = 'Melhor opção?', opcoes = ['Ana', 'Bia', 'Cau
   return s
 }
 
-const votar = async (s, quem, texto) => jogosAtivos.processarMensagemLivre(s.sock, JID, msg(quem), texto)
+const votar = async (s, quem, texto) => {
+  const dados = enquete._enqueteAtiva(JID)
+  const indice = /^\d+$/.test(texto) ? Number(texto) - 1 : dados?.opcoes.findIndex(o => o.toLowerCase() === texto.toLowerCase())
+  const mensagem = dados && indice >= 0 && indice < dados.opcoes.length ? protocolo.voto(dados, JID, quem, [indice]) : msg(quem)
+  return jogosAtivos.processarMensagemLivre(s.sock, JID, mensagem, texto)
+}
 
 async function main () {
   console.log('🧪 /enquete — testes offline\n')
@@ -71,7 +77,7 @@ async function main () {
   ok(enquete.nome === 'enquete', 'nome = enquete')
   ok(encerrarCmd.nome === 'encerrar-enquete', 'nome = encerrar-enquete')
   ok(typeof enquete.executar === 'function' && typeof encerrarCmd.executar === 'function', 'ambos têm executar')
-  ok(enquete.MAX_OPCOES === 6 && enquete.MIN_OPCOES === 2, 'limite de 2 a 6 opções')
+  ok(enquete.MAX_OPCOES === 12 && enquete.MIN_OPCOES === 2, 'limite de 2 a 12 opções')
   ok(enquete.TIPO_JOGO === jogosAtivos.TIPOS.ENQUETE, 'tipo registrado no registro compartilhado')
 
   // 0.1) parse: pergunta + opções
@@ -82,23 +88,23 @@ async function main () {
   // 1) CRIAÇÃO
   let s = await abrir()
   let t = ultimo(s.enviadas)
-  ok(/ENQUETE/i.test(t), 'a enquete foi criada', t)
-  ok(t.includes('Melhor opção?'), 'a pergunta aparece na mensagem')
-  ok(t.includes('1️⃣ Ana') && t.includes('2️⃣ Bia') && t.includes('3️⃣'), 'as opções vão numeradas com emoji')
-  ok(/NÚMERO da opção/i.test(t), 'a mensagem explica como votar')
+  const poll = s.enviadas[0].conteudo.poll
+  ok(Boolean(poll), 'a enquete nativa foi criada')
+  ok(poll.name === 'Melhor opção?', 'a pergunta aparece na enquete')
+  ok(poll.values.join('|') === 'Ana|Bia|Cauã', 'opções nativas preservadas')
+  ok(poll.selectableCount === 1, 'apenas uma escolha por pessoa')
   ok(jogosAtivos.tipoAtivo(JID) === 'enquete', 'a enquete ficou registrada no grupo')
   ok(typeof timerAgendado === 'function', 'o timer de duração foi agendado')
 
-  // 2) VOTO pelo NÚMERO
-  ok(await votar(s, A, '1') === true, 'voto pelo número é aceito')
-  ok(/Voto registrado/i.test(ultimo(s.enviadas)), 'o bot confirma o voto', ultimo(s.enviadas))
+  // O helper converte a escolha em voto nativo criptografado.
+  ok(await votar(s, A, '1') === true, 'voto nativo na primeira opção é aceito')
+  ok(s.enviadas.length === 1, 'voto nativo não gera confirmação por texto')
   let d = enquete._enqueteAtiva(JID)
-  ok(d.votos.get(0).has(A), 'o voto foi para a opção 1')
+  ok(d.votos.get(0).has(A.split('@')[0]), 'o voto foi para a opção 1')
 
-  // 2.1) VOTO pelo TEXTO da opção
-  ok(await votar(s, B, 'Bia') === true, 'voto pelo texto da opção é aceito')
+  ok(await votar(s, B, 'Bia') === true, 'voto nativo na opção Bia é aceito')
   d = enquete._enqueteAtiva(JID)
-  ok(d.votos.get(1).has(B), 'o voto foi para a opção 2 (Bia)')
+  ok(d.votos.get(1).has(B.split('@')[0]), 'o voto foi para a opção 2 (Bia)')
 
   // 2.2) Voto inválido (número fora / texto desconhecido) → silêncio
   const antesRuidoso = s.enviadas.length
@@ -109,8 +115,8 @@ async function main () {
   // 2.3) Um voto por pessoa: votar de novo TROCA
   await votar(s, A, '3')
   d = enquete._enqueteAtiva(JID)
-  ok(!d.votos.get(0).has(A), 'o voto antigo foi removido ao trocar')
-  ok(d.votos.get(2).has(A), 'o voto novo foi registrado')
+  ok(!d.votos.get(0).has(A.split('@')[0]), 'o voto antigo foi removido ao trocar')
+  ok(d.votos.get(2).has(A.split('@')[0]), 'o voto novo foi registrado')
   ok(enquete.apurar(d).total === 2, 'continua sendo 1 voto por pessoa', String(enquete.apurar(d).total))
 
   // 3) RESULTADO com vencedora
@@ -190,8 +196,8 @@ async function main () {
   await enquete.executar(lim.sock, JID, msg(A), '/enquete so uma | X')
   ok(/pelo menos/i.test(ultimo(lim.enviadas)), 'exige pelo menos 2 opções', ultimo(lim.enviadas))
   lim = criarSock()
-  await enquete.executar(lim.sock, JID, msg(A), '/enquete muitas | 1|2|3|4|5|6|7|8')
-  ok(/Limite de/i.test(ultimo(lim.enviadas)), 'recusa mais de 6 opções', ultimo(lim.enviadas))
+  await enquete.executar(lim.sock, JID, msg(A), '/enquete muitas | 1|2|3|4|5|6|7|8|9|10|11|12|13')
+  ok(/Limite de/i.test(ultimo(lim.enviadas)), 'recusa mais de 12 opções', ultimo(lim.enviadas))
 
   // 8.1) Sem "|" → instruções de uso
   lim = criarSock()

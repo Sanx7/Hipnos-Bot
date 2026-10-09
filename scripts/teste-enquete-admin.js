@@ -17,6 +17,7 @@ process.env.MONGODB_URI = ''
 process.env.MONGO_URI_RPG = ''
 
 const jogosAtivos = require('../dados/jogos-ativos')
+const protocolo = require('./helpers/enquete-nativa-fake')
 const modulos = require('../comandos/admin/enquete-admin')
 const enquete = modulos[0]      // /enquete-admin
 const encerrarCmd = modulos[1]  // /encerrar-enquete
@@ -57,7 +58,7 @@ function criarSock () {
       user: { id: '5511999999999@s.whatsapp.net' },
       groupMetadata: async () => ({ participants: PARTICIPANTES, owner: ADMIN }),
       groupParticipantsUpdate: async (gid, alvos, acao) => { baneados.push({ alvos, acao }); return alvos },
-      sendMessage: async (para, conteudo, extra) => { enviadas.push({ para, conteudo, extra }); return { key: { id: 'x' } } }
+      sendMessage: async (para, conteudo, extra) => { enviadas.push({ para, conteudo, extra }); return protocolo.mensagemEnviada(para, conteudo) }
     }
   }
 }
@@ -83,8 +84,12 @@ const textos = (e) => e.map((x) => x.conteudo?.text || '').join(' | ')
 let timerAgendado = null
 enquete._injetarAgendador((fn) => { timerAgendado = fn; return 1 }, () => {})
 
-const votar = async (s, quem, n) =>
-  jogosAtivos.processarMensagemLivre(s.sock, JID, msg(quem), String(n))
+const votar = async (s, quem, n) => {
+  const dados = enquete._enqueteAtiva(JID)
+  const indice = Number(n) - 1
+  const mensagem = dados && Number.isInteger(indice) && indice >= 0 && indice < dados.opcoes.length ? protocolo.voto(dados, JID, quem, [indice]) : msg(quem)
+  return jogosAtivos.processarMensagemLivre(s.sock, JID, mensagem, String(n))
+}
 
 async function abrir (pergunta = 'Mudar a regra?', opcoes = ['Sim', 'Não']) {
   jogosAtivos.limparJogos()
@@ -116,13 +121,13 @@ async function main () {
   // 1.1) Admin abre
   s = await abrir()
   let t = ultimo(s.enviadas)
-  ok(/VOTAÇÃO DE DECISÃO/i.test(t), 'admin abre a votação', t)
-  ok(t.includes('1️⃣ Sim') && t.includes('2️⃣ Não'), 'opções numeradas com emoji')
+  ok(s.enviadas[0].conteudo.poll?.name === 'Mudar a regra?', 'admin abre a enquete nativa')
+  ok(s.enviadas[0].conteudo.poll?.values.join('|') === 'Sim|Não', 'opções nativas preservadas')
   ok(jogosAtivos.tipoAtivo(JID) === 'enquete-admin', 'votação registrada no grupo')
   ok(typeof timerAgendado === 'function', 'timer de duração agendado')
 
   // 2) VOTOS
-  ok(await votar(s, MEMBRO, 1) === true, 'voto pelo número é aceito')
+  ok(await votar(s, MEMBRO, 1) === true, 'voto nativo na primeira opção é aceito')
   let d = enquete._enqueteAtiva(JID)
   ok(d.votos.get(0).size === 1, '1 voto na opção 1')
   ok(await votar(s, MEMBRO2, 2) === true, 'segundo voto aceito')
@@ -147,7 +152,7 @@ async function main () {
   s = await abrir()
   const antes = s.enviadas.length
   ok(await votar(s, MEMBRO, 9) === false, 'número fora da faixa não é voto')
-  ok(await votar(s, MEMBRO, 'sim') === false, 'texto não é voto (aqui é só número)')
+  ok(await votar(s, MEMBRO, 'sim') === false, 'texto livre não é voto nativo')
   ok(s.enviadas.length === antes, 'voto inválido é ignorado em silêncio')
 
   // 3) RESULTADO com vencedora
@@ -210,8 +215,8 @@ async function main () {
   const ban1 = criarSock()
   await enquete.executar(ban1.sock, JID, msgComMencao(ALVO_BAN), '/enquete-admin-ban @alvo | sim | não')
   t = ultimo(ban1.enviadas)
-  ok(/VOTAÇÃO DE DECISÃO/i.test(t), 'votação de ban foi criada', t)
-  ok(t.includes('5511900000009'), 'a mensagem avisa que o alvo pode ser banido', t)
+  ok(ban1.enviadas.some(e => e.conteudo.poll?.name === 'Banir o marcado?'), 'votação nativa de ban foi criada')
+  ok(textos(ban1.enviadas).includes('5511900000009'), 'a mensagem avisa que o alvo pode ser banido')
   await votar(ban1, MEMBRO, 1)  // sim
   await votar(ban1, MEMBRO2, 1) // sim
   const encBan = criarSock()

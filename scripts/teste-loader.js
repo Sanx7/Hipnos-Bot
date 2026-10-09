@@ -25,7 +25,12 @@ function carregarComandos(pasta) {
         const comando = require(caminho)
         if (Array.isArray(comando)) {
           for (const item of comando) {
-            if (item?.nome && item.executar) comandos.set(item.nome, item)
+            if (item?.nome && item.executar) {
+              comandos.set(item.nome, item)
+              for (const alias of item.aliases || []) {
+                if (typeof alias === 'string' && alias && !comandos.has(alias)) comandos.set(alias, item)
+              }
+            }
             else console.log(`⚠️ Item ignorado em ${arquivo}: sem nome/executar`)
           }
           continue
@@ -65,6 +70,11 @@ for (const nome of ['ranking', 'rankativo', 'inativos', 'sairgrupo', 'sairdogrup
 const comunicado = require('../comandos/menu-dono/comunicado')
 for (const nome of [comunicado.nome, ...comunicado.aliases]) {
   if (comandos.get(nome) !== comunicado) process.exitCode = 1
+}
+for (const cmd of [require('../comandos/menu-brincadeiras/enquete')[0], require('../comandos/admin/enquete-admin')[0], require('../comandos/menu-brincadeiras/eununca')]) {
+  for (const nome of [cmd.nome, ...cmd.aliases]) {
+    if (comandos.get(nome) !== cmd) process.exitCode = 1
+  }
 }
 for (const cmd of require('../comandos/admin/figurinhas-moderacao')) {
   if (comandos.get(cmd.nome) !== cmd) {

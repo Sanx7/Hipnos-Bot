@@ -163,6 +163,7 @@ async function main() {
     const ouvintes = new Map()
     const exclusoes = []
     const eventos = []
+    const polls = []
     const protecoes = {}
     const mapaAfk = new Map()
     const mutados = new Map()
@@ -188,6 +189,14 @@ async function main() {
       registro.set(nome, { executar: async () => eventos.push(`comando:${nome}`) })
     }
     const sairGrupo = require('../comandos/menu-dono/sairgrupo')
+    for (const cmd of [require('../comandos/menu-brincadeiras/enquete')[0], require('../comandos/admin/enquete-admin')[0]]) {
+      for (const nome of [cmd.nome, ...cmd.aliases]) {
+        registro.set(nome, { executar: async (...args) => {
+          eventos.push(`comando:${cmd.nome}`)
+          return cmd.executar(...args)
+        } })
+      }
+    }
     const comunicado = require('../comandos/menu-dono/comunicado')
     for (const nome of [comunicado.nome, ...comunicado.aliases]) {
       registro.set(nome, { executar: async (...args) => {
@@ -210,6 +219,7 @@ async function main() {
         async groupFetchAllParticipating() { return { [grupo]: { id: grupo } } },
         async groupLeave(jid) { assert.equal(jid, grupo); eventos.push('saida-grupo') },
         async sendMessage(jid, conteudo) {
+          if (conteudo.poll) polls.push(conteudo.poll)
           eventos.push(conteudo.delete ? 'delete' : 'resposta')
           if (conteudo.delete) {
             exclusoes.push(conteudo.delete)
@@ -218,7 +228,8 @@ async function main() {
               update: { message: null, messageStubType: require('@whiskeysockets/baileys').WAMessageStubType.REVOKE }
             }])
           }
-          return { key: { remoteJid: jid, fromMe: true, id: `manutencao-${++sequencia}` } }
+          const mensagemPoll = conteudo.poll ? await require('./helpers/enquete-nativa-fake').mensagemEnviada(jid, conteudo) : null
+          return { key: { remoteJid: jid, fromMe: true, id: `manutencao-${++sequencia}` }, ...(mensagemPoll ? { message: mensagemPoll.message } : {}) }
         }
       },
       estadoBot: estado,
@@ -245,12 +256,16 @@ async function main() {
       removerAfk: async () => eventos.push('afk-removido'),
       formatarDuracao: () => '1 minuto', MOTIVO_PADRAO: 'ausente',
       prefixoComandos: { obterPrefixo: async () => '/', resolverNomeComando: text => text.startsWith('/') ? text.slice(1).split(' ')[0] : null },
-      processarMensagemLivre: async () => { eventos.push('jogo'); return false },
+      processarMensagemLivre: async (...args) => {
+        eventos.push('jogo')
+        const jogos = require('../dados/jogos-ativos')
+        return ['enquete', 'enquete-admin'].includes(jogos.tipoAtivo(args[1])) ? jogos.processarMensagemLivre(...args) : false
+      },
       processarGatilhoIA: async () => eventos.push('ia')
     }
     require('../dados/mensagens-enviadas').acompanharSocket(contexto.sock)
     vm.runInNewContext(fonte.slice(inicio, fim), contexto)
-    return { eventos, exclusoes, protecoes, mapaAfk, mutados, sock: contexto.sock, async enviar(texto, sender = `${comum}@s.whatsapp.net`, conteudo, fromMe = false) {
+    return { eventos, exclusoes, protecoes, mapaAfk, mutados, polls, sock: contexto.sock, async enviar(texto, sender = `${comum}@s.whatsapp.net`, conteudo, fromMe = false) {
       eventos.length = 0
       const mensagem = msg(sender)
       const lote = { messages: [{ ...mensagem, key: { ...mensagem.key, id: `recebida-${++sequencia}`, fromMe }, message: conteudo || { conversation: texto } }] }
@@ -369,6 +384,42 @@ async function main() {
     for (const comando of ['menu', 'ping', 'on', 'off']) {
       await fluxo.enviar(`/${comando}`, `${dono}@s.whatsapp.net`)
       assert.ok(fluxo.eventos.includes(`comando:${comando}`))
+    }
+  })
+  await teste('OFF preserva gate das enquetes nativas e aliases no handler real', async () => {
+    const jogos = require('../dados/jogos-ativos')
+    await estado.definirLigado(false)
+    for (const [nome, alias] of [['enquete', 'enquete-opiniao'], ['enquete-admin', 'votacao']]) {
+      const antes = fluxo.polls.length
+      for (const sender of [`${comum}@s.whatsapp.net`, '67890@lid']) {
+        await fluxo.enviar(`/${alias} P | A | B`, sender)
+        assert.ok(!fluxo.eventos.includes(`comando:${nome}`))
+      }
+      assert.equal(fluxo.polls.length, antes)
+      await fluxo.enviar(`/${alias} P | A | B`, '12345@lid')
+      assert.ok(fluxo.eventos.includes(`comando:${nome}`))
+      assert.equal(fluxo.polls.length, antes + 1)
+      assert.equal(fluxo.polls.at(-1).selectableCount, 1)
+      const cmd = require(nome === 'enquete' ? '../comandos/menu-brincadeiras/enquete' : '../comandos/admin/enquete-admin')[0]
+      cmd.encerrarEnquete(grupo)
+      assert.equal(jogos.obterJogo(grupo), null)
+    }
+    assert.equal(await estado.obterLigado(), false)
+  })
+  await teste('voto nativo chega à apuração pelo handler e respeita OFF', async () => {
+    const protocolo = require('./helpers/enquete-nativa-fake')
+    for (const nome of ['enquete', 'enquete-admin']) {
+      await fluxo.enviar(`/${nome} P | A | B`, '12345@lid')
+      const cmd = require(nome === 'enquete' ? '../comandos/menu-brincadeiras/enquete' : '../comandos/admin/enquete-admin')[0]
+      const dados = cmd._enqueteAtiva(grupo)
+      const update = () => protocolo.voto(dados, grupo, `${comum}@s.whatsapp.net`, [0], { criador: fluxo.sock.user.id }).message
+      await fluxo.enviar('', `${comum}@s.whatsapp.net`, update())
+      assert.equal(cmd.apurar(dados).total, 0, 'OFF bloqueia apuração do voto de não dono')
+      await estado.definirLigado(true)
+      await fluxo.enviar('', `${comum}@s.whatsapp.net`, update())
+      assert.equal(cmd.apurar(dados).total, 1, 'ON recebe voto nativo pelo fluxo de produção')
+      cmd.encerrarEnquete(grupo)
+      await estado.definirLigado(false)
     }
   })
   await teste('OFF: comunicado real prepara, confirma e relata via handler para dono LID', async () => {

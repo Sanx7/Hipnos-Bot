@@ -1,35 +1,7 @@
-// ============================================================
-// 🏛️ ENQUETE-ADMIN — VOTAÇÃO DE DECISÃO do grupo (só admin)
-// ============================================================
-//   /enquete-admin pergunta | opção 1 | opção 2 | ...
-//   /enquete-admin-ban @alvo | sim | não   → vota o BAN do alvo
-//   /encerrar-enquete                → encerra antes (só admin)
-//
-// 🏛️ DIFERENTE DO /enquete: aquela é OPINIÃO e qualquer membro abre; esta é
-//    DECISÃO (banir alguém, mudar regra, aprovar algo) e SÓ ADMIN abre —
-//    mesmo padrão do /ban (isAdmin + metadados do grupo).
-//
-// 🗳️ VOTAÇÃO: texto livre no grupo, respondendo o NÚMERO da opção
-//    (mesmo gancho do /gartic, /anagrama, /quiz, /enquete). Um voto por
-//    pessoa e pode trocar; o voto é contado pelo NÚMERO REAL (lid.js —
-//    quem vota chega como "@lid" em grupos com LID ligado).
-//
-// ⏱️ DURAÇÃO: 2 minutos (constante abaixo) ou até /encerrar-enquete.
-// 🔒 Uma decisão por grupo, no registro COMPARTILHADO (dados/jogos-ativos.js):
-//    bloqueia com /velha, /anagrama, /gartic, /quiz, /forca, /enquete,
-//    /desenharpalavra e /adivinha-emoji, e não convive com outro jogo.
-//
-// ☠️ AÇÃO ESPECIAL — VOTAÇÃO DE BAN:
-//    /enquete-admin-ban @alvo | sim | não
-//    (ou a pergunta começando com "banir", com @alvo na mensagem)
-//    Se a opção do SIM vencer, o bot bane sozinho ao final, REUSANDO a
-//    função banirDoGrupo do /ban — mesma blacklist e mesmas proteções:
-//    dono do bot (ehDonoDoBot) e o próprio bot. Nenhuma decisão de ban
-//    acontece se houver empate, se o SIM não vencer ou se o alvo for
-//    protegido. É uma sugestão que o grupo VOTA — o Modular só executa
-//    o que a maioria aprovou.
-// ============================================================
-
+const { remetenteEhDono } = require('../../estado-bot')
+const nativa = require('../../dados/enquetes-nativas')
+// Enquete nativa: um voto por pessoa, apuração por 2 minutos no registro existente.
+// Votos chegam como pollUpdateMessage, sem consumir números de outros jogos.
 const { ehDonoDoBot, ehAdminDoGrupo, limparNumero } = require('../../config')
 const { resolverNumeroAlvo } = require('../../lid')
 const { TIPOS, rotuloDoTipo, registrarJogo, removerJogo, obterJogo, registrarOuvinteTexto } = require('../../dados/jogos-ativos')
@@ -38,10 +10,10 @@ const { banirDoGrupo } = require('../admin/ban')
 const { ehProprioBot, respostaAutoexpulsao } = require('../../dados/protecao-bot')
 
 const TIPO_JOGO = TIPOS.ENQUETE_ADMIN
-const DURACAO_ENQUETE_MS = 2 * 60 * 1000 // ⏱️ 2 minutos
-const MAX_OPCOES = 6
+let DURACAO_ENQUETE_MS = 2 * 60 * 1000 // ⏱️ 2 minutos
+const MAX_OPCOES = 12
 const MIN_OPCOES = 2
-const EMOJIS_NUMERO = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣']
+const EMOJIS_NUMERO = Array.from({ length: 12 }, (_, i) => `${i + 1}.`)
 
 // ─── ✉️ Mensagens ───
 const AVISO_SEM_ADMIN = '🏛️ *Só administradores do grupo podem abrir uma votação de decisão.*'
@@ -52,7 +24,7 @@ const AVISO_USO =
   '`/enquete-admin pergunta | opção 1 | opção 2`\n\n' +
   'Ex.: `/enquete-admin Mudar a regra do grupo? | Mudar | Deixar como está`\n\n' +
   `ℹ️ Só admin abre. De ${MIN_OPCOES} a ${MAX_OPCOES} opções, 2 minutos.\n` +
-  '🗳️ Para votar, mande o NÚMERO da opção no chat. /encerrar-enquete fecha antes.'
+  '🗳️ Para votar, toque na opção da enquete nativa. /encerrar-enquete fecha a apuração antes.'
 
 // ─── 📋 Estado (ganchos p/ testes offline) ───
 let agendar = (fn, ms) => setTimeout(fn, ms)
@@ -94,12 +66,7 @@ function apurar (dados) {
 }
 
 // ─── ⌂️ Parse: pergunta + opções ───
-function parse (texto) {
-  const bruto = String(texto || '').replace(/^\/\S+\s*/, '')
-  const partes = bruto.split('|').map((p) => p.trim()).filter(Boolean)
-  if (partes.length < 2) return { pergunta: '', opcoes: [] }
-  return { pergunta: partes[0], opcoes: partes.slice(1) }
-}
+function parse (texto) { return nativa.parse(texto) }
 
 // ─── ☠️ A pergunta é de BAN? (para o kick automático) ───
 function ehVotacaoDeBan (dados) {
@@ -119,7 +86,7 @@ function textoDaEnquete (dados) {
   const linhas = [`🏛️ *VOTAÇÃO DE DECISÃO*\n\n❓ *${dados.pergunta}*\n`]
   dados.opcoes.forEach((o, i) => linhas.push(`${EMOJIS_NUMERO[i]} ${o}`))
   linhas.push(
-    '\n🗳️ *Vote mandando o NÚMERO da opção aqui no chat.*' +
+    '\n🗳️ *Vote na enquete nativa do WhatsApp.*' +
     `\n⏱️ Fecha em ~${minutos} minuto(s) ou antes, com /encerrar-enquete.` +
     `\n🏛️ Abriu: @${String(dados.autor).split('@')[0]}`
   )
@@ -223,19 +190,15 @@ async function criar (sock, jid, msg, autor, pergunta, opcoes, alvoBan = null) {
   let metadados = null
   try { metadados = await sock.groupMetadata(jid) } catch (e) { /* segue */ }
   const participantes = metadados?.participants || []
-  if (!ehAdminDoGrupo(participantes, autor) && !ehDonoDoBot(participantes, autor)) {
+  if (!ehAdminDoGrupo(nativa.participantesDoAutor(participantes, autor), autor) && !(await remetenteEhDono(sock, jid, autor))) {
     return await sock.sendMessage(jid, { text: AVISO_SEM_ADMIN }, { quoted: msg })
   }
   if (alvoBan && await ehProprioBot(sock, jid, alvoBan, participantes)) {
     return await sock.sendMessage(jid, { text: respostaAutoexpulsao() }, { quoted: msg })
   }
 
-  if (opcoes.length < MIN_OPCOES) {
-    return await sock.sendMessage(jid, { text: `❌ Preciso de pelo menos *${MIN_OPCOES}* opções.\n\n\`/enquete-admin pergunta | opção 1 | opção 2\`` }, { quoted: msg })
-  }
-  if (opcoes.length > MAX_OPCOES) {
-    return await sock.sendMessage(jid, { text: `❌ Limite de *${MAX_OPCOES}* opções (você mandou ${opcoes.length}).` }, { quoted: msg })
-  }
+  const invalida = nativa.validar(pergunta, opcoes)
+  if (invalida) return await sock.sendMessage(jid, { text: `${invalida}\n\n${AVISO_USO}` }, { quoted: msg })
 
   // 2) Uma por grupo: confere a própria (o registro só bloqueia tipos diferentes)
   const atual = obterJogo(jid)
@@ -253,9 +216,16 @@ async function criar (sock, jid, msg, autor, pergunta, opcoes, alvoBan = null) {
     return await sock.sendMessage(jid, { text: `🔒 Já tem um *${rotuloDoTipo(registro.conflito?.tipo)}* rolando neste grupo. Termine (ou cancele) ele antes.` }, { quoted: msg })
   }
 
-  dados.timer = agendar(() => aoExpirar(jid), dados.duracaoMs)
-  console.log(`[enquete-admin] 🏛️ votação de "${autor}" em ${jid}: "${pergunta}"${alvoBan ? ` (ban de ${alvoBan})` : ''}`)
-  return await sock.sendMessage(jid, { text: textoDaEnquete(dados) }, { quoted: msg })
+  try {
+    if (alvoBan) await sock.sendMessage(jid, { text: `☠️ Se o SIM vencer, @${limparNumero(alvoBan)} será removido e entrará na blacklist.` }, { quoted: msg })
+    dados.mensagemEnquete = await sock.sendMessage(jid, nativa.montarEnquete(pergunta, opcoes))
+    dados.timer = agendar(() => aoExpirar(jid), dados.duracaoMs)
+    dados.timer?.unref?.()
+    return dados.mensagemEnquete
+  } catch (erro) {
+    encerrarEnquete(jid)
+    throw erro
+  }
 }
 
 // ─── ⏱️ Expirou ───
@@ -275,7 +245,7 @@ async function encerrarManual (sock, jid, msg, autor) {
   let metadados = null
   try { metadados = await sock.groupMetadata(jid) } catch (e) { /* segue */ }
   const participantes = metadados?.participants || []
-  if (!ehAdminDoGrupo(participantes, autor) && !ehDonoDoBot(participantes, autor)) {
+  if (!ehAdminDoGrupo(nativa.participantesDoAutor(participantes, autor), autor) && !(await remetenteEhDono(sock, jid, autor))) {
     return await sock.sendMessage(jid, { text: AVISO_SEM_ADMIN }, { quoted: msg })
   }
   const dados = encerrarEnquete(jid)
@@ -283,33 +253,10 @@ async function encerrarManual (sock, jid, msg, autor) {
 }
 
 // ─── 🗳️ Ouvinte de TEXTO LIVRE (o voto) ───
-async function registrarVoto (sock, jid, msg, texto) {
+async function registrarVoto (sock, jid, msg) {
   const jogo = obterJogo(jid)
   if (!jogo || jogo.tipo !== TIPO_JOGO) return false
-  const dados = jogo.dados || {}
-  const chute = String(texto || '').trim()
-  if (!chute) return false
-
-  // Só NÚMERO conta na decisão (mais seguro: nada de o bot ler uma frase
-  // inteira como voto).
-  if (!/^\d{1,2}$/.test(chute)) return false
-  const n = Number(chute) - 1
-  if (n < 0 || n >= dados.opcoes.length) return false
-
-  // 🪪 Vota pelo NÚMERO REAL (lid.js) — senão a mesma pessoa contaria 2x
-  // (uma como "@lid" e outra como número).
-  const autorJid = msg?.key?.participant || msg?.key?.remoteJid || ''
-  let participantes = null
-  try { participantes = (await sock.groupMetadata(jid))?.participants || null } catch (e) { /* segue */ }
-  const numero = await numeroRealDe(participantes, autorJid)
-
-  for (const conjunto of dados.votos.values()) conjunto.delete(numero)
-  dados.votos.get(n).add(numero)
-
-  const total = [...dados.votos.values()].reduce((s, c) => s + c.size, 0)
-  console.log(`[enquete-admin] 🗳️ voto de ${numero} (opção ${n + 1}) — total ${total}`)
-  await sock.sendMessage(jid, { text: `🗳️ Voto registrado: *${EMOJIS_NUMERO[n]} ${dados.opcoes[n]}* _(pode mudar o voto)_` }).catch(() => {})
-  return true
+  return nativa.registrarVotoNativo(sock, jid, msg, jogo.dados)
 }
 
 registrarOuvinteTexto(TIPO_JOGO, registrarVoto)
@@ -339,7 +286,7 @@ const cmdEnqueteAdmin = {
     try {
       const autor = msg.key?.participant || msg.key?.remoteJid
       const cru = String(texto || '')
-      const bruto = cru.replace(/^\/\S+\s*/, '').trim()
+      const bruto = require('../../prefixo').removerPrefixo(cru).replace(/^\S+\s*/, '').trim()
 
       // ☠️ /enquete-admin-ban @alvo | sim | não  (ou /banir @alvo | sim | não)
       //    Precisa ser testado no texto CRU: o nome do comando é removido
@@ -349,9 +296,9 @@ const cmdEnqueteAdmin = {
       }
 
       const { pergunta, opcoes } = parse(cru)
-      if (!pergunta || opcoes.length === 0) {
+      if (!String(cru).includes('|')) {
         const jogo = obterJogo(jid)
-        if (jogo && jogo.tipo === TIPO_JOGO) {
+        if (jogo && jogo.tipo === TIPO_JOGO && ['', 'status'].includes(bruto.toLowerCase())) {
           return await sock.sendMessage(jid, { text: textoDaEnquete(jogo.dados) }, { quoted: msg })
         }
         return await sock.sendMessage(jid, { text: AVISO_USO }, { quoted: msg })
