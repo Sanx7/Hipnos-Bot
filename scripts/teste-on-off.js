@@ -185,6 +185,10 @@ async function main() {
     require('../dados/antigolpe-config').__definirColecoesTeste({ config: golpeFake(), eventos: golpeFake(), cooldowns: golpeFake() })
     require('../dados/moderacao-antigolpe').__limparTeste()
     const antigolpe = require('../comandos/admin/antigolpe')
+    const setads = require('../comandos/admin/setads')
+    for (const nome of [setads.nome, ...setads.aliases]) {
+      registro.set(nome, { executar: async (...args) => { eventos.push('comando:setads'); return setads.executar(...args) } })
+    }
     for (const nome of [antigolpe.nome, ...antigolpe.aliases]) {
       registro.set(nome, { executar: async (...args) => { eventos.push('comando:antigolpe'); return antigolpe.executar(...args) } })
     }
@@ -918,6 +922,51 @@ async function main() {
         await fluxo.enviar(`!${nome} off`,'12345@lid');assert.equal((await conf.obter(grupo)).ativo,false)
       }
     }finally{require('../prefixo').__definirPrefixoTeste('/')}
+  })
+  await teste('OFF: setads e aliases bloqueiam admin e preservam dono LID com prefixo dinâmico', async () => {
+    const storageAds = require('../dados/ads-storage'), mongo = require('./helpers/ads-fake').criarStorage()
+    storageAds.__definirTeste(mongo)
+    await estado.definirLigado(false); require('../prefixo').__definirPrefixoTeste('!')
+    try {
+      for (const nome of ['setads','ads','anuncios','anuncioauto']) {
+        await fluxo.enviar(`!${nome} criar texto`, '67890@lid'); assert.ok(!fluxo.eventos.includes('comando:setads'))
+        await fluxo.enviar(`!${nome} criar texto`, '12345@lid'); assert.ok(fluxo.eventos.includes('comando:setads'))
+      }
+      assert.equal((await require('../anuncios').listar(grupo)).length, 4)
+    } finally { require('../prefixo').__definirPrefixoTeste('/') }
+  })
+  await teste('OFF: agendador de anúncios envia sem liberar comandos e fromMe ignora proteções/ranking', async () => {
+    const ads = require('../anuncios'), mongo = require('./helpers/ads-fake').criarStorage()
+    require('../dados/ads-storage').__definirTeste(mongo)
+    await estado.definirLigado(false)
+    let agora = Date.now(), envios = 0
+    const anuncio = await ads.criar(grupo, { tipo: 'texto', texto: 'Aviso automático' }, dono, agora)
+    await ads.alterar(grupo, anuncio.id, 'intervalo', '15', dono, agora)
+    await ads.alterar(grupo, anuncio.id, 'retomar', null, dono, agora)
+    const agendador = ads.criarAgendador({ relogio: () => agora, intervalo: () => ({ unref() {} }), cancelar: () => {} })
+    try {
+      await agendador.abrir({ groupMetadata: async jid => ({ id: jid, participants: [] }), sendMessage: async (jid, conteudo) => { assert.equal(jid,grupo); assert.equal(conteudo.text,'Aviso automático'); envios++ } })
+      agora += 900000; await agendador.verificar(); assert.equal(envios,1); assert.equal(await estado.obterLigado(),false)
+      await fluxo.enviar('Aviso automático', `${comum}@s.whatsapp.net`, { conversation: 'Aviso automático' }, true)
+      assert.ok(!fluxo.eventos.includes('ranking')); assert.ok(!fluxo.eventos.includes('delete')); assert.ok(!fluxo.eventos.includes('ia'))
+    } finally { agendador.parar() }
+  })
+  await teste('ON: admin configura aliases setads e cria foto/vídeo citados no handler real', async () => {
+    const ads = require('../anuncios'), mongo = require('./helpers/ads-fake').criarStorage(), midia = require('../dados/ads-midia')
+    require('../dados/ads-storage').__definirTeste(mongo); await estado.definirLigado(true)
+    const extrairOriginal = midia.extrair
+    try {
+      for (const nome of ['setads','ads','anuncios','anuncioauto']) {
+        await fluxo.enviar(`/${nome} criar texto`, '67890@lid'); assert.ok(fluxo.eventos.includes('comando:setads'))
+      }
+      const foto = Buffer.from([255,216,255,224,0,0,255,217]), video = Buffer.concat([Buffer.from([0,0,0,20]),Buffer.from('ftypisom0000isom')])
+      for (const [node, buffer, tipo] of [['imageMessage',foto,'foto'],['videoMessage',video,'video']]) {
+        const novo = require('./helpers/ads-fake').criarStorage(); require('../dados/ads-storage').__definirTeste(novo)
+        midia.extrair = (...args) => extrairOriginal(...args, async (alvo, saida) => { assert.equal(saida,'stream'); assert.equal(alvo.key.id,'midia-citada'); return require('stream').Readable.from([buffer]) })
+        await fluxo.enviar('/ads criar', '67890@lid', { extendedTextMessage: { text: '/ads criar', contextInfo: { participant: `${comum}@s.whatsapp.net`, stanzaId: 'midia-citada', quotedMessage: { ephemeralMessage: { message: { [node]: { caption: 'legenda' } } } } } } })
+        const docs = await ads.listar(grupo); assert.equal(docs.length,1); assert.equal(docs[0].tipo,tipo); assert.equal(docs[0].ativo,false); assert.ok(novo.arquivos.has(docs[0].midia))
+      }
+    } finally { midia.extrair = extrairOriginal }
   })
   const fraude='Sou da equipe de suporte do WhatsApp. Envie seu código de verificação. Sua conta será bloqueada. https://example.com'
   async function comAntigolpeIntegrado(fn){

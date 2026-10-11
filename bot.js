@@ -99,6 +99,7 @@ const { processarGatilhoIA } = require('./ia-interativa')
 // (iniciarAgendadorLembretes) para o disparo sobreviver a reconexões; se o
 // Mongo falhar, ele apenas loga e tenta de novo no próximo ciclo.
 const { iniciarAgendadorLembretes } = require('./lembretes')
+const { agendador: agendadorAnuncios } = require('./anuncios')
 
 // 🪪 Resolução LID→número real (lid.js) — usada pela anti-blacklist: a entrada
 // pode chegar como "@lid" (identificador novo do WhatsApp) enquanto o
@@ -294,6 +295,7 @@ async function startBot() {
   // Encerra o socket anterior (se ainda existir) antes de abrir outro
   if (sockAtual) {
     const antigo = sockAtual
+    agendadorAnuncios.fechar(antigo)
     sockAtual = null
     try {
       antigo.end(undefined)
@@ -906,6 +908,7 @@ async function startBot() {
     }
 
     if (connection === 'open') {
+      agendadorAnuncios.abrir(sock).catch(() => console.info('[setads]', 'inicio_adiado'))
       tentativas = 0
       reconexaoAgendada = false
       console.log('🌙 Hipnos Bot connected successfully!')
@@ -919,6 +922,7 @@ async function startBot() {
     }
 
     if (connection === 'close') {
+      agendadorAnuncios.fechar(sock)
       const codigo = lastDisconnect?.error?.output?.statusCode
       console.log('❌ Conexão fechada')
       console.log('Status do erro:', codigo, '| Motivo:', lastDisconnect?.error?.message)

@@ -131,6 +131,13 @@ module.exports = {
 📢 /hidetag [texto]
 ➥ Convocação oculta de todas as almas do grupo.
 
+🌙 ${prefixo}setads (também ${prefixo}ads · ${prefixo}anuncios · ${prefixo}anuncioauto)
+➥ ${prefixo}setads criar texto (ou respondendo a foto/vídeo comum)
+➥ ${prefixo}setads listar · status · ver <id>
+➥ ${prefixo}setads intervalo <id> <15–1440 minutos> · horario <id> <HH:MM>
+➥ ${prefixo}setads pausar · retomar · excluir <id>
+➥ Até 5 por grupo; configure e retome. Horários de São Paulo; anúncios continuam no OFF.
+
 📩 /totag (ou /notag2)
 ➥ Escreva /totag seu texto ou responda a texto, imagem, vídeo ou áudio com /totag sem texto para reenviar o original com menções ocultas a todos (só admin ou dono). Em áudio, a notificação de menção pode não aparecer no WhatsApp.
 
