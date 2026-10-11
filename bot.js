@@ -33,6 +33,8 @@ const {
 // forçando novo QR Code. Detalhes e fixes de integração: sessao-mongo.js
 const { useMongoDBAuthState } = require('mongo-baileys')
 const { obterColecaoAuth } = require('./sessao-mongo')
+const socketSeguro = require('./dados/socket-seguro')
+const { criarLease } = require('./dados/sessao-exclusiva')
 
 const P = require('pino')
 const qrcode = require('qrcode-terminal')
@@ -284,8 +286,26 @@ if (fs.existsSync(pastaComandos)) {
 let sockAtual = null
 let reconexaoAgendada = false
 let tentativas = 0
+let timerReconexao = null
+const inicializadorSocket = socketSeguro.criarInicializador()
+const idProcessoConexao = require('crypto').randomUUID().slice(0, 8)
+let geracaoConexao = 0
+const leaseSessao = criarLease({ perdida: () => {
+  console.warn('[conexao]', { evento: 'lease_perdida', reconectar: false })
+  inicializadorSocket.bloquear()
+  clearTimeout(timerReconexao)
+  const antigo = sockAtual
+  if (antigo) {
+    socketSeguro.atualizar(antigo, false)
+    agendadorAnuncios.fechar(antigo)
+    sockAtual = null
+    Promise.resolve(antigo.end(undefined)).catch(() => {})
+  }
+} })
 
-async function startBot() {
+function startBot() { return inicializadorSocket.iniciar(montarBot) }
+
+async function montarBot() {
   // TRAVA ANTI-DUPLICAÇÃO: se já existe uma reconexão marcada, ignora a chamada
   if (reconexaoAgendada) {
     console.log('⏳ Reconexão já agendada, ignorando chamada duplicada...')
@@ -296,11 +316,14 @@ async function startBot() {
   if (sockAtual) {
     const antigo = sockAtual
     agendadorAnuncios.fechar(antigo)
+    socketSeguro.atualizar(antigo, false)
     sockAtual = null
     try {
-      antigo.end(undefined)
+      await antigo.end(undefined)
     } catch (err) {
-      // socket já morto — seguimos em frente
+      // Sem confirmação de encerramento, não criar um socket sobreposto.
+      sockAtual = antigo
+      throw new Error('Encerramento do socket anterior falhou')
     }
   }
 
@@ -308,7 +331,10 @@ async function startBot() {
   // A collection guarda 1 doc "auth_creds" + 1 doc por chave de sessão.
   // Se o Mongo falhar, obterColecaoAuth lança com log ruidoso e o
   // startBot().catch de fora mostra "Falha ao iniciar/reconectar".
-  const colecaoAuth = await obterColecaoAuth()
+  const colecaoPersistente = await obterColecaoAuth()
+  await leaseSessao.adquirir(colecaoPersistente)
+  let socketDaSessao = null
+  const colecaoAuth = leaseSessao.vestir(colecaoPersistente, () => !socketDaSessao || sockAtual === socketDaSessao)
 
   // Sessão NOVA? Cria as credenciais com o initAuthCreds DO PRÓPRIO Baileys
   // (estrutura exata da versão instalada) em vez da cópia interna embutida
@@ -324,6 +350,7 @@ async function startBot() {
   }
 
   const { state, saveCreds } = await useMongoDBAuthState(colecaoAuth)
+  if (!leaseSessao.valida() || inicializadorSocket.bloqueado()) throw new Error('Inicialização perdeu exclusividade da sessão')
 
   const sock = makeWASocket({
     auth: state,
@@ -331,6 +358,10 @@ async function startBot() {
   })
 
   sockAtual = sock
+  socketDaSessao = sock
+  const geracao = ++geracaoConexao
+  console.info('[conexao]', { evento: 'socket_criado', processo: idProcessoConexao, geracao })
+  socketSeguro.preparar(sock, () => leaseSessao.valida())
   // Nenhuma automação ou comando pode remover a conta conectada, mesmo em LID.
   require('./dados/protecao-bot').protegerRemocoes(sock)
   // Histórico de chaves para /limpar-chat, incluindo os envios automáticos.
@@ -346,18 +377,17 @@ async function startBot() {
     .then((p) => console.log(`🔤 [prefixo] comandos respondendo a "${p}" (use /set-prefix para mudar)`))
     .catch(() => { /* obterPrefixo nunca lança: este catch é só rede de segurança */ })
 
-  // ⏰ LEMBRETES: registra o socket novo + roda a checagem inicial (catch-up
-  // do que venceu com o bot offline) e arma o timer de 30s (idempotente).
-  // A checagem inicial é FIRE-AND-FORGET DE PROPÓSITO: startBot não pode
-  // travar a conexão do Baileys esperando o Mongo responder.
-  iniciarAgendadorLembretes(sock).catch((errLembretes) => {
-    console.error('⚠️ [lembretes] falha na checagem inicial (o agendador segue):', errLembretes?.message || errLembretes)
-  })
+  // Lembretes iniciam somente em connection=open: não consumir tentativas
+  // de lembretes pendentes enquanto a conexão ainda está sendo estabelecida.
 
-  sock.ev.on('creds.update', saveCreds)
+  sock.ev.on('creds.update', () => {
+    if (sockAtual !== sock || !leaseSessao.valida()) return
+    saveCreds().catch(() => console.warn('[conexao]', { evento: 'credenciais_gravacao_falhou' }))
+  })
 
   // 🚨 MONITOR AUTOMÁTICO DE ENTRADAS, SAÍDAS E ANTI-BLACKLIST
   sock.ev.on('group-participants.update', async (atualizacao) => {
+    if (!socketSeguro.disponivel(sock)) return
     const { id: grupoId, participants, action } = atualizacao;
 
     if (!participants) return;
@@ -475,6 +505,7 @@ async function startBot() {
   });
 
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
+    if (!socketSeguro.disponivel(sock)) return
     try {
       // Moderação do lote inteiro, inclusive em OFF. Hard assume os links antes das demais regras.
       const linksTratados = await moderacaoAntilinkHard.processarLote(sock, messages)
@@ -908,6 +939,13 @@ async function startBot() {
     }
 
     if (connection === 'open') {
+      if (inicializadorSocket.bloqueado() || !leaseSessao.valida()) {
+        socketSeguro.atualizar(sock, false)
+        Promise.resolve(sock.end(undefined)).catch(() => {})
+        return
+      }
+      socketSeguro.atualizar(sock, true)
+      clearTimeout(timerReconexao)
       agendadorAnuncios.abrir(sock).catch(() => console.info('[setads]', 'inicio_adiado'))
       tentativas = 0
       reconexaoAgendada = false
@@ -922,10 +960,18 @@ async function startBot() {
     }
 
     if (connection === 'close') {
+      socketSeguro.atualizar(sock, false)
       agendadorAnuncios.fechar(sock)
       const codigo = lastDisconnect?.error?.output?.statusCode
-      console.log('❌ Conexão fechada')
-      console.log('Status do erro:', codigo, '| Motivo:', lastDisconnect?.error?.message)
+      const conflito = codigo === DisconnectReason.connectionReplaced || codigo === 440
+      console.warn('[conexao]', { evento: conflito ? 'sessao_substituida' : 'conexao_fechada', codigo: Number.isInteger(codigo) ? codigo : null, processo: idProcessoConexao, geracao })
+      if (conflito) {
+        inicializadorSocket.bloquear()
+        clearTimeout(timerReconexao)
+        reconexaoAgendada = false
+        console.warn('[conexao]', { evento: 'conflito_440', reconectar: false, acao: 'verificar_instancias_da_mesma_sessao' })
+        return
+      }
 
       // Não faz sentido reconectar quando a sessão foi encerrada ou corrompida
       const sessaoInvalida =
@@ -934,7 +980,9 @@ async function startBot() {
 
       console.log('Reconectar?', !sessaoInvalida)
 
-      if (sessaoInvalida) {
+      if (sessaoInvalida || inicializadorSocket.bloqueado()) {
+        inicializadorSocket.bloquear()
+        clearTimeout(timerReconexao)
         console.log('🚪 Sessão encerrada ou inválida. Reinicie o bot e escaneie o QR Code novamente.')
         sockAtual = null
         return
@@ -953,18 +1001,42 @@ async function startBot() {
       const espera = Math.min(3000 * Math.pow(2, tentativas - 1), 60000)
       console.log(`🔄 Reconnecting em ${espera / 1000}s... (tentativa ${tentativas})`)
 
-      setTimeout(() => {
+      timerReconexao = setTimeout(() => {
+        timerReconexao = null
         reconexaoAgendada = false
-        startBot().catch((err) => {
-          console.error('❌ Falha ao reconectar:', err)
-          reconexaoAgendada = false
-        })
+        startBot().catch(tratarFalhaInicializacao)
       }, espera)
     }
   })
 }
 
-startBot().catch((err) => {
-  console.error('❌ Falha ao iniciar o bot:', err)
-  reconexaoAgendada = false
-});
+function tratarFalhaInicializacao(err) {
+  console.warn('[conexao]', { evento: err?.sessaoOcupada ? 'sessao_ocupada' : 'inicializacao_falhou', processo: idProcessoConexao })
+  if (inicializadorSocket.bloqueado() || reconexaoAgendada) return
+  reconexaoAgendada = true
+  tentativas++
+  const espera = err?.sessaoOcupada ? 30000 : Math.min(3000 * 2 ** Math.min(tentativas - 1, 5), 60000)
+  timerReconexao = setTimeout(() => {
+    timerReconexao = null; reconexaoAgendada = false
+    startBot().catch(tratarFalhaInicializacao)
+  }, espera)
+}
+
+async function encerrarBot() {
+  inicializadorSocket.bloquear()
+  clearTimeout(timerReconexao)
+  const antigo = sockAtual
+  if (antigo) {
+    socketSeguro.atualizar(antigo, false)
+    agendadorAnuncios.fechar(antigo)
+    sockAtual = null
+    await antigo.end(undefined)
+  }
+  await leaseSessao.liberar()
+}
+for (const sinal of ['SIGTERM', 'SIGINT']) process.once(sinal, () => {
+  const prazo = setTimeout(() => process.exit(1), 15000)
+  encerrarBot().then(() => { clearTimeout(prazo); process.exit(0) }, () => { clearTimeout(prazo); process.exit(1) })
+})
+
+startBot().catch(tratarFalhaInicializacao);

@@ -295,6 +295,7 @@ async function main() {
         }
       },
       estadoBot: estado,
+      socketSeguro: require('../dados/socket-seguro'),
       respostaPrefixo: require('../dados/resposta-prefixo'),
       moderacaoFigurinhas,
       moderacaoAntiflood: require('../dados/moderacao-antiflood'),

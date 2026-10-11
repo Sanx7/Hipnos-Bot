@@ -51,6 +51,8 @@ const cmd = require('../comandos/admin/totag');
 let simularRenovacao = false;
 let downloadReal = false;
 let erroDownloadReal = null;
+let tentativasEnvio = 0;
+let consultasMetadados = 0;
 
 function msg(quoted, sender = LID_ADMIN) {
   return {
@@ -71,15 +73,22 @@ async function executar(message, opcoes = {}) {
   simularRenovacao = Boolean(opcoes.simularRenovacao);
   downloadReal = Boolean(opcoes.downloadReal);
   erroDownloadReal = null;
+  tentativasEnvio = 0;
+  consultasMetadados = 0;
   const sock = {
+    ws: opcoes.desconectado ? { isOpen: false } : undefined,
     user: opcoes.user,
     updateMediaMessage: opcoes.updateMediaMessage,
     async groupMetadata() {
-      if (opcoes.erroMetadata) throw new Error('metadata indisponível');
+      consultasMetadados++;
+      if (opcoes.desconectarMetadata) this.ws = { isOpen: false };
+      if (opcoes.erroMetadata) throw opcoes.erroMetadata instanceof Error ? opcoes.erroMetadata : new Error('metadata indisponível');
       return { participants: opcoes.participantes || PARTICIPANTES };
     },
     async sendMessage(jid, conteudo, extra) {
-      if (opcoes.erroEnvio || (opcoes.erroEnvioMidia && conteudo.image)) throw new Error('envio indisponível');
+      tentativasEnvio++;
+      const falha = opcoes.erroEnvio || (conteudo.image ? opcoes.erroEnvioMidia : false);
+      if (falha) throw falha instanceof Error ? falha : new Error('envio indisponível');
       enviadas.push({ jid, conteudo, extra });
       return { key: { id: 'REENVIO' } };
     }
@@ -556,6 +565,37 @@ async function main() {
   });
   await testar('falha de envio não escapa do comando', async () => {
     assert.deepEqual(await executar(msg(VIDEO), { erroEnvio: true }), []);
+  });
+  await testar('socket desconectado não consulta metadados nem envia aviso ou baixa mídia', async () => {
+    assert.deepEqual(await executar(msg(IMAGEM), { desconectado: true }), []);
+    assert.equal(consultasMetadados,0); assert.equal(tentativasEnvio,0); assert.equal(baixadas.length,0);
+  });
+  await testar('metadados falham e aviso falha: somente uma tentativa, sem falsa falha de autorização', async () => {
+    const logs = [], original = console.info; console.info = (...args) => logs.push(args);
+    try { await executar(msg(IMAGEM), { erroMetadata: true, erroEnvio: true }); }
+    finally { console.info = original; }
+    assert.equal(tentativasEnvio,1); assert.equal(baixadas.length,0);
+    assert.ok(!logs.some(l => l[1]?.etapa === 'autorizacao'));
+  });
+  await testar('conexão cai durante consulta: não tenta avisar ou baixar', async () => {
+    await executar(msg(IMAGEM), { erroMetadata: true, desconectarMetadata: true });
+    assert.equal(tentativasEnvio,0); assert.equal(baixadas.length,0);
+  });
+  await testar('erro 440 nos metadados não repete aviso em transporte encerrado', async () => {
+    await executar(msg(IMAGEM), { erroMetadata: Object.assign(new Error('conflict'), { output: { statusCode: 440 } }) });
+    assert.equal(tentativasEnvio,0); assert.equal(baixadas.length,0);
+  });
+  await testar('metadados vazios bloqueiam mesmo dono sem mídia', async () => {
+    recusa(await executar(msg(IMAGEM,DONO), { participantes: [] }), /ler os membros/);
+    assert.equal(baixadas.length,0);
+  });
+  await testar('resposta de autorização negada falha sem segundo envio', async () => {
+    await executar(msg(IMAGEM,LID_COMUM), { erroEnvio: true });
+    assert.equal(tentativasEnvio,1); assert.equal(baixadas.length,0);
+  });
+  await testar('envio da foto retorna 440: não tenta reenviar aviso ou mídia', async () => {
+    await executar(msg(IMAGEM), { erroEnvioMidia: Object.assign(new Error('conflict'), { output: { statusCode: 440 } }) });
+    assert.equal(tentativasEnvio,1); assert.equal(baixadas.length,1);
   });
   lid.__definirConsultaSessaoTeste(null);
   require.cache[entrada] = cacheOriginal;

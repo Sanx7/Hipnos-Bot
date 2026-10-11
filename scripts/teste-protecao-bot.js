@@ -185,6 +185,7 @@ async function main() {
     sock.ev = { on: (_, fn) => { handler = fn } }
     const contexto = {
       sock, console, path, __dirname: path.dirname(require.resolve('../bot')),
+      socketSeguro: require('../dados/socket-seguro'),
       fs: { existsSync: () => true, readFileSync: () => JSON.stringify(blacklistOuConfigs) },
       OWNER_NUMBERS, ehLid: lid.ehLid, resolverLidParaTelefone: lid.resolverLidParaTelefone,
       welcomeHabilitado: async () => false,

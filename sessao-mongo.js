@@ -162,7 +162,7 @@ function vestirColecaoAuth(colecao) {
         // ⚠️ DEFENSIVO: undefined não é BSON válido → normalizado a null.
         const valorAGuardar = set === undefined ? null : set
         if (set === undefined) {
-          console.log(`[sessao-mongo] ⚠️ valor undefined para ${chave} — guardado como null (defensivo)`)
+          console.log('[sessao-mongo] valor undefined guardado como null (defensivo)')
         }
         return colecao.updateOne(
           filtro,
@@ -219,7 +219,7 @@ async function obterColecaoAuth() {
     } catch (erroPing) {
       console.error(
         '⚠️ [sessao-mongo] conexão anterior com o MongoDB morreu — reconectando:',
-        erroPing?.message
+        'ping indisponível'
       )
       try { await clienteMongo.close() } catch (e) { /* já morta */ }
       clienteMongo = null
@@ -246,7 +246,7 @@ async function obterColecaoAuth() {
   const nomeColecao = process.env.MONGODB_COLLECTION || 'authState'
 
   try {
-    console.log(`🗄️ [sessao-mongo] conectando ao MongoDB (db: ${nomeBanco}, collection: ${nomeColecao})...`)
+    console.log('[sessao-mongo] conectando ao armazenamento da sessão...')
     clienteMongo = new MongoClient(uri, { serverSelectionTimeoutMS: 15000 })
     await clienteMongo.connect()
     // Ping de verdade: valida credenciais + rede + whitelist de IP do Atlas
@@ -258,7 +258,7 @@ async function obterColecaoAuth() {
     return colecaoCacheada
   } catch (erro) {
     console.error('════════════════════════════════════════════════════════')
-    console.error('💥 FALHA AO CONECTAR AO MONGODB (sessão de autenticação):', erro?.message)
+    console.error('💥 FALHA AO CONECTAR AO MONGODB (sessão de autenticação).')
     console.error('   Causas mais comuns:')
     console.error('   → MONGODB_URI com usuário/senha/cluster errados')
     console.error('   → IP não liberado no Atlas: Network Access → 0.0.0.0/0')

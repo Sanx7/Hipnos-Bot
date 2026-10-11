@@ -2,6 +2,7 @@ const { downloadMediaMessage, normalizeMessageContent, getContentType, jidNormal
 const { ehAdminDoGrupo, ehDonoDoBot } = require('../../config');
 const { resolverNumeroAlvo } = require('../../lid');
 const { extrairTextoComando } = require('../../dados/texto-comando');
+const { disponivel, exigir, falhaConexao } = require('../../dados/socket-seguro');
 
 // Apenas eventos fixos e contagens: erros do socket podem conter URLs,
 // JIDs, conteúdo e chaves de mídia. Nunca imprimir o erro recebido.
@@ -34,23 +35,39 @@ module.exports = {
 
   async executar(sock, jid, msg, text) {
     let etapa = 'autorizacao';
+    let envioFalhou = false;
+    const enviar = async (...args) => {
+      exigir(sock);
+      try { return await sock.sendMessage(...args); }
+      catch (e) { envioFalhou = falhaConexao(e) || !disponivel(sock); throw e; }
+    };
+    const avisar = async (...args) => {
+      if (!disponivel(sock)) { log('aviso_erro', 'socket_indisponivel'); return; }
+      try { await enviar(...args); } catch (_) { log('aviso_erro', 'falha'); }
+    };
     try {
+      if (!disponivel(sock)) { log('conexao', 'socket_indisponivel'); return; }
       if (!String(jid || '').endsWith('@g.us')) {
-        return await sock.sendMessage(jid, {
+        return await avisar(jid, {
           text: '🌑 Use /totag em um grupo: escreva um texto depois do comando ou responda a uma mensagem de texto, imagem, vídeo ou áudio.'
         }, { quoted: msg });
       }
 
       let metadados;
+      etapa = 'metadados';
       try {
         metadados = await sock.groupMetadata(jid);
+        if (!Array.isArray(metadados?.participants) || !metadados.participants.length) throw new Error('Metadados incompletos');
       } catch (err) {
-        log('metadados', 'falha');
-        return await sock.sendMessage(jid, {
+        const codigo = err?.output?.statusCode ?? err?.statusCode ?? err?.status;
+        log('metadados', 'falha', { conexao: disponivel(sock) ? 'disponivel' : 'indisponivel', codigo: Number.isInteger(codigo) ? codigo : null });
+        if ([428, 440, 401, 515].includes(codigo)) return;
+        return await avisar(jid, {
           text: '⚠️ Não consegui ler os membros deste grupo agora. Tente de novo em instantes.'
         }, { quoted: msg });
       }
       const participantes = metadados?.participants || [];
+      etapa = 'autorizacao';
 
       // Mesma autorização de /hidetag: ADM OU dono, usando JID cru e
       // telefone comprovado pelos metadados ou pelo mapeamento da sessão.
@@ -64,7 +81,7 @@ module.exports = {
         (telefone && ehAdminDoGrupo(doRemetente(telefone), telefone));
       const dono = telefone && ehDonoDoBot([], telefone);
       if (!admin && !dono) {
-        return await sock.sendMessage(jid, {
+        return await avisar(jid, {
           text: '🔒 Só administradores do grupo ou donos do bot podem usar /totag.'
         }, { quoted: msg });
       }
@@ -79,7 +96,7 @@ module.exports = {
       log(etapa, 'prontas', { quantidade: mentions.length });
       if (textoDireto.trim()) {
         etapa = 'envio_texto';
-        await sock.sendMessage(jid, { text: textoDireto, ...marcacao });
+        await enviar(jid, { text: textoDireto, ...marcacao });
         return;
       }
 
@@ -88,7 +105,7 @@ module.exports = {
       const quoted = contexto?.quotedMessage;
       log(etapa, quoted ? 'encontrada' : 'ausente');
       if (!quoted) {
-        return await sock.sendMessage(jid, {
+        return await avisar(jid, {
           text: '📩 Use /totag seu texto (ou /notag2 seu texto).\n\nResponda a uma mensagem de texto, imagem, vídeo ou áudio e envie /totag sem texto para reenviá-la. Todos serão marcados silenciosamente.'
         }, { quoted: msg });
       }
@@ -97,7 +114,7 @@ module.exports = {
       // impede transformar mídia de visualização única em cópia permanente.
       if (visualizacaoUnica(quoted)) {
         log('midia', 'visualizacao_unica_recusada');
-        return await sock.sendMessage(jid, {
+        return await avisar(jid, {
           text: '🔒 Essa mídia é de visualização única e não pode ser reenviada por /totag. Peça ao autor uma imagem, vídeo ou áudio comum.'
         }, { quoted: msg });
       }
@@ -108,7 +125,7 @@ module.exports = {
       // Tipo desconhecido não é registrado: a chave recebida não é confiável.
       log(etapa, ['conversation', 'extendedTextMessage', 'imageMessage', 'videoMessage', 'audioMessage'].includes(tipo) ? tipo : 'nao_suportada');
       if (!['conversation', 'extendedTextMessage', 'imageMessage', 'videoMessage', 'audioMessage'].includes(tipo)) {
-        return await sock.sendMessage(jid, {
+        return await avisar(jid, {
           text: '📩 O /totag só funciona respondendo a texto, imagem, vídeo ou áudio. Figurinhas não são suportadas.'
         }, { quoted: msg });
       }
@@ -116,7 +133,7 @@ module.exports = {
       if (tipo === 'conversation' || tipo === 'extendedTextMessage') {
         etapa = 'envio_texto';
         const text = tipo === 'conversation' ? original.conversation : original.extendedTextMessage.text;
-        await sock.sendMessage(jid, { text, ...marcacao });
+        await enviar(jid, { text, ...marcacao });
         return;
       }
 
@@ -166,7 +183,7 @@ module.exports = {
       log(etapa, 'inicio');
       if (tipo === 'imageMessage') {
         const imagem = original.imageMessage;
-        await sock.sendMessage(jid, {
+        await enviar(jid, {
           image: buffer,
           caption: imagem.caption ?? undefined,
           mimetype: imagem.mimetype || 'image/jpeg',
@@ -177,7 +194,7 @@ module.exports = {
         });
       } else if (tipo === 'videoMessage') {
         const video = original.videoMessage;
-        await sock.sendMessage(jid, {
+        await enviar(jid, {
           video: buffer,
           caption: video.caption ?? undefined,
           mimetype: video.mimetype || 'video/mp4',
@@ -192,7 +209,7 @@ module.exports = {
         // Isso NÃO comprova notificação visível nos clientes WhatsApp:
         // sem validação em aparelhos, menções em áudio são best-effort.
         // Não acrescentamos texto nem envio separado para forçar notificação.
-        await sock.sendMessage(jid, {
+        await enviar(jid, {
           audio: buffer,
           ptt: audio.ptt === true,
           mimetype: audio.mimetype || 'audio/ogg; codecs=opus',
@@ -202,9 +219,10 @@ module.exports = {
       log(etapa, 'concluido');
     } catch (err) {
       log(etapa, 'falha');
-      await sock.sendMessage(jid, {
+      if (envioFalhou || !disponivel(sock)) return;
+      await avisar(jid, {
         text: '❌ Não consegui reenviar essa mensagem agora. A mídia pode ter expirado; tente novamente em instantes.'
-      }, { quoted: msg }).catch(() => log('aviso_erro', 'falha'));
+      }, { quoted: msg });
     }
   }
 };
