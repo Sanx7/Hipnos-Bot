@@ -67,6 +67,7 @@ const moderacaoFigurinhas = require('./dados/moderacao-figurinhas')
 const moderacaoAntilinkHard = require('./dados/moderacao-antilinkhard')
 const moderacaoAntiflood = require('./dados/moderacao-antiflood')
 const moderacaoLimiteCaractere = require('./dados/moderacao-limitecaractere')
+const moderacaoAntigolpe = require('./dados/moderacao-antigolpe')
 const { temLinkBasico } = require('./dados/deteccao-links')
 
 // ⚙️ Configurações globais do bot
@@ -478,6 +479,7 @@ async function startBot() {
       const floodsTratados = await moderacaoAntiflood.processarLote(sock, messages, type, linksTratados)
       const textosTratados = await moderacaoLimiteCaractere.processarLote(sock, messages, type, new Set([...linksTratados, ...floodsTratados]))
       const figurinhasTratadas = await moderacaoFigurinhas.processarLote(sock, messages.filter(msg => !linksTratados.has(`${msg?.key?.remoteJid}:${msg?.key?.id}`) && !floodsTratados.has(`${msg?.key?.remoteJid}:${msg?.key?.id}`) && !textosTratados.has(`${msg?.key?.remoteJid}:${msg?.key?.id}`)))
+      const golpesTratados = await moderacaoAntigolpe.processarLote(sock, messages, type, new Set([...linksTratados, ...floodsTratados, ...textosTratados, ...figurinhasTratadas]))
       const msg = messages[0]
 
       if (!msg?.message) return
@@ -524,7 +526,7 @@ async function startBot() {
       }
 
       // 🪐 GUARDIÕES DO LIMBO (MONITORES DE GRUPO)
-      if (linksTratados.has(`${jid}:${msg.key.id}`) || floodsTratados.has(`${jid}:${msg.key.id}`) || textosTratados.has(`${jid}:${msg.key.id}`) || figurinhasTratadas.has(`${jid}:${msg.key.id}`)) return
+      if (linksTratados.has(`${jid}:${msg.key.id}`) || floodsTratados.has(`${jid}:${msg.key.id}`) || textosTratados.has(`${jid}:${msg.key.id}`) || figurinhasTratadas.has(`${jid}:${msg.key.id}`) || golpesTratados.has(`${jid}:${msg.key.id}`)) return
       if (jid.endsWith('@g.us')) {
         const caminhoConfigs = path.join(__dirname, 'comandos', 'dados', 'antias.json');
         if (fs.existsSync(caminhoConfigs)) {

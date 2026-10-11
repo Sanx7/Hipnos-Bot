@@ -175,6 +175,9 @@ async function aplicarBanAutomatico(sock, jid, msg, alvoBruto, alvoReal, autorRe
         pendencia += '\n⚠️ Não consegui arquivar os registros. A operação ficará bloqueada para evitar uma expulsão repetida.'
       }
     }
+    // Proteções de conteúdo sensível podem emitir um resumo sem reproduzir
+    // a mensagem original nem motivos históricos. O comportamento padrão segue.
+    if (opcoesBan.responderResultado) return opcoesBan.responderResultado({ confirmado, pendencia, limite })
     const texto = confirmado
       ? montarBanimento({ alvoNumero: alvoReal, motivos, aplicadoPor: autorReal, limite })
       : montarFalhaBan({ alvoNumero: alvoReal, motivos, aplicadoPor: autorReal, limite })

@@ -4,17 +4,15 @@ const { mensagemAtual, alvoSeguro } = require('./moderacao-contexto')
 const { removerDoGrupoConfirmado } = require('../comandos/admin/ban')
 const advertencias = require('../advertencias')
 const adv = require('../comandos/admin/adv')
-const filas = new Map(), vistas = new Map()
+const { criarFila } = require('./moderacao-fila')
 const MAX = 10000
 let relogio = () => Date.now()
+const fila = criarFila({ relogio: () => relogio(), max: MAX,
+  saturada: () => console.warn('[limitecaractere] Limite de operações; fluxo preservado.'),
+  falha: () => { console.warn('[limitecaractere] Operação incompleta; sem repetição de efeitos.'); return true } })
 // Iteração por pontos de código, equivalente a Array.from(texto).length,
 // sem alocar um array proporcional ao tamanho do texto. Não conta bytes.
 function contarCaracteres(texto) { let total = 0; for (const _ of texto) total++; return total }
-function limpar() {
-  for (const [k, v] of vistas) if (!v.ativo && v.expira <= relogio()) vistas.delete(k)
-}
-const limpeza = setInterval(limpar, 30000)
-limpeza.unref()
 function aviso(limite, punicao, apagada) {
   return `🌙 *HIPNOS — O SILÊNCIO DOS DEUSES*\n\n📜 Mortal, até os pergaminhos do Olimpo possuem limites.\n\n⚠️ Sua mensagem ultrapassou o tamanho permitido neste reino.\n🔱 Limite: ${limite} caracteres.\n💀 Punição: ${punicao}.\n🗑️ Mensagem: ${apagada ? 'exclusão aceita' : 'exclusão não confirmada'}.\n\n🌑 Nem todos os discursos merecem atravessar os sonhos.`
 }
@@ -69,21 +67,8 @@ async function processar(sock, msg, tipo = 'notify') {
   if (!mensagemAtual(msg, tipo, relogio())) return false
   const texto = extrairTextoComando(msg)
   if (!texto) return false
-  limpar()
-  const jid = msg.key.remoteJid, chave = `${jid}:${msg.key.id}`
-  if (vistas.has(chave)) return vistas.get(chave).promise
-  if (vistas.size >= MAX || filas.size >= MAX) { console.warn('[limitecaractere] Limite de operações; fluxo preservado.'); return false }
   const total = contarCaracteres(texto)
-  const anterior = filas.get(jid) || Promise.resolve()
-  const promise = anterior.catch(() => {}).then(() => tratar(sock, msg, total)).catch(() => {
-    console.warn('[limitecaractere] Operação incompleta; sem repetição de efeitos.')
-    return true
-  })
-  const visto = { promise, ativo: true, expira: relogio() + 120000 }
-  vistas.set(chave, visto)
-  filas.set(jid, promise)
-  promise.finally(() => { visto.ativo = false; visto.expira = relogio() + 120000; if (filas.get(jid) === promise) filas.delete(jid) })
-  return promise
+  return fila.processar(msg.key.remoteJid, msg.key.id, () => tratar(sock, msg, total))
 }
 async function processarLote(sock, mensagens = [], tipo, prioridade = new Set()) {
   const tratadas = new Set()
@@ -96,5 +81,5 @@ async function processarLote(sock, mensagens = [], tipo, prioridade = new Set())
   return tratadas
 }
 module.exports = { processar, processarLote, contarCaracteres, MAX,
-  __limparTeste(agora) { filas.clear(); vistas.clear(); relogio = agora || (() => Date.now()) },
-  __tamanhoCacheTeste() { return vistas.size } }
+  __limparTeste(agora) { fila.limparTeste(); relogio = agora || (() => Date.now()) },
+  __tamanhoCacheTeste() { return fila.tamanho() } }

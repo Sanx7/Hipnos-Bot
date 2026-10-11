@@ -40,6 +40,12 @@ module.exports = {
 
 👥 GESTÃO DE MEMBROS
 
+🛡️ ${prefixo}antigolpe on · off · status (também ${prefixo}antiscam · ${prefixo}antifraude)
+➥ ${prefixo}antigolpe modo alerta · apagar · adv
+➥ ${prefixo}antigolpe sensibilidade baixa · media · alta
+➥ ${prefixo}antigolpe permitir sorteio oficial · remover sorteio oficial · excecoes
+➥ Padrão desligado; modo alerta. Só risco alto pode ser apagado/advertido; cooldown 60s.
+
 💤 /inativos [página]
 ➥ Participantes com 0 a 5 mensagens registradas (ADM ou dono), 20 por página.
 

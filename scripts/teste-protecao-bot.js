@@ -192,6 +192,7 @@ async function main() {
       moderacaoFigurinhas: { processarLote: async () => new Set() },
       moderacaoAntiflood: { processarLote: async () => new Set() },
       moderacaoLimiteCaractere: { processarLote: async () => new Set() },
+      moderacaoAntigolpe: { processarLote: async () => new Set() },
       moderacaoAntilinkHard: { processarLote: async () => new Set() },
       temLinkBasico: require('../dados/deteccao-links').temLinkBasico,
       rankingRegistro: { registrarComNumeroReal: async () => {} },

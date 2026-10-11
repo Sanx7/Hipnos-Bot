@@ -181,6 +181,13 @@ async function main() {
     require('../dados/limitecaractere-config').__definirColecoesTeste({ config: floodFake(), eventos: floodFake(), cooldowns: floodFake() })
     require('../dados/moderacao-limitecaractere').__limparTeste()
     const limiteCaractere = require('../comandos/admin/limitecaractere')
+    const golpeFake = require('./helpers/colecao-antigolpe-fake')
+    require('../dados/antigolpe-config').__definirColecoesTeste({ config: golpeFake(), eventos: golpeFake(), cooldowns: golpeFake() })
+    require('../dados/moderacao-antigolpe').__limparTeste()
+    const antigolpe = require('../comandos/admin/antigolpe')
+    for (const nome of [antigolpe.nome, ...antigolpe.aliases]) {
+      registro.set(nome, { executar: async (...args) => { eventos.push('comando:antigolpe'); return antigolpe.executar(...args) } })
+    }
     for (const nome of [limiteCaractere.nome, ...limiteCaractere.aliases]) {
       registro.set(nome, { executar: async (...args) => { eventos.push('comando:limitecaractere'); return limiteCaractere.executar(...args) } })
     }
@@ -288,6 +295,7 @@ async function main() {
       moderacaoFigurinhas,
       moderacaoAntiflood: require('../dados/moderacao-antiflood'),
       moderacaoLimiteCaractere: require('../dados/moderacao-limitecaractere'),
+      moderacaoAntigolpe: require('../dados/moderacao-antigolpe'),
       moderacaoAntilinkHard: require('../dados/moderacao-antilinkhard'),
       temLinkBasico: require('../dados/deteccao-links').temLinkBasico,
       console,
@@ -899,6 +907,68 @@ async function main() {
       await fluxo.enviar('/menu ' + 'x'.repeat(101)); assert.ok(fluxo.eventos.includes('comando:menu')); assert.ok(!fluxo.eventos.includes('delete'))
       await fluxo.enviar('x'.repeat(101)); assert.ok(fluxo.eventos.includes('jogo')); assert.ok(fluxo.eventos.includes('ia'))
     } finally { c.mongo.config.falhar = false }
+  }))
+  await teste('OFF: antigolpe e aliases configuráveis só pelo dono com prefixo dinâmico',async()=>{
+    const conf=require('../dados/antigolpe-config')
+    await estado.definirLigado(false);require('../prefixo').__definirPrefixoTeste('!')
+    try{
+      for(const nome of ['antigolpe','antiscam','antifraude']){
+        await fluxo.enviar(`!${nome} on`,'67890@lid');assert.ok(!fluxo.eventos.includes('comando:antigolpe'));assert.equal((await conf.obter(grupo)).ativo,false)
+        await fluxo.enviar(`!${nome} on`,'12345@lid');assert.ok(fluxo.eventos.includes('comando:antigolpe'));assert.equal((await conf.obter(grupo)).ativo,true)
+        await fluxo.enviar(`!${nome} off`,'12345@lid');assert.equal((await conf.obter(grupo)).ativo,false)
+      }
+    }finally{require('../prefixo').__definirPrefixoTeste('/')}
+  })
+  const fraude='Sou da equipe de suporte do WhatsApp. Envie seu código de verificação. Sua conta será bloqueada. https://example.com'
+  async function comAntigolpeIntegrado(fn){
+    return comLimiteIntegrado(async c=>{
+      const fake=require('./helpers/colecao-antigolpe-fake'),conf=require('../dados/antigolpe-config'),mod=require('../dados/moderacao-antigolpe')
+      const mongo={config:fake(),eventos:fake(),cooldowns:fake()}
+      conf.__definirColecoesTeste(mongo);mod.__limparTeste()
+      await c.conf.definir(grupo,{ativo:false},dono)
+      const meta=fluxo.sock.groupMetadata
+      fluxo.sock.groupMetadata=async()=>{const m=await meta();return{...m,participants:[...m.participants,{id:'5511777770000@s.whatsapp.net',admin:'admin'}]}}
+      try{await conf.definir(grupo,{ativo:true,modo:'adv'},dono);await fn(Object.assign(c,{golpe:conf,mongoGolpe:mongo}))}
+      finally{await conf.definir(grupo,{ativo:false},dono);mod.__limparTeste()}
+    })
+  }
+  await teste('OFF: antigolpe automático apaga; mantém ranking e não aciona IA',()=>comAntigolpeIntegrado(async c=>{
+    await estado.definirLigado(false);await fluxo.enviar(fraude)
+    assert.equal(fluxo.eventos.filter(e=>e==='delete').length,1);assert.equal(await c.advs.contarAdvertencias(comum,grupo),1)
+    assert.ok(fluxo.eventos.includes('ranking'));assert.ok(!fluxo.eventos.some(e=>e==='ia'||e==='jogo'||e.startsWith('comando:')))
+  }))
+  await teste('ON: antigolpe punitivo impede comando e jogos/IA',()=>comAntigolpeIntegrado(async c=>{
+    await estado.definirLigado(true)
+    for(const t of [`/menu ${fraude}`,fraude]){await fluxo.enviar(t);assert.equal(fluxo.eventos.filter(e=>e==='delete').length,1);assert.ok(!fluxo.eventos.some(e=>e==='ia'||e==='jogo'||e.startsWith('comando:')))}
+    assert.equal(await c.advs.contarAdvertencias(comum,grupo),1)
+  }))
+  await teste('modo alerta preserva comandos e mensagens livres sem punição',()=>comAntigolpeIntegrado(async c=>{
+    await estado.definirLigado(true);await c.golpe.definir(grupo,{modo:'alerta'},dono)
+    await fluxo.enviar(`/menu ${fraude}`);assert.ok(fluxo.eventos.includes('comando:menu'));assert.ok(!fluxo.eventos.includes('delete'))
+    await fluxo.enviar(fraude);assert.ok(fluxo.eventos.includes('jogo'));assert.ok(fluxo.eventos.includes('ia'));assert.equal(await c.advs.contarAdvertencias(comum,grupo),0)
+  }))
+  await teste('risco médio no modo adv só alerta e preserva fluxo',()=>comAntigolpeIntegrado(async c=>{
+    await estado.definirLigado(true);await fluxo.enviar('Você ganhou um prêmio. https://example.com')
+    assert.ok(fluxo.eventos.includes('resposta'));assert.ok(fluxo.eventos.includes('jogo'));assert.ok(fluxo.eventos.includes('ia'))
+    assert.ok(!fluxo.eventos.includes('delete'));assert.equal(await c.advs.contarAdvertencias(comum,grupo),0)
+  }))
+  for(const prioridade of ['hard','flood','limite','figadv'])await teste(`${prioridade} precede antigolpe sem duplicar advertência/remoção`,()=>comAntigolpeIntegrado(async c=>{
+    await estado.definirLigado(false)
+    const regras=require('../dados/figurinhas-regras'),hash=require('node:crypto').createHash('sha256').update('figurinha-off').digest('hex')
+    try{
+      if(prioridade==='hard')await c.hard.definir(grupo,true,dono)
+      if(prioridade==='flood'){await c.flood.definir(grupo,{ativo:true,acao:'adv'},dono);for(let i=0;i<6;i++)await fluxo.enviar('oi')}
+      if(prioridade==='limite')await c.conf.definir(grupo,{ativo:true,limite:100,acao:'adv'},dono)
+      if(prioridade==='figadv')await regras.cadastrar(grupo,hash,'adv',dono)
+      await fluxo.enviar(fraude,`${comum}@s.whatsapp.net`,prioridade==='figadv'?{conversation:fraude,stickerMessage:{}}:undefined)
+      assert.equal(fluxo.eventos.filter(e=>e==='delete').length,1);assert.equal(c.mongoGolpe.eventos.docs.length,0)
+      assert.equal(await c.advs.contarAdvertencias(comum,grupo),prioridade==='hard'?0:1);assert.equal(c.remocoes,prioridade==='hard'?1:0)
+    }finally{if(prioridade==='figadv')await regras.remover(grupo,hash,'adv')}
+  }))
+  await teste('Mongo do antigolpe indisponível não interrompe o listener',()=>comAntigolpeIntegrado(async c=>{
+    await estado.definirLigado(true);c.mongoGolpe.config.falhar=true
+    try{await fluxo.enviar(`/menu ${fraude}`);assert.ok(fluxo.eventos.includes('comando:menu'));assert.ok(!fluxo.eventos.includes('delete'))}
+    finally{c.mongoGolpe.config.falhar=false}
   }))
   await teste('OFF mantém ranking, captura diária, cache e atualização AFK sem avisos', async () => {
     fluxo.mapaAfk.set(comum, { desde: Date.now() - 60000 })
