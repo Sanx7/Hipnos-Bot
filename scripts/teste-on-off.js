@@ -178,6 +178,12 @@ async function main() {
     require('../dados/moderacao-antiflood').__limparTeste()
     const antiflood = require('../comandos/admin/antiflood')
     registro.set('antiflood', { executar: async (...args) => { eventos.push('comando:antiflood'); return antiflood.executar(...args) } })
+    require('../dados/limitecaractere-config').__definirColecoesTeste({ config: floodFake(), eventos: floodFake(), cooldowns: floodFake() })
+    require('../dados/moderacao-limitecaractere').__limparTeste()
+    const limiteCaractere = require('../comandos/admin/limitecaractere')
+    for (const nome of [limiteCaractere.nome, ...limiteCaractere.aliases]) {
+      registro.set(nome, { executar: async (...args) => { eventos.push('comando:limitecaractere'); return limiteCaractere.executar(...args) } })
+    }
     // Mock apenas do download usado pelo comando real; demais módulos usam o Baileys real.
     const entradaBaileys = require.resolve('@whiskeysockets/baileys')
     const baileysReal = require('@whiskeysockets/baileys')
@@ -281,6 +287,7 @@ async function main() {
       respostaPrefixo: require('../dados/resposta-prefixo'),
       moderacaoFigurinhas,
       moderacaoAntiflood: require('../dados/moderacao-antiflood'),
+      moderacaoLimiteCaractere: require('../dados/moderacao-limitecaractere'),
       moderacaoAntilinkHard: require('../dados/moderacao-antilinkhard'),
       temLinkBasico: require('../dados/deteccao-links').temLinkBasico,
       console,
@@ -787,6 +794,112 @@ async function main() {
       await fluxo.enviar('!antiflood off','12345@lid'); assert.equal((await conf.obter(grupo)).ativo,false)
     } finally { require('../prefixo').__definirPrefixoTeste('/') }
   })
+  await teste('OFF: limitecaractere e aliases bloqueiam ADM, dono configura com prefixo dinâmico', async () => {
+    const conf = require('../dados/limitecaractere-config')
+    await estado.definirLigado(false)
+    require('../prefixo').__definirPrefixoTeste('!')
+    try {
+      for (const nome of ['limitecaractere', 'limitecaracteres', 'antitextao']) {
+        await fluxo.enviar(`!${nome} on`, '67890@lid')
+        assert.ok(!fluxo.eventos.includes('comando:limitecaractere')); assert.equal((await conf.obter(grupo)).ativo, false)
+        await fluxo.enviar(`!${nome} on`, '12345@lid')
+        assert.ok(fluxo.eventos.includes('comando:limitecaractere')); assert.equal((await conf.obter(grupo)).ativo, true)
+        await fluxo.enviar(`!${nome} off`, '12345@lid'); assert.equal((await conf.obter(grupo)).ativo, false)
+      }
+    } finally { require('../prefixo').__definirPrefixoTeste('/') }
+  })
+  async function comLimiteIntegrado(fn) {
+    const fake = require('./helpers/colecao-figurinhas-fake')
+    const conf = require('../dados/limitecaractere-config'), mod = require('../dados/moderacao-limitecaractere')
+    const flood = require('../dados/antiflood-config'), hard = require('../dados/antilinkhard-config')
+    const advs = require('../advertencias'), ban = require('../comandos/admin/ban')
+    const mongo = { config: fake(), eventos: fake(), cooldowns: fake() }
+    const meta = fluxo.sock.groupMetadata, remover = fluxo.sock.groupParticipantsUpdate
+    let remocoes = 0, blacklist = 0
+    conf.__definirColecoesTeste(mongo); mod.__limparTeste()
+    flood.__definirColecoesTeste({ config: fake(), eventos: fake(), cooldowns: fake() }); require('../dados/moderacao-antiflood').__limparTeste()
+    hard.__definirColecoesTeste({ config: fake(), eventos: fake(), travas: fake() }); require('../dados/moderacao-antilinkhard').__limparCacheTeste()
+    advs.__definirColecaoTeste(fake()); ban.__definirGravacaoBlacklistTeste(() => { blacklist++ })
+    fluxo.sock.groupMetadata = async () => ({ participants: [
+      { id: '5511666660000@s.whatsapp.net', lid: '66666@lid', admin: 'admin' },
+      { id: `${comum}@s.whatsapp.net`, lid: '88888@lid' },
+      { id: `${dono}@s.whatsapp.net`, lid: '12345@lid' }
+    ] })
+    fluxo.sock.groupParticipantsUpdate = async (jid, alvos) => { remocoes++; return alvos.map(jid => ({ jid, status: '200' })) }
+    try {
+      await conf.definir(grupo, { ativo: true, limite: 100, acao: 'adv' }, dono)
+      await fn({ conf, mod, mongo, flood, hard, advs, get remocoes() { return remocoes }, get blacklist() { return blacklist } })
+    } finally {
+      fluxo.sock.groupMetadata = meta; fluxo.sock.groupParticipantsUpdate = remover
+      await conf.definir(grupo, { ativo: false }, dono); await flood.definir(grupo, { ativo: false }, dono); await hard.definir(grupo, false, dono)
+      delete fluxo.protecoes.antiLink
+      mod.__limparTeste(); require('../dados/moderacao-antiflood').__limparTeste()
+      ban.__definirGravacaoBlacklistTeste(); await estado.definirLigado(false)
+    }
+  }
+  await teste('OFF: limite automático pune e preserva ranking', () => comLimiteIntegrado(async c => {
+    await estado.definirLigado(false); await c.conf.definir(grupo, { acao: 'apagar' }, dono)
+    await fluxo.enviar('x'.repeat(101), '88888@lid')
+    assert.equal(fluxo.eventos.filter(e => e === 'delete').length, 1); assert.ok(fluxo.eventos.includes('ranking'))
+    assert.ok(!fluxo.eventos.some(e => e === 'jogo' || e === 'ia' || e.startsWith('comando:')))
+  }))
+  await teste('ON: textão apagado não executa comando ou aciona jogos/IA', () => comLimiteIntegrado(async c => {
+    await estado.definirLigado(true)
+    for (const texto of ['/menu ' + 'x'.repeat(101), 'palpite ' + 'x'.repeat(101)]) {
+      await fluxo.enviar(texto)
+      assert.equal(fluxo.eventos.filter(e => e === 'delete').length, 1)
+      assert.ok(!fluxo.eventos.some(e => e === 'jogo' || e === 'ia' || e.startsWith('comando:')))
+    }
+    assert.equal(await c.advs.contarAdvertencias(comum, grupo), 1)
+  }))
+  await teste('hard prevalece sobre antiflood e limite: uma expulsão, nenhuma adv', () => comLimiteIntegrado(async c => {
+    await estado.definirLigado(false); await c.hard.definir(grupo, true, dono); await c.flood.definir(grupo, { ativo: true, acao: 'adv' }, dono)
+    for (let i = 0; i < 6; i++) await fluxo.enviar('oi')
+    await fluxo.enviar('https://example.com ' + 'x'.repeat(101))
+    assert.equal(c.remocoes, 1); assert.equal(fluxo.eventos.filter(e => e === 'delete').length, 1)
+    assert.equal(await c.advs.contarAdvertencias(comum, grupo), 0); assert.equal(c.mongo.eventos.docs.length, 0)
+  }))
+  await teste('antiflood prevalece sobre limite: uma advertência e exclusão', () => comLimiteIntegrado(async c => {
+    await estado.definirLigado(true); await c.flood.definir(grupo, { ativo: true, acao: 'adv' }, dono)
+    for (let i = 0; i < 6; i++) await fluxo.enviar('oi')
+    await fluxo.enviar('x'.repeat(101))
+    assert.equal(fluxo.eventos.filter(e => e === 'delete').length, 1); assert.equal(await c.advs.contarAdvertencias(comum, grupo), 1)
+    assert.equal(c.mongo.eventos.docs.length, 0); assert.equal(c.remocoes, 0)
+  }))
+  await teste('limite prevalece sobre antilink básico sem duplicar efeitos', () => comLimiteIntegrado(async c => {
+    await estado.definirLigado(true); fluxo.protecoes.antiLink = [grupo]
+    await fluxo.enviar('https://example.com ' + 'x'.repeat(101))
+    assert.equal(fluxo.eventos.filter(e => e === 'delete').length, 1); assert.equal(await c.advs.contarAdvertencias(comum, grupo), 1)
+    assert.equal(c.remocoes, 0); assert.equal(c.blacklist, 0)
+  }))
+  await teste('figadv continua usando contador central com limite ligado', () => comLimiteIntegrado(async c => {
+    const regras = require('../dados/figurinhas-regras')
+    const hash = require('node:crypto').createHash('sha256').update('figurinha-off').digest('hex')
+    await regras.cadastrar(grupo, hash, 'adv', dono)
+    try {
+      await estado.definirLigado(false); await fluxo.enviar('', `${comum}@s.whatsapp.net`, { stickerMessage: {} })
+      assert.equal(await c.advs.contarAdvertencias(comum, grupo), 1); assert.equal(c.mongo.eventos.docs.length, 0)
+      assert.equal(fluxo.eventos.filter(e => e === 'delete').length, 1)
+    } finally { await regras.remover(grupo, hash, 'adv') }
+  }))
+  await teste('mensagem já tratada pelo limite não recebe também figadv', () => comLimiteIntegrado(async c => {
+    const regras = require('../dados/figurinhas-regras'), fake = require('./helpers/colecao-figurinhas-fake')
+    regras.__definirColecoesTeste({ regras: fake(), ocorrencias: fake() })
+    const hash = require('node:crypto').createHash('sha256').update('figurinha-off').digest('hex')
+    await regras.cadastrar(grupo, hash, 'adv', dono)
+    try {
+      // Entrada adversarial com dois nós: ambas as regras seriam candidatas.
+      await fluxo.enviar('', `${comum}@s.whatsapp.net`, { conversation: 'x'.repeat(101), stickerMessage: {} })
+      assert.equal(await c.advs.contarAdvertencias(comum, grupo), 1); assert.equal(fluxo.eventos.filter(e => e === 'delete').length, 1)
+    } finally { await regras.remover(grupo, hash, 'adv') }
+  }))
+  await teste('Mongo do limite indisponível preserva comandos, jogos e IA', () => comLimiteIntegrado(async c => {
+    await estado.definirLigado(true); c.mongo.config.falhar = true
+    try {
+      await fluxo.enviar('/menu ' + 'x'.repeat(101)); assert.ok(fluxo.eventos.includes('comando:menu')); assert.ok(!fluxo.eventos.includes('delete'))
+      await fluxo.enviar('x'.repeat(101)); assert.ok(fluxo.eventos.includes('jogo')); assert.ok(fluxo.eventos.includes('ia'))
+    } finally { c.mongo.config.falhar = false }
+  }))
   await teste('OFF mantém ranking, captura diária, cache e atualização AFK sem avisos', async () => {
     fluxo.mapaAfk.set(comum, { desde: Date.now() - 60000 })
     await fluxo.enviar('voltei')

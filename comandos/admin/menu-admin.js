@@ -7,6 +7,7 @@
 // ============================================
 
 const { RODAPE_MENU } = require('../../config')
+const { obterPrefixo } = require('../../prefixo')
 
 module.exports = {
   nome: 'menu-admin',
@@ -14,6 +15,7 @@ module.exports = {
 
   async executar(sock, jid, msg) {
     try {
+      const prefixo = await obterPrefixo()
       await sock.sendMessage(jid, {
         text: `
 ╔══════════════════════════════╗
@@ -29,6 +31,12 @@ module.exports = {
 ➥ Proteção por grupo: padrão desligado, 6 mensagens em 10s, ação adv.
 ➥ /antiflood limite 6 10 · /antiflood acao apagar · adv · ban
 ➥ ADM ou dono; cooldown de 30s, advertências no contador existente.
+
+📜 ${prefixo}limitecaractere on · off · status
+➥ Texto e legendas: padrão desligado, 1000 caracteres, ação apagar.
+➥ ${prefixo}limitecaractere definir 1000 (100–10000 caracteres Unicode)
+➥ ${prefixo}limitecaractere acao apagar · adv · ban
+➥ Aliases: ${prefixo}limitecaracteres · ${prefixo}antitextao. ADM ou dono; cooldown de 30s.
 
 👥 GESTÃO DE MEMBROS
 
