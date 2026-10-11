@@ -3,6 +3,12 @@ const { ehAdminDoGrupo, ehDonoDoBot } = require('../../config');
 const { resolverNumeroAlvo } = require('../../lid');
 const { extrairTextoComando } = require('../../dados/texto-comando');
 
+// Apenas eventos fixos e contagens: erros do socket podem conter URLs,
+// JIDs, conteúdo e chaves de mídia. Nunca imprimir o erro recebido.
+function log(etapa, estado, detalhes = {}) {
+  console.info('[totag]', { etapa, estado, ...detalhes });
+}
+
 function contextoCitado(message) {
   // O roteador aceita comandos em texto e em legendas. A citação pertence
   // ao nó que contém o comando, não necessariamente a extendedTextMessage.
@@ -27,6 +33,7 @@ module.exports = {
   descricao: 'Envia texto direto ou reenvia texto, imagem, vídeo ou áudio citado com menções ocultas (admin ou dono).',
 
   async executar(sock, jid, msg, text) {
+    let etapa = 'autorizacao';
     try {
       if (!String(jid || '').endsWith('@g.us')) {
         return await sock.sendMessage(jid, {
@@ -38,7 +45,7 @@ module.exports = {
       try {
         metadados = await sock.groupMetadata(jid);
       } catch (err) {
-        console.error('[totag] falha nos metadados:', err?.message || err);
+        log('metadados', 'falha');
         return await sock.sendMessage(jid, {
           text: '⚠️ Não consegui ler os membros deste grupo agora. Tente de novo em instantes.'
         }, { quoted: msg });
@@ -66,15 +73,20 @@ module.exports = {
       // conteúdo do argumento. Texto direto tem prioridade sobre o reply.
       const textoDireto = String(text ?? extrairTextoComando(msg)).replace(/^\s*\S+\s*/, '');
       // Mantém os IDs no formato do grupo (inclusive @lid).
+      etapa = 'marcacoes';
       const mentions = participantes.map((p) => p.id).filter(Boolean);
       const marcacao = { mentions, contextInfo: { mentionedJid: mentions } };
+      log(etapa, 'prontas', { quantidade: mentions.length });
       if (textoDireto.trim()) {
+        etapa = 'envio_texto';
         await sock.sendMessage(jid, { text: textoDireto, ...marcacao });
         return;
       }
 
+      etapa = 'citacao';
       const contexto = contextoCitado(msg.message);
       const quoted = contexto?.quotedMessage;
+      log(etapa, quoted ? 'encontrada' : 'ausente');
       if (!quoted) {
         return await sock.sendMessage(jid, {
           text: '📩 Use /totag seu texto (ou /notag2 seu texto).\n\nResponda a uma mensagem de texto, imagem, vídeo ou áudio e envie /totag sem texto para reenviá-la. Todos serão marcados silenciosamente.'
@@ -84,13 +96,17 @@ module.exports = {
       // Normalizar remove o envelope viewOnce. Conferir antes de normalizar
       // impede transformar mídia de visualização única em cópia permanente.
       if (visualizacaoUnica(quoted)) {
+        log('midia', 'visualizacao_unica_recusada');
         return await sock.sendMessage(jid, {
           text: '🔒 Essa mídia é de visualização única e não pode ser reenviada por /totag. Peça ao autor uma imagem, vídeo ou áudio comum.'
         }, { quoted: msg });
       }
 
+      etapa = 'midia';
       const original = normalizeMessageContent(quoted) || {};
       const tipo = getContentType(original);
+      // Tipo desconhecido não é registrado: a chave recebida não é confiável.
+      log(etapa, ['conversation', 'extendedTextMessage', 'imageMessage', 'videoMessage', 'audioMessage'].includes(tipo) ? tipo : 'nao_suportada');
       if (!['conversation', 'extendedTextMessage', 'imageMessage', 'videoMessage', 'audioMessage'].includes(tipo)) {
         return await sock.sendMessage(jid, {
           text: '📩 O /totag só funciona respondendo a texto, imagem, vídeo ou áudio. Figurinhas não são suportadas.'
@@ -98,6 +114,7 @@ module.exports = {
       }
 
       if (tipo === 'conversation' || tipo === 'extendedTextMessage') {
+        etapa = 'envio_texto';
         const text = tipo === 'conversation' ? original.conversation : original.extendedTextMessage.text;
         await sock.sendMessage(jid, { text, ...marcacao });
         return;
@@ -110,19 +127,52 @@ module.exports = {
           remoteJid: contexto.remoteJid || jid,
           id: contexto.stanzaId,
           participant: contexto.participant,
-          fromMe: false
+          fromMe: [sock.user?.id, sock.user?.lid].filter(Boolean)
+            .some(id => jidNormalizedUser(id) === jidNormalizedUser(contexto.participant || ''))
         },
         message: quoted
       };
-      const buffer = await downloadMediaMessage(alvo, 'buffer', {});
-      if (!buffer || buffer.length === 0) throw new Error('Mídia vazia');
+      etapa = 'download';
+      log(etapa, 'inicio');
+      // Em URLs expiradas o Baileys precisa da chave da citação e deste
+      // callback para solicitar renovação. Seu logger padrão incluiria JIDs.
+      let renovacaoSolicitada = false;
+      const downloadContext = typeof sock.updateMediaMessage === 'function' ? {
+        logger: { info: () => log('download', 'renovacao_solicitada') },
+        reuploadRequest: async alvo => {
+          renovacaoSolicitada = true;
+          const atualizado = await sock.updateMediaMessage(alvo);
+          if (visualizacaoUnica(atualizado?.message)) throw new Error('Mídia de visualização única');
+          return atualizado;
+        }
+      } : undefined;
+      let buffer;
+      try {
+        buffer = await downloadMediaMessage(alvo, 'buffer', {}, downloadContext);
+      } catch (err) {
+        // rc14: getHttpStream lança Boom (output.statusCode), mas o retry
+        // interno consulta error.status. Tratar só HTTP 404/410 e renovar
+        // uma vez, sem alterar a dependência nem repetir falhas de envio.
+        const status = err?.isBoom ? err.output?.statusCode : err?.status;
+        if (!downloadContext || renovacaoSolicitada || ![404, 410].includes(status)) throw err;
+        downloadContext.logger.info();
+        const atualizado = await downloadContext.reuploadRequest(alvo);
+        buffer = await downloadMediaMessage(atualizado, 'buffer', {});
+      }
+      if (!Buffer.isBuffer(buffer) || buffer.length === 0) throw new Error('Buffer de mídia inválido');
+      log(etapa, 'concluido');
 
+      etapa = 'envio_midia';
+      log(etapa, 'inicio');
       if (tipo === 'imageMessage') {
         const imagem = original.imageMessage;
         await sock.sendMessage(jid, {
           image: buffer,
           caption: imagem.caption ?? undefined,
           mimetype: imagem.mimetype || 'image/jpeg',
+          // Reutiliza a miniatura; se ausente, envia sem miniatura. Evita
+          // que o Baileys acione Sharp/Jimp só para recomputá-la.
+          jpegThumbnail: imagem.jpegThumbnail || Buffer.alloc(0),
           ...marcacao
         });
       } else if (tipo === 'videoMessage') {
@@ -149,11 +199,12 @@ module.exports = {
           ...marcacao
         });
       }
+      log(etapa, 'concluido');
     } catch (err) {
-      console.error('[totag] falha capturada:', err?.message || err);
+      log(etapa, 'falha');
       await sock.sendMessage(jid, {
         text: '❌ Não consegui reenviar essa mensagem agora. A mídia pode ter expirado; tente novamente em instantes.'
-      }, { quoted: msg }).catch(() => {});
+      }, { quoted: msg }).catch(() => log('aviso_erro', 'falha'));
     }
   }
 };
