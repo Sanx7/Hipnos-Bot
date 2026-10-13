@@ -3,6 +3,8 @@ function disponivel(sock) {
   const estado = estados.get(sock)
   return (!estado || (estado.aberto && estado.validar())) && sock?.ws?.isOpen !== false
 }
+// Operações destrutivas exigem socket registrado com a guarda da lease.
+function exclusivoDisponivel(sock) { return estados.has(sock) && disponivel(sock) }
 function falhaConexao(erro) {
   const codigo = erro?.output?.statusCode || erro?.statusCode || erro?.status
   return [408, 428, 440, 401, 500, 503, 515].includes(Number(codigo))
@@ -36,4 +38,4 @@ function criarInicializador() {
     bloqueado() { return bloqueado }
   }
 }
-module.exports = { disponivel, exigir, falhaConexao, preparar, atualizar, criarInicializador }
+module.exports = { disponivel, exclusivoDisponivel, exigir, falhaConexao, preparar, atualizar, criarInicializador }

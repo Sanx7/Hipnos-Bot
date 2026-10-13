@@ -171,6 +171,15 @@ async function main() {
     const mapaAfk = new Map()
     const mutados = new Map()
     const registro = new Map([['mute', { mutedUsers: mutados }]])
+    const nukeMongo = require('./helpers/colecao-nuke-fake')()
+    const nuke = require('../nuke').criarNuke({
+      repositorio: require('../dados/nuke-mongo').criarRepositorio(async () => nukeMongo),
+      disponivel: () => true, codigo: () => 'codigo-offline', esperar: async () => {}
+    })
+    registro.set('nuke', { executar: async (...args) => {
+      eventos.push('comando:nuke')
+      return nuke.executar(...args)
+    } })
     require('../dados/antilinkhard-config').__definirColecoesTeste({ config: require('./helpers/colecao-figurinhas-fake')(), eventos: require('./helpers/colecao-figurinhas-fake')(), travas: require('./helpers/colecao-figurinhas-fake')() })
     require('../dados/moderacao-antilinkhard').__limparCacheTeste()
     const floodFake = require('./helpers/colecao-figurinhas-fake')
@@ -334,7 +343,7 @@ async function main() {
     }
     require('../dados/mensagens-enviadas').acompanharSocket(contexto.sock)
     vm.runInNewContext(fonte.slice(inicio, fim), contexto)
-    return { eventos, exclusoes, protecoes, mapaAfk, mutados, polls, imagensTotag, downloadsTotag, respostasPrefixo, sock: contexto.sock, async enviar(texto, sender = `${comum}@s.whatsapp.net`, conteudo, fromMe = false, jidDestino = grupo) {
+    return { eventos, exclusoes, protecoes, mapaAfk, mutados, polls, imagensTotag, downloadsTotag, respostasPrefixo, nukeMongo, sock: contexto.sock, async enviar(texto, sender = `${comum}@s.whatsapp.net`, conteudo, fromMe = false, jidDestino = grupo) {
       eventos.length = 0
       const mensagem = msg(sender)
       mensagem.key.remoteJid = jidDestino
@@ -345,6 +354,37 @@ async function main() {
     } }
   }
   const fluxo = criarHandler()
+  await teste('OFF: nuke real bloqueia admin comum e dono simula/cancela com prefixo dinâmico', async () => {
+    await estado.definirLigado(false)
+    const metadataOriginal = fluxo.sock.groupMetadata
+    fluxo.sock.groupMetadata = async () => {
+      const meta = await metadataOriginal()
+      meta.participants[0].admin = 'admin'
+      meta.owner = meta.participants[1].id
+      return meta
+    }
+    require('../prefixo').__definirPrefixoTeste('!')
+    try {
+      await fluxo.enviar('!nuke', '67890@lid')
+      assert.ok(!fluxo.eventos.includes('comando:nuke'))
+      assert.equal(fluxo.nukeMongo.docs.get(grupo), undefined)
+      await fluxo.enviar('!nuke', '12345@lid')
+      assert.ok(fluxo.eventos.includes('comando:nuke'))
+      assert.equal(fluxo.nukeMongo.docs.get(grupo), undefined)
+      await fluxo.enviar('!nuke habilitar', '12345@lid')
+      assert.equal(fluxo.nukeMongo.docs.get(grupo).habilitado, true)
+      assert.equal(fluxo.nukeMongo.docs.get(grupo).estado, 'inativa')
+      await fluxo.enviar('!nuke', '12345@lid')
+      assert.equal(fluxo.nukeMongo.docs.get(grupo).estado, 'pendente')
+      await fluxo.enviar('!nuke cancelar', '12345@lid')
+      assert.equal(fluxo.nukeMongo.docs.get(grupo).estado, 'cancelada')
+      await fluxo.enviar('!nuke desabilitar', '12345@lid')
+      assert.equal(fluxo.nukeMongo.docs.get(grupo).habilitado, false)
+    } finally {
+      fluxo.sock.groupMetadata = metadataOriginal
+      require('../prefixo').__definirPrefixoTeste('/')
+    }
+  })
   await teste('OFF: moderação de figurinhas real funciona; ADM bloqueado e dono gerencia regras', async () => {
     const regras = require('../dados/figurinhas-regras')
     const hash = require('node:crypto').createHash('sha256').update('figurinha-off').digest('hex')
