@@ -1,334 +1,319 @@
-// ============================================
-// 🎭 TESTE OFFLINE — /verdadeouconsequencia
-// ============================================
-// Cobre: sorteio livre, forçar verdade, forçar desafio, com menção, sem menção,
-// a trava diária determinística, LID → número real e os erros do executor.
-// 100% offline: nenhuma chamada de rede (groupMetadata é mock, quando chamado).
-//
-// Rode com:  node scripts/teste-vouc.js
-// ============================================
-
-const assert = require('assert')
-const vouc = require('../comandos/menu-brincadeiras/verdadeouconsequencia')
-const { VERDADES, DESAFIOS } = require('../dados/perguntas-vouc')
-const T = vouc.__teste
-
-const JID_GRUPO = '5511900000000-123456@g.us'
-const NUM_A = '5511999990001'
-const NUM_B = '5522888880002'
-
+﻿// Offline: fake sockets/collections, real Baileys payloads and AES-GCM votes.
+process.env.MONGODB_URI = ''
+process.env.MONGO_URI_RPG = ''
+const assert = require('node:assert/strict')
+const { EventEmitter } = require('node:events')
+const crypto = require('node:crypto')
+const fs = require('node:fs')
+const { decryptPollVote, cleanMessage, proto, jidNormalizedUser } = require('@whiskeysockets/baileys')
+const mod = require('../dados/vouc-rodadas')
+const banco = require('../dados/perguntas-vouc')
+const fake = require('./helpers/enquete-nativa-fake')
+const prefixo = require('../prefixo')
+const estado = require('../estado-bot')
+const adulto = require('../modoadulto')
+const comando = require('../comandos/menu-brincadeiras/verdadeouconsequencia')
+const A = '5511900000001@s.whatsapp.net', B = '5511900000002@s.whatsapp.net'
+const L = '900001@lid', G = '120363000000000000@g.us', G2 = '120363000000000001@g.us'
 let passou = 0
-let falhou = 0
-
-async function testar (nome, fn) {
-  try {
-    await fn()
-    passou++
-    console.log('  OK  ' + nome)
-  } catch (err) {
-    falhou++
-    console.log('  XX  ' + nome)
-    console.log('      ' + (err && err.message ? err.message : err))
-  }
-}
-
-// ─── 🧪 Sock falso: registra o que foi enviado ───
-// (os .enviados ficam NO PRÓPRIO sock, assim `textoEnviado(sock)` funciona
-//  tanto com `const { sock } = ...` quanto com `const { sock, enviados } = ...`)
-function criarSock (opcoes) {
-  const enviados = []
-  const { participantes, falharMetadata, falharEnvio } = opcoes || {}
-  const sock = {
-    user: { id: `${NUM_A}:1@s.whatsapp.net` },
-    enviados,
-    groupMetadata: async () => {
-      if (falharMetadata) throw new Error('sem metadados')
-      return { participants: participantes || [] }
-    },
-    sendMessage: async (jid, conteudo, opts) => {
-      if (falharEnvio) throw new Error('socket fora do ar')
-      enviados.push({ jid, conteudo, opts })
+const fixtures = []
+function fixture(opcoes = {}) {
+  const f = { agora: 1000000, ligado: true, adulto: false, conectado: true, timers: new Map(), envios: [], originais: [], participantes: [{id:L,phoneNumber:A}, {id:B}], ...opcoes }
+  let timerId = 0
+  f.sock = { user:{id:fake.BOT,lid:'900099@lid'}, ev:new EventEmitter(),
+    groupMetadata: async () => { if(f.falharMeta) throw new Error('metadata indisponivel'); return {participants:f.participantes} },
+    sendMessage: async (jid, conteudo) => {
+      if(f.falharEnvio || (conteudo.poll && f.falharPoll) || (conteudo.mentions && f.falharResultado)) throw new Error('envio indisponivel')
+      f.envios.push({jid,conteudo})
+      const enviada = await fake.mensagemEnviada(jid,conteudo)
+      if(conteudo.poll) { if(f.semSecret) delete enviada.message.messageContextInfo.messageSecret; f.originais.push(enviada) }
+      return enviada
     }
   }
-  return { sock, enviados }
-}
-
-function textoEnviado (sock) {
-  return sock.enviados.map((e) => e.conteudo?.text || '').join('\n')
-}
-
-// ─── 🧪 Mensagens falsas ───
-// Só texto, sem menção: o autor é msg.key.participant
-function msgSimples (comando) {
-  return {
-    key: { participant: `${NUM_A}:1@s.whatsapp.net` },
-    message: { extendedTextMessage: { text: comando, contextInfo: {} } }
+  const deps = { agora:()=>f.agora, ligado:async()=>f.ligado, adulto:async()=>f.adulto,
+    disponivel:()=>f.conectado, random:()=>f.aleatorio ?? 0,
+    agendar:(fn,ms)=> { const id=++timerId; f.timers.set(id,{fn,em:f.agora+ms}); return id }, limpar:id=>f.timers.delete(id), ...f.deps }
+  f.r = mod.criarGerenciador(f.sock,deps)
+  f.msg = (autor=A, alvo=null) => ({key:{remoteJid:G,participant:autor,fromMe:false,id:'pedido'},message:alvo ? {extendedTextMessage:{text:'/vouc',contextInfo:{mentionedJid:[alvo]}}} : {conversation:'/vouc'}})
+  f.abrir = (autor=A,alvo=null,grupo=G)=>f.r.abrir(grupo,f.msg(autor,alvo))
+  f.voto = (i,autor=A,indices=[i],timestamp=f.agora+1,poll=f.originais.at(-1)) => fake.voto({mensagemEnquete:poll,opcoes:mod.OPCOES},poll.key.remoteJid,autor,indices,{timestamp})
+  f.votar = (i,autor=A) => f.r.processarMensagem(f.voto(i,autor))
+  f.atualizacao = mensagem => {
+    const poll = f.originais.find(p => p.key.id === mensagem.message.pollUpdateMessage.pollCreationMessageKey.id)
+    const voto = decryptPollVote(mensagem.message.pollUpdateMessage.vote, { pollCreatorJid: f.sock.user.id,
+      pollMsgId: poll.key.id, pollEncKey: poll.message.messageContextInfo.messageSecret,
+      voterJid: jidNormalizedUser(mensagem.key.participant) })
+    return [{ key: poll.key, update: { pollUpdates: [{ pollUpdateMessageKey: mensagem.key, vote: voto,
+      senderTimestampMs: mensagem.message.pollUpdateMessage.senderTimestampMs }] } }]
   }
+  f.resultados = ()=>f.envios.filter(e=>e.conteudo.mentions)
+  f.avancar = ms=>{f.agora+=ms; for(const {fn,em} of [...f.timers.values()]) if(em<=f.agora) fn()}
+  fixtures.push(f)
+  return f
 }
-
-// Texto com @menção (JID "normalizado" que o Baileys entrega)
-function msgComMencao (comando, menciona) {
-  return {
-    key: { participant: `${NUM_A}:1@s.whatsapp.net` },
-    message: {
-      extendedTextMessage: {
-        text: comando,
-        contextInfo: { mentionedJid: [`${menciona}:1@s.whatsapp.net`] }
-      }
-    }
-  }
+async function testar(nome,fn) {
+  try { await fn(); passou++; console.log('OK '+nome) }
+  finally { for(const f of fixtures.splice(0)) f.r.fechar(); prefixo.__definirPrefixoTeste('/') }
 }
-
-// ─── 🚀 Suíte ───
-async function principal () {
-  console.log('🎭 Testando o /verdadeouconsequencia...\n')
-
-  // ─── 📦 Banco de conteúdo ───
-  await testar('o banco tem 100+ verdade e 100+ desafio', () => {
-    assert.ok(VERDADES.length >= 100, 'verdades: ' + VERDADES.length)
-    assert.ok(DESAFIOS.length >= 100, 'desafios: ' + DESAFIOS.length)
+async function main() {
+  prefixo.__definirPrefixoTeste('/')
+  await testar('aliases preservados e sem comandos globais de fallback',async()=>{
+    assert.deepEqual(comando.aliases,['vouc','verdadeconsequencia','verdadeouconseq'])
+    assert.equal(comando.nome,'verdadeouconsequencia')
   })
-
-  await testar('o banco não tem pergunta repetida dentro de cada lista', () => {
-    for (const [nome, lista] of [['verdades', VERDADES], ['desafios', DESAFIOS]]) {
-      const minusculas = lista.map((p) => p.toLowerCase().trim())
-      assert.strictEqual(new Set(minusculas).size, minusculas.length, nome + ' tem duplicada')
+  await testar('banco intacto: 369 verdades, 206 desafios, sem duplicatas',async()=>{
+    assert.equal(banco.VERDADES.length,369); assert.equal(banco.DESAFIOS.length,206)
+    for(const lista of [banco.VERDADES,banco.DESAFIOS]) assert.equal(new Set(lista.map(p=>p.toLowerCase().trim())).size,lista.length)
+    for(const p of banco.VERDADES) assert(p.endsWith('?'))
+    for(const p of banco.DESAFIOS) assert(p.endsWith('.'))
+  })
+  await testar('criacao: poll real, tres opcoes e um voto; estado vinculado',async()=>{
+    const f=fixture();await f.abrir();const poll=f.envios[0].conteudo.poll
+    assert.equal(poll.selectableCount,1);assert.deepEqual(poll.values,mod.OPCOES)
+    assert.match(poll.name,/HIPNOS/);assert(f.originais[0].message.messageContextInfo.messageSecret)
+    const r=[...f.r.__teste.porJogador.values()][0]
+    assert.equal(r.grupo,G);assert.equal(r.criadaEm,f.agora);assert.equal(r.expiraEm,f.agora+120000)
+    assert.equal(r.original.key.id,f.originais[0].key.id);assert.equal(r.estado,'aguardando')
+  })
+  await testar('desconexao durante leitura ON/OFF nao abre enquete nem timer',async()=>{
+    let chamadas=0,resolver
+    const f=fixture({deps:{ligado:()=>++chamadas===2?new Promise(r=>{resolver=r}):Promise.resolve(true)}})
+    const abertura=f.abrir();while(!resolver)await new Promise(r=>setImmediate(r))
+    f.sock.ev.emit('connection.update',{connection:'close'});resolver(true);await abertura
+    assert.equal(f.originais.length,0);assert.equal(f.timers.size,0);assert.equal(f.r.__teste.porJogador.size,0)
+  })
+  await testar('mudanca de associacao JID/LID entre consultas nao autoriza outro eleitor',async()=>{
+    const f=fixture();await f.abrir();let consultas=0
+    f.sock.groupMetadata=async()=>({participants:++consultas===1?[{id:L,phoneNumber:A},{id:B}]:[{id:'900002@lid',phoneNumber:A},{id:L,phoneNumber:B}]})
+    const original=f.originais[0]
+    await f.r.processarAtualizacoes([{key:original.key,update:{pollUpdates:[{pollUpdateMessageKey:{remoteJid:G,participant:L},vote:{selectedOptions:[crypto.createHash('sha256').update(mod.OPCOES[0]).digest()]},senderTimestampMs:f.agora+1}]}}])
+    assert.equal(f.resultados().length,0)
+  })
+  for(const [i,titulo] of [[0,'VERDADE'],[1,'CONSEQU\u00caNCIA'],[2,'VERDADE']]) await testar('voto cifrado: '+titulo+' / opcao '+i,async()=>{
+    const f=fixture();await f.abrir();await f.votar(i)
+    assert.equal(f.resultados().length,1);assert(f.resultados()[0].conteudo.text.includes(titulo))
+    assert.deepEqual(f.resultados()[0].conteudo.mentions,[A]);assert.equal(f.timers.size,0);assert.equal(f.r.__teste.porEnquete.size,0)
+  })
+  await testar('aleatorio pode escolher consequencia',async()=>{
+    const f=fixture({aleatorio:0.9});await f.abrir();await f.votar(2);assert.match(f.resultados()[0].conteudo.text,/CONSEQU\u00caNCIA/)
+  })
+  await testar('voto nao autorizado nao determina resultado',async()=>{
+    const f=fixture();await f.abrir();await f.votar(0,B);assert.equal(f.resultados().length,0);await f.votar(1,A);assert.equal(f.resultados().length,1)
+  })
+  await testar('mencao: so mencionado vota, nao iniciador',async()=>{
+    const f=fixture();await f.abrir(A,B);await f.votar(0,A);assert.equal(f.resultados().length,0);await f.votar(0,B);assert.deepEqual(f.resultados()[0].conteudo.mentions,[B])
+  })
+  await testar('JID/LID: voto LID autentica par dos metadados',async()=>{
+    const f=fixture();await f.abrir(A,L);await f.votar(0,L);assert.deepEqual(f.resultados()[0].conteudo.mentions,[A])
+  })
+  await testar('sufixo de dispositivo normalizado',async()=>{
+    const f=fixture();await f.abrir(A.replace('@',':7@'));await f.votar(0,L.replace('@',':3@'));assert.equal(f.resultados().length,1)
+  })
+  await testar('packet LID com cifra PN usa apenas o par comprovado',async()=>{
+    const f=fixture();await f.abrir();const v=f.voto(0,A);v.key.participant=L;await f.r.processarMensagem(v);assert.equal(f.resultados().length,1)
+  })
+  await testar('criador LID autentica cifra da enquete',async()=>{
+    const f=fixture();await f.abrir();const v=fake.voto({mensagemEnquete:f.originais[0],opcoes:mod.OPCOES},G,L,[0],{timestamp:f.agora+1,criador:f.sock.user.lid});await f.r.processarMensagem(v);assert.equal(f.resultados().length,1)
+  })
+  await testar('LID exato sem PN funciona; nao inventa telefone',async()=>{
+    const f=fixture({participantes:[{id:L},{id:B}]});await f.abrir(L);await f.votar(0,L);assert.deepEqual(f.resultados()[0].conteudo.mentions,[L])
+  })
+  await testar('mesmos digitos em PN e LID nao autorizam',async()=>{
+    const impostor='5511900000001@lid';const f=fixture({participantes:[{id:A},{id:impostor}]});await f.abrir(A);await f.votar(0,impostor);assert.equal(f.resultados().length,0)
+  })
+  await testar('identidade ambigua ou desconhecida nao abre rodada',async()=>{
+    const f=fixture({participantes:[{id:L,phoneNumber:A},{id:B,phoneNumber:A}]});await f.abrir();assert.equal(f.originais.length,0)
+    assert.equal(mod.identificar([{id:B}],L),null)
+  })
+  await testar('falha de metadados nao autoriza voto',async()=>{
+    const f=fixture();await f.abrir();f.falharMeta=true;await f.votar(0);assert.equal(f.resultados().length,0)
+  })
+  await testar('duplicatas concorrentes enviam um unico resultado',async()=>{
+    const f=fixture();await f.abrir();const v=f.voto(0);await Promise.all([f.r.processarMensagem(v),f.r.processarMensagem(v),f.r.processarMensagem(v)]);assert.equal(f.resultados().length,1)
+  })
+  await testar('primeira escolha valida vence alteracoes posteriores',async()=>{
+    const f=fixture();await f.abrir();const v=f.voto(0),alterado=f.voto(1);await f.r.processarMensagem(v);await f.r.processarMensagem(alterado);assert.equal(f.resultados().length,1);assert.match(f.resultados()[0].conteudo.text,/VERDADE/)
+  })
+  await testar('remocao de voto nao sorteia; voto posterior valido decide',async()=>{
+    const f=fixture();await f.abrir();await f.r.processarMensagem(f.voto(0,A,[],f.agora+2));assert.equal(f.resultados().length,0)
+    await f.r.processarMensagem(f.voto(0,A,[0],f.agora+1));assert.equal(f.resultados().length,0)
+    await f.r.processarMensagem(f.voto(1,A,[1],f.agora+3));assert.equal(f.resultados().length,1)
+  })
+  await testar('multivoto e opcao desconhecida nao sorteiam',async()=>{
+    const f=fixture();await f.abrir();await f.r.processarMensagem(f.voto(0,A,[0,1]));assert.equal(f.resultados().length,0)
+    const original=f.originais[0];await f.r.processarAtualizacoes([{key:original.key,update:{pollUpdates:[{pollUpdateMessageKey:{remoteJid:G,participant:A},vote:{selectedOptions:[Buffer.alloc(32)]},senderTimestampMs:f.agora+2}]}}]);assert.equal(f.resultados().length,0)
+  })
+  await testar('expiracao limpa timers e ignora voto/fallback tardios',async()=>{
+    const f=fixture();await f.abrir();const v=f.voto(0);f.avancar(120000);await f.r.processarMensagem(v)
+    assert.equal(await f.r.fallback(G,f.msg(),'/verdade'),false);assert.equal(f.resultados().length,0);assert.equal(f.r.__teste.porJogador.size,0);assert.equal(f.timers.size,0)
+  })
+  await testar('deadline vale mesmo antes do callback do timer',async()=>{
+    const f=fixture();await f.abrir();const v=f.voto(0);f.agora+=120001;await f.r.processarMensagem(v);assert.equal(f.resultados().length,0);assert.equal(f.r.__teste.porJogador.size,0)
+  })
+  await testar('rodadas simultaneas independentes; duplicata do jogador bloqueada',async()=>{
+    const f=fixture();await Promise.all([f.abrir(),f.abrir()]);assert.equal(f.originais.length,1)
+    await f.abrir(B);const segundo=f.originais.at(-1);await f.abrir(A,null,G2);assert.equal(f.r.__teste.porJogador.size,3)
+    await f.r.processarMensagem(f.voto(0,A,[0],f.agora+1,f.originais[0]));await f.r.processarMensagem(f.voto(1,B,[1],f.agora+2,segundo));assert.equal(f.resultados().length,2);assert.equal(f.r.__teste.porJogador.size,1)
+  })
+  await testar('ID real e grupo vinculados; enquete desconhecida ignorada',async()=>{
+    const f=fixture();await f.abrir();const v=f.voto(0);v.message.pollUpdateMessage.pollCreationMessageKey={...v.message.pollUpdateMessage.pollCreationMessageKey,id:'outra'};assert.equal(await f.r.processarMensagem(v),false)
+    const outro=f.voto(0);outro.key.remoteJid=G2;assert.equal(await f.r.processarMensagem(outro),false);assert.equal(f.resultados().length,0)
+  })
+  await testar('messages.update usa ID e autor real do voto',async()=>{
+    const f=fixture();await f.abrir();const original=f.originais[0]
+    const upd=autor=>[{key:original.key,update:{pollUpdates:[{pollUpdateMessageKey:{remoteJid:G,participant:autor},vote:{selectedOptions:[crypto.createHash('sha256').update(mod.OPCOES[1]).digest()]},senderTimestampMs:f.agora+1}]}}]
+    await f.r.processarAtualizacoes(upd(B));assert.equal(f.resultados().length,0);await f.r.processarAtualizacoes(upd(L));await f.r.processarAtualizacoes(upd(L));assert.equal(f.resultados().length,1)
+  })
+  await testar('voto adulterado nao autentica e oferece fallback uma vez',async()=>{
+    const f=fixture();await f.abrir();const v=f.voto(0);v.message.pollUpdateMessage.vote.encPayload[0]^=255
+    await f.r.processarMensagem(v);await f.r.processarMensagem(v);assert.equal(f.resultados().length,0);assert.equal(f.envios.filter(e=>e.conteudo.text?.includes('interpretar')).length,1)
+  })
+  await testar('segredo ausente oferece fallback e nao presume voto',async()=>{
+    const f=fixture({semSecret:true});await f.abrir();assert(f.envios.some(e=>e.conteudo.text?.includes('interpretar')));assert.equal(f.resultados().length,0);await f.r.fallback(G,f.msg(),'/verdade');assert.equal(f.resultados().length,1)
+  })
+  await testar('falha no envio da enquete permite fallback durante a rodada',async()=>{
+    const f=fixture({falharPoll:true});await f.abrir();assert.equal(f.originais.length,0);assert.equal(f.r.__teste.porJogador.size,1);await f.r.fallback(G,f.msg(),'/consequencia');assert.equal(f.resultados().length,1)
+  })
+  await testar('fallback so participante, prefixo dinamico e somente durante rodada',async()=>{
+    const f=fixture();prefixo.__definirPrefixoTeste('!');assert.equal(await f.r.fallback(G,f.msg(),'!verdade'),false);await f.abrir(A,B)
+    assert.equal(await f.r.fallback(G,f.msg(A),'!verdade'),false);assert.equal(await f.r.fallback(G,f.msg(B),'!verdade extra'),false)
+    assert.equal(await f.r.fallback(G,f.msg(B),'!consequencia'),true);assert.equal(f.resultados().length,1);assert.equal(await f.r.fallback(G,f.msg(B),'!consequencia'),false)
+  })
+  await testar('OFF bloqueia abertura, voto e fallback inclusive de dono',async()=>{
+    const f=fixture({ligado:false});await f.abrir();assert.equal(f.envios.length,0);f.ligado=true;await f.abrir();f.ligado=false;await f.votar(0);assert.equal(await f.r.fallback(G,f.msg(),'/verdade'),false);assert.equal(f.resultados().length,0)
+  })
+  await testar('desconexao cancela rodada, remove listeners e nao envia',async()=>{
+    const f=fixture();await f.abrir();const v=f.voto(0);f.conectado=false;f.sock.ev.emit('connection.update',{connection:'close'});await f.r.processarMensagem(v);assert.equal(f.resultados().length,0);assert.equal(f.timers.size,0)
+    for(const ev of ['messages.update','group-participants.update','connection.update'])assert.equal(f.sock.ev.listenerCount(ev),0)
+  })
+  await testar('erro de envio do resultado nao causa retry nem duplicata',async()=>{
+    const f=fixture();await f.abrir();const v=f.voto(0);f.falharResultado=true;await f.r.processarMensagem(v);f.falharResultado=false;await f.r.processarMensagem(v);assert.equal(f.resultados().length,0);assert.equal(f.r.__teste.porJogador.size,0)
+  })
+  await testar('saida do jogador por LID cancela apenas sua rodada',async()=>{
+    const f=fixture();await f.abrir(A);await f.abrir(B);f.sock.ev.emit('group-participants.update',{id:G,action:'remove',participants:[{id:L,phoneNumber:A}]});assert.equal(f.r.__teste.porJogador.size,1);await f.votar(0,B);assert.equal(f.resultados().length,1)
+  })
+  await testar('participante ausente nos metadados nao recebe resultado',async()=>{
+    const f=fixture();await f.abrir();f.participantes=[{id:B}];await f.votar(0);assert.equal(f.resultados().length,0);assert.equal(f.r.__teste.porJogador.size,0)
+  })
+  await testar('modo adulto filtra todas as frases novas nao classificadas',async()=>{
+    const livres=mod.listas(false),todos=mod.listas(true)
+    assert.deepEqual(todos.verdade,banco.VERDADES);assert.deepEqual(todos.desafio,banco.DESAFIOS)
+    assert(!livres.verdade.includes(banco.VERDADES[124]));assert(!livres.desafio.includes(banco.DESAFIOS[112]))
+    for(const cat of ['verdade','desafio'])assert(livres[cat].length>100)
+    const f=fixture({aleatorio:0.999});await f.abrir();await f.votar(0);assert(f.resultados()[0].conteudo.text.includes(livres.verdade.at(-1)))
+    const g=fixture({adulto:true,aleatorio:0.999});await g.abrir();await g.votar(0);assert(g.resultados()[0].conteudo.text.includes(banco.VERDADES.at(-1)))
+  })
+  await testar('modo adulto real e OFF real com colecoes fake',async()=>{
+    estado.__definirColecaoTeste({findOne:async()=>({ligado:true})});adulto.__definirColecaoTeste({findOne:async()=>({ativo:true})})
+    const f=fixture({deps:{ligado:()=>estado.obterLigado(),adulto:g=>adulto.modoAdultoAtivo(g)}});await f.abrir();assert.equal(f.originais.length,1);await f.votar(0);assert.equal(f.resultados().length,1)
+    estado.__definirColecaoTeste({findOne:async()=>({ligado:false})});const g=fixture({deps:{ligado:()=>estado.obterLigado()}});await g.abrir();assert.equal(g.originais.length,0)
+  })
+  await testar('banco adulto indisponivel falha fechado',async()=>{
+    adulto.__definirColecaoTeste({findOne:async()=>{throw new Error('offline')}})
+    const f=fixture({aleatorio:0.999,deps:{adulto:g=>adulto.modoAdultoAtivo(g)}});await f.abrir();await f.votar(0);assert(f.resultados()[0].conteudo.text.includes(mod.listas(false).verdade.at(-1)))
+  })
+  await testar('modo adulto desligado durante consulta impede entrega +18',async()=>{
+    let consultas=0;const f=fixture({aleatorio:124.5/369,deps:{adulto:async()=>++consultas===1}});await f.abrir();await f.votar(0);assert.equal(f.resultados().length,0);assert.equal(f.r.__teste.porJogador.size,0)
+  })
+  await testar('conclusao durante saida/expiracao nao continua apos await',async()=>{
+    let resolver;const f=fixture({deps:{adulto:()=>new Promise(r=>{resolver=r})}});await f.abrir();const voto=f.votar(0)
+    while(!resolver)await new Promise(r=>setImmediate(r));f.avancar(120000);resolver(true);await voto;assert.equal(f.resultados().length,0)
+  })
+  await testar('listeners constantes com multiplas rodadas',async()=>{
+    const f=fixture();for(let i=0;i<10;i++){await f.abrir();await f.votar(0)}assert.equal(f.sock.ev.listenerCount('messages.update'),1);assert.equal(f.timers.size,0)
+  })
+  await testar('votos sem timestamp, anteriores ou fora do prazo nao decidem',async()=>{
+    const f=fixture();await f.abrir()
+    for(const timestamp of [NaN,f.agora-1,f.agora+120000])await f.r.processarMensagem(f.voto(0,A,[0],timestamp))
+    assert.equal(f.resultados().length,0);await f.votar(0);assert.equal(f.resultados().length,1)
+  })
+  await testar('fallback LID resolve apenas a rodada do participante',async()=>{
+    const f=fixture();await f.abrir(A);assert.equal(await f.r.fallback(G,f.msg(L),'/verdade'),true);assert.deepEqual(f.resultados()[0].conteudo.mentions,[A])
+  })
+  await testar('limpeza tardia de rodada expirada nao remove nova rodada',async()=>{
+    let resolver;const f=fixture({deps:{adulto:()=>new Promise(r=>{resolver=r})}});await f.abrir();const voto=f.votar(0)
+    while(!resolver)await new Promise(r=>setImmediate(r));f.avancar(120000);await f.abrir();resolver(true);await voto
+    assert.equal(f.r.__teste.porJogador.size,1);assert.equal(f.r.__teste.porEnquete.size,1);assert.equal(f.resultados().length,0)
+  })
+  await testar('VOUC nao ocupa nem altera enquete existente no registro',async()=>{
+    const jogos=require('../dados/jogos-ativos'),f=fixture(),dados={enquete:'independente'}
+    jogos.registrarJogo(G,jogos.TIPOS.ENQUETE,dados)
+    try { const original=jogos.obterJogo(G);await f.abrir();await f.votar(0);assert.equal(f.resultados().length,1);assert.equal(jogos.obterJogo(G),original) }
+    finally { jogos.removerJogo(G,jogos.TIPOS.ENQUETE) }
+  })
+  await testar('pipeline rc14: cleanMessage, protobuf Long e voto GCM real',async()=>{
+    const f=fixture();await f.abrir();const v=f.voto(0,L)
+    v.message.pollUpdateMessage.pollCreationMessageKey.fromMe=false
+    v.message.pollUpdateMessage.pollCreationMessageKey.participant=f.sock.user.lid
+    v.message.pollUpdateMessage=proto.Message.PollUpdateMessage.decode(proto.Message.PollUpdateMessage.encode(v.message.pollUpdateMessage).finish())
+    cleanMessage(v,f.sock.user.id,f.sock.user.lid)
+    assert.equal(v.message.pollUpdateMessage.pollCreationMessageKey.fromMe,true)
+    await f.r.processarMensagem(v);assert.equal(f.resultados().length,1)
+  })
+  await testar('mesmo voto em upsert/update: duas ordens e concorrencia enviam apenas uma resposta',async()=>{
+    for(const ordem of ['upsert','update','juntos']) {
+      const f=fixture();await f.abrir();const v=f.voto(0),updates=f.atualizacao(v)
+      if(ordem==='juntos')await Promise.all([f.r.processarMensagem(v),f.r.processarAtualizacoes(updates)])
+      else if(ordem==='upsert'){await f.r.processarMensagem(v);await f.r.processarAtualizacoes(updates)}
+      else {await f.r.processarAtualizacoes(updates);await f.r.processarMensagem(v)}
+      assert.equal(f.resultados().length,1);assert.equal(f.r.__teste.porJogador.size,0);assert.equal(f.timers.size,0)
     }
   })
-
-  await testar('toda pergunta é texto útil (não vazio, terminada corretamente)', () => {
-    // Verdades são perguntas (terminam em "?"); desafios são ordens
-    // ("Faca...", "Mande...", "Descreva...") e terminam em ponto.
-    for (const p of VERDADES) {
-      assert.ok(typeof p === 'string' && p.length > 8, 'verdade curta/vazia: ' + p)
-      assert.ok(p.trim().endsWith('?'), 'verdade não termina em ?: ' + p)
-    }
-    for (const p of DESAFIOS) {
-      assert.ok(typeof p === 'string' && p.length > 8, 'desafio curto/vazio: ' + p)
-      assert.ok(p.trim().endsWith('.'), 'desafio não termina em ponto: ' + p)
-    }
+  await testar('remocao nova em update bloqueia upsert antigo; replays apos conclusao ignorados',async()=>{
+    const f=fixture();await f.abrir();const antiga=f.voto(0,A,[0],f.agora+1),removida=f.voto(0,A,[],f.agora+3),alterada=f.voto(1,A,[1],f.agora+4)
+    const uAntiga=f.atualizacao(antiga),uRemovida=f.atualizacao(removida),uAlterada=f.atualizacao(alterada)
+    await f.r.processarAtualizacoes(uRemovida);await f.r.processarMensagem(antiga);await f.r.processarAtualizacoes(uAntiga);await f.r.processarMensagem(removida)
+    assert.equal(f.resultados().length,0)
+    await f.r.processarMensagem(alterada);await f.r.processarAtualizacoes(uAlterada);await f.r.processarAtualizacoes(uRemovida)
+    assert.equal(f.resultados().length,1);assert.match(f.resultados()[0].conteudo.text,/CONSEQU\u00caNCIA/)
   })
-
-  // ─── 🎲 Sorteio livre ───
-  await testar('sorteio livre: devolve uma das duas categorias, com pergunta da lista', () => {
-    for (let i = 0; i < 30; i++) {
-      const s = T.sortear({ numero: NUM_A, data: '2026-09-25' })
-      assert.ok(s.categoria === 'verdade' || s.categoria === 'desafio', s.categoria)
-      const lista = s.categoria === 'verdade' ? VERDADES : DESAFIOS
-      assert.ok(lista.includes(s.pergunta), 'pergunta não veio da lista: ' + s.pergunta)
-    }
+  await testar('update com grupo/ID/autor incorretos nao altera a rodada',async()=>{
+    const f=fixture();await f.abrir();const updates=f.atualizacao(f.voto(0))
+    await f.r.processarAtualizacoes([{...updates[0],key:{...updates[0].key,remoteJid:G2}}])
+    await f.r.processarAtualizacoes([{...updates[0],key:{...updates[0].key,id:'outra-enquete'}}])
+    const outraPessoa=f.atualizacao(f.voto(0,B,[0],f.agora+100))
+    await f.r.processarAtualizacoes(outraPessoa);assert.equal(f.resultados().length,0)
+    await f.r.processarAtualizacoes(updates);assert.equal(f.resultados().length,1)
   })
-
-  await testar('sorteio livre no comando: responde com verdade OU desafio', async () => {
-    const { sock } = criarSock()
-    await vouc.executar(sock, JID_GRUPO, msgSimples('/verdadeouconsequencia'), '/verdadeouconsequencia')
-    const txt = textoEnviado(sock)
-    assert.ok(txt.includes('VERDADE') || txt.includes('DESAFIO'), txt)
-    assert.ok(txt.includes('@' + NUM_A), 'não marcou quem chamou: ' + txt)
+  await testar('expiracao permite nova rodada; votos antigos nao atingem a nova',async()=>{
+    const f=fixture();await f.abrir();const v=f.voto(0),updates=f.atualizacao(v),id=f.originais[0].key.id
+    f.avancar(120000);await f.abrir();assert.notEqual(f.originais.at(-1).key.id,id)
+    await f.r.processarMensagem(v);await f.r.processarAtualizacoes(updates);assert.equal(f.resultados().length,0);assert.equal(f.r.__teste.porJogador.size,1)
+    await f.votar(1);assert.equal(f.resultados().length,1);assert.equal(f.timers.size,0)
   })
-
-  await testar('o sorteio livre usa o sorteador injetado', async () => {
-    const respostas = ['verdade', 'desafio', 'verdade']
-    vouc._injetarSorteador(() => respostas.shift())
-    try {
-      assert.strictEqual(T.sortear({ numero: NUM_A, data: '2026-09-25' }).categoria, 'verdade')
-      assert.strictEqual(T.sortear({ numero: NUM_A, data: '2026-09-25' }).categoria, 'desafio')
-      assert.strictEqual(T.sortear({ numero: NUM_A, data: '2026-09-25' }).categoria, 'verdade')
-    } finally {
-      vouc._restaurarSorteador()
-    }
-  })
-
-  // ─── 🎭 Forçar VERDADE ───
-  await testar('forçar verdade: sempre dá VERDADE, com texto da lista de verdades', () => {
-    for (let i = 0; i < 20; i++) {
-      const s = T.sortear({ numero: `${NUM_A}${i}`, forcar: 'verdade', data: '2026-09-25' })
-      assert.strictEqual(s.categoria, 'verdade')
-      assert.ok(VERDADES.includes(s.pergunta), s.pergunta)
-    }
-  })
-
-  await testar('comando "verdade" (com barra) responde VERDADE', async () => {
-    const { sock } = criarSock()
-    await vouc.executar(sock, JID_GRUPO, msgSimples('/verdadeouconsequencia verdade'), '/verdadeouconsequencia verdade')
-    const txt = textoEnviado(sock)
-    assert.ok(txt.includes('VERDADE'), txt)
-    assert.ok(!txt.includes('DESAFIO'), 'vazou desafio: ' + txt)
-  })
-
-  // ─── 💣 Forçar DESAFIO ───
-  await testar('forçar desafio: sempre dá DESAFIO, com texto da lista de desafios', () => {
-    for (let i = 0; i < 20; i++) {
-      const s = T.sortear({ numero: `${NUM_B}${i}`, forcar: 'desafio', data: '2026-09-25' })
-      assert.strictEqual(s.categoria, 'desafio')
-      assert.ok(DESAFIOS.includes(s.pergunta), s.pergunta)
-    }
-  })
-
-  await testar('comando "desafio" (com barra) responde DESAFIO', async () => {
-    const { sock } = criarSock()
-    await vouc.executar(sock, JID_GRUPO, msgSimples('/verdadeouconsequencia desafio'), '/verdadeouconsequencia desafio')
-    const txt = textoEnviado(sock)
-    assert.ok(txt.includes('DESAFIO'), txt)
-    assert.ok(!txt.includes('VERDADE'), 'vazou verdade: ' + txt)
-  })
-
-  await testar('"consequência" (com acento) também força desafio', async () => {
-    assert.strictEqual(T.categoriaPedida('/verdadeouconsequencia consequência'), 'desafio')
-    assert.strictEqual(T.categoriaPedida('/vouc CONSEQUENCIA'), 'desafio')
-  })
-
-  await testar('"Verdade" com maiúscula e "@" junto ainda é reconhecido', () => {
-    assert.strictEqual(T.categoriaPedida('/verdadeouconsequencia  VERDADE @5511'), 'verdade')
-  })
-
-  // ─── 👥 Com menção ───
-  await testar('com menção: o sorteio é marcado para a pessoa citada, não para quem chamou', async () => {
-    const { sock, enviados } = criarSock()
-    await vouc.executar(
-      sock, JID_GRUPO,
-      msgComMencao('/verdadeouconsequencia @pessoa', NUM_B),
-      '/verdadeouconsequencia @pessoa'
-    )
-    const txt = textoEnviado(sock)
-    assert.ok(txt.includes('@' + NUM_B), 'não marcou a pessoa citada: ' + txt)
-    assert.ok(!txt.includes('@' + NUM_A), 'marcou quem chamou em vez do alvo: ' + txt)
-    assert.deepStrictEqual(enviados[0].conteudo.mentions, [`${NUM_B}@s.whatsapp.net`])
-  })
-
-  await testar('menção + categoria: "verdade @pessoa" funciona (ordem invertida)', async () => {
-    const { sock } = criarSock()
-    await vouc.executar(
-      sock, JID_GRUPO,
-      msgComMencao('/verdadeouconsequencia verdade @pessoa', NUM_B),
-      '/verdadeouconsequencia verdade @pessoa'
-    )
-    const txt = textoEnviado(sock)
-    assert.ok(txt.includes('VERDADE'), txt)
-    assert.ok(txt.includes('@' + NUM_B), txt)
-  })
-
-  await testar('sem menção: o sorteio marca quem chamou (o participant)', async () => {
-    const { sock, enviados } = criarSock()
-    await vouc.executar(sock, JID_GRUPO, msgSimples('/vouc'), '/vouc')
-    assert.ok(textoEnviado(sock).includes('@' + NUM_A))
-    assert.deepStrictEqual(enviados[0].conteudo.mentions, [`${NUM_A}@s.whatsapp.net`])
-  })
-
-  await testar('LID na menção é resolvido pelo metadado do grupo pro número real', async () => {
-    const { sock, enviados } = criarSock({
-      participantes: [{ id: '99887766@lid', phoneNumber: `${NUM_B}@s.whatsapp.net` }]
-    })
-    const msg = {
-      key: { participant: `${NUM_A}:1@s.whatsapp.net` },
-      message: {
-        extendedTextMessage: {
-          text: '/vouc @pessoa',
-          contextInfo: { mentionedJid: ['99887766@lid'] }
+  await testar('todos os 575 conteudos sao alcancaveis; modo comum so entrega os 415 livres',async()=>{
+    for(const modoAdulto of [true,false]) {
+      const f=fixture({adulto:modoAdulto}),listas=mod.listas(modoAdulto)
+      let total=0
+      for(const [indice,cat] of [[0,'verdade'],[1,'desafio']]) {
+        for(let i=0;i<listas[cat].length;i++) {
+          f.aleatorio=(i+0.5)/listas[cat].length
+          await f.abrir();await f.votar(indice)
+          assert(f.resultados().at(-1).conteudo.text.includes('\n'+listas[cat][i]+'\n'))
+          total++
         }
       }
-    }
-    await vouc.executar(sock, JID_GRUPO, msg, '/vouc @pessoa')
-    assert.ok(textoEnviado(sock).includes('@' + NUM_B), textoEnviado(sock))
-    assert.deepStrictEqual(enviados[0].conteudo.mentions, [`${NUM_B}@s.whatsapp.net`])
-  })
-
-  await testar('LID sem metadado do grupo: usa o próprio LID (não quebra, não inventa número)', async () => {
-    const { sock, enviados } = criarSock({ falharMetadata: true })
-    const msg = {
-      key: { participant: `${NUM_A}:1@s.whatsapp.net` },
-      message: {
-        extendedTextMessage: {
-          text: '/vouc @pessoa',
-          contextInfo: { mentionedJid: ['99887766@lid'] }
-        }
-      }
-    }
-    await vouc.executar(sock, JID_GRUPO, msg, '/vouc @pessoa')
-    assert.ok(textoEnviado(sock).includes('@99887766'), textoEnviado(sock))
-    assert.deepStrictEqual(enviados[0].conteudo.mentions, ['99887766@lid'])
-  })
-
-  await testar('menção extra com :N (sufixo de dispositivo) é limpa', () => {
-    assert.strictEqual(T.normalizarJid('5511999990001:12@s.whatsapp.net'), '5511999990001@s.whatsapp.net')
-    assert.strictEqual(T.normalizarJid('99887766@lid'), '99887766@lid')
-    assert.strictEqual(T.normalizarJid(''), '')
-    assert.strictEqual(T.normalizarJid('sem-arroba'), '')
-  })
-
-
-  // ─── 🔒 Trava diária determinística ───
-  await testar('mesma pessoa + mesma categoria + mesmo dia = MESMA pergunta', () => {
-    const a = T.sortear({ numero: NUM_A, forcar: 'verdade', data: '2026-09-25' })
-    const b = T.sortear({ numero: NUM_A, forcar: 'verdade', data: '2026-09-25' })
-    assert.strictEqual(a.indice, b.indice)
-    assert.strictEqual(a.pergunta, b.pergunta)
-  })
-
-  await testar('dia diferente muda a pergunta (o sorteio gira sozinho amanhã)', () => {
-    const hoje = T.sortear({ numero: NUM_A, forcar: 'verdade', data: '2026-09-25' })
-    const amanha = T.sortear({ numero: NUM_A, forcar: 'verdade', data: '2026-09-26' })
-    assert.notStrictEqual(hoje.indice, amanha.indice)
-  })
-
-  await testar('pessoa diferente cai em item diferente', () => {
-    const a = T.sortear({ numero: NUM_A, forcar: 'verdade', data: '2026-09-25' })
-    const b = T.sortear({ numero: NUM_B, forcar: 'verdade', data: '2026-09-25' })
-    assert.notStrictEqual(a.indice, b.indice)
-  })
-
-  await testar('trava cobre 100% das combinações (índice sempre dentro da lista)', () => {
-    for (let i = 0; i < 200; i++) {
-      const numero = `5511${String(i).padStart(7, '0')}`
-      const cat = i % 2 === 0 ? 'verdade' : 'desafio'
-      const s = T.sortear({ numero, forcar: cat, data: '2026-09-25' })
-      const lista = cat === 'verdade' ? VERDADES : DESAFIOS
-      assert.ok(s.indice >= 0 && s.indice < lista.length, `índice ${s.indice} fora de ${lista.length}`)
+      assert.equal(total,modoAdulto?575:415);assert.equal(f.resultados().length,total);assert.equal(f.timers.size,0)
     }
   })
-
-  await testar('chaveData monta YYYY-MM-DD e respeita a data injetada', () => {
-    assert.strictEqual(T.chaveData(new Date(2026, 0, 5)), '2026-01-05')
-    assert.strictEqual(T.chaveData(new Date(2026, 11, 31)), '2026-12-31')
+  await testar('desconexao durante consulta adulta cancela resultado e todos os timers',async()=>{
+    let resolver;const f=fixture({deps:{adulto:()=>new Promise(r=>{resolver=r})}})
+    await f.abrir(A);const v=f.voto(0),updates=f.atualizacao(v);await f.abrir(B)
+    const voto=f.r.processarMensagem(v);while(!resolver)await new Promise(r=>setImmediate(r))
+    f.sock.ev.emit('connection.update',{connection:'close'});assert.equal(f.timers.size,0);assert.equal(f.r.__teste.porJogador.size,0);assert.equal(f.r.__teste.porEnquete.size,0)
+    resolver(true);await voto;await f.r.processarAtualizacoes(updates);assert.equal(f.resultados().length,0)
+    await f.abrir();assert.equal(f.timers.size,0)
   })
-
-  // ─── 🛡️ Erros do executor ───
-  await testar('mensagem sem autor nem menção → avisa e não lança', async () => {
-    const { sock } = criarSock()
-    const msgVazia = { key: {}, message: { extendedTextMessage: { text: '/vouc', contextInfo: {} } } }
-    await vouc.executar(sock, JID_GRUPO, msgVazia, '/vouc')
-    assert.ok(textoEnviado(sock).includes('Não consegui identificar'), textoEnviado(sock))
+  await testar('eleitor precisa continuar autorizado depois da consulta adulta',async()=>{
+    let resolver;const f=fixture({deps:{adulto:()=>new Promise(r=>{resolver=r})}})
+    await f.abrir();const voto=f.votar(0,L);while(!resolver)await new Promise(r=>setImmediate(r))
+    f.participantes=[{id:'900002@lid',phoneNumber:A},{id:L,phoneNumber:B}];resolver(true);await voto
+    assert.equal(f.resultados().length,0);assert.equal(f.r.__teste.porJogador.size,0);assert.equal(f.timers.size,0)
   })
-
-  await testar('sock quebrado: o erro não escapa do comando', async () => {
-    const { sock } = criarSock({ falharEnvio: true })
-    await vouc.executar(sock, JID_GRUPO, msgSimples('/vouc'), '/vouc')
-    assert.strictEqual(sock.enviados.length, 0, 'não deveria ter enviado nada')
+  await testar('metadados id PN com campo lid separado autorizam a mesma identidade',async()=>{
+    const f=fixture({participantes:[{id:A,lid:L},{id:B}]});await f.abrir(A,L);await f.votar(0,L)
+    assert.deepEqual(f.resultados()[0].conteudo.mentions,[A])
   })
-
-  await testar('a resposta sempre cita a mensagem do usuário', async () => {
-    const { sock, enviados } = criarSock()
-    await vouc.executar(sock, JID_GRUPO, msgSimples('/vouc verdade'), '/vouc verdade')
-    assert.ok(enviados[0].opts && enviados[0].opts.quoted, 'não citava o usuário')
-  })
-
-  await testar('nenhum estado global: NÃO usa jogos-ativos nem Mongo', () => {
-    const fonte = require('fs').readFileSync(
-      require('path').join(__dirname, '..', 'comandos', 'menu-brincadeiras', 'verdadeouconsequencia.js'),
-      'utf8'
-    )
-    // Só o CÓDIGO importa: o cabeçalho comenta sobre o jogos-ativos de propósito.
-    const codigo = fonte.split('\n').filter((l) => !l.trim().startsWith('//')).join('\n')
-    assert.ok(!codigo.includes('jogos-ativos'), 'não deveria tocar em jogos-ativos')
-    assert.ok(!/mongodb|MongoClient|collection\(|getDb\b/i.test(codigo), 'não deveria usar Mongo')
-  })
-
-  vouc._restaurarSorteador()
-
-  console.log('\n' + (falhou === 0
-    ? '🎉 TODOS OS TESTES DO /verdadeouconsequencia PASSARAM!'
-    : '💥 ' + falhou + ' teste(s) FALHARAM de ' + (passou + falhou) + '.'))
-  if (falhou > 0) process.exitCode = 1
+  console.log(passou+' testes offline passaram.')
 }
-
-principal()
+main().catch(e=>{console.error(e);process.exitCode=1})

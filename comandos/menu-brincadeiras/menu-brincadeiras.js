@@ -67,8 +67,8 @@ module.exports = {
 😈 /insulto (@pessoa)
 ➥ Dá uma zoeira leve e engraçada em alguém (também: /zoeira; sem menção, zoa você mesmo).
 
-🎭 /verdadeouconsequencia [verdade|desafio] (@pessoa)
-➥ Sorteia uma verdade ou um desafio pro sorteado (sem categoria, o destino é aleatório; sem menção, cai em quem chamou). Também: /vouc, /verdadeconsequencia.
+🎭 /verdadeouconsequencia (@pessoa)
+➥ Abre uma enquete: Verdade, Consequência ou Aleatório. Só o participante escolhido pode decidir, em até 2 minutos. Se a enquete falhar, ele pode usar /verdade ou /consequencia durante a rodada. Também: /vouc, /verdadeconsequencia.
 
 ════════════════════
 
@@ -137,7 +137,7 @@ module.exports = {
 ➥ Descubra a palavra secreta letra por letra — 6 erros e o limbo vence (um jogo por grupo; ex: /anagrama animais). Com jogo ativo: /anagrama <letra> chuta, /anagrama palpite <palavra> arrisca tudo, /anagrama desistir desiste.
 
 🎨 /gartic [categoria]
-➥ Adivinhe a palavra pela imagem (Pixabay) — quem acertar primeiro vence (um jogo por grupo, 3 min por rodada; ex: /gartic animais).
+➥ Adivinhe a palavra pela imagem do catálogo próprio — quem acertar primeiro vence (um jogo por grupo, 3 min por rodada; ex: /gartic animais).
 
 🧠 /quiz [categoria]
 ➥ Perguntas de múltipla escolha: responda com a letra (A-D) ou o número (1-4) — 5 perguntas por rodada, quem acertar mais vence (um jogo por grupo; ex: /quiz geografia). Com rodada ativa: /quiz parar encerra.

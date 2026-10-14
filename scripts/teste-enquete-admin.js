@@ -57,7 +57,7 @@ function criarSock () {
     sock: {
       user: { id: '5511999999999@s.whatsapp.net' },
       groupMetadata: async () => ({ participants: PARTICIPANTES, owner: ADMIN }),
-      groupParticipantsUpdate: async (gid, alvos, acao) => { baneados.push({ alvos, acao }); return alvos },
+      groupParticipantsUpdate: async (gid, alvos, acao) => { baneados.push({ alvos, acao }); return alvos.map(jid => ({ jid, status: '200' })) },
       sendMessage: async (para, conteudo, extra) => { enviadas.push({ para, conteudo, extra }); return protocolo.mensagemEnviada(para, conteudo) }
     }
   }

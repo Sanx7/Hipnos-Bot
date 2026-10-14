@@ -170,6 +170,7 @@ const { comandos } = require('./comandos-registry')
 const prefixoComandos = require('./prefixo')
 const respostaPrefixo = require('./dados/resposta-prefixo')
 const estadoBot = require('./estado-bot')
+const rodadasVouc = require('./dados/vouc-rodadas')
 const mensagensEnviadas = require('./dados/mensagens-enviadas')
 
 // 🎮 Registro COMPARTILHADO de jogos por grupo (dados/jogos-ativos.js).
@@ -298,6 +299,7 @@ const leaseSessao = criarLease({ perdida: () => {
   if (antigo) {
     socketSeguro.atualizar(antigo, false)
     agendadorAnuncios.fechar(antigo)
+    rodadasVouc.fechar(antigo)
     sockAtual = null
     Promise.resolve(antigo.end(undefined)).catch(() => {})
   }
@@ -316,6 +318,7 @@ async function montarBot() {
   if (sockAtual) {
     const antigo = sockAtual
     agendadorAnuncios.fechar(antigo)
+    rodadasVouc.fechar(antigo)
     socketSeguro.atualizar(antigo, false)
     sockAtual = null
     try {
@@ -366,6 +369,7 @@ async function montarBot() {
   require('./dados/protecao-bot').protegerRemocoes(sock)
   // Histórico de chaves para /limpar-chat, incluindo os envios automáticos.
   mensagensEnviadas.acompanharSocket(sock)
+  rodadasVouc.obter(sock)
   // Permite que boas-vindas pendentes reenviem pelo socket recriado.
   registrarSocketBoasVindas(sock)
 
@@ -513,9 +517,20 @@ async function montarBot() {
       const textosTratados = await moderacaoLimiteCaractere.processarLote(sock, messages, type, new Set([...linksTratados, ...floodsTratados]))
       const figurinhasTratadas = await moderacaoFigurinhas.processarLote(sock, messages.filter(msg => !linksTratados.has(`${msg?.key?.remoteJid}:${msg?.key?.id}`) && !floodsTratados.has(`${msg?.key?.remoteJid}:${msg?.key?.id}`) && !textosTratados.has(`${msg?.key?.remoteJid}:${msg?.key?.id}`)))
       const golpesTratados = await moderacaoAntigolpe.processarLote(sock, messages, type, new Set([...linksTratados, ...floodsTratados, ...textosTratados, ...figurinhasTratadas]))
+      // Votos de todas as mensagens novas do lote, após moderação.
+      // O gerenciador aplica sua própria barreira OFF antes de interpretar votos.
+      const votosVouc = new Set()
+      if (type === 'notify') {
+        const tratados = new Set([...linksTratados, ...floodsTratados, ...textosTratados, ...figurinhasTratadas, ...golpesTratados])
+        for (const mensagem of messages) {
+          const id = `${mensagem?.key?.remoteJid}:${mensagem?.key?.id}`
+          if (!tratados.has(id) && await rodadasVouc.obter(sock).processarMensagem(mensagem)) votosVouc.add(id)
+        }
+      }
       const msg = messages[0]
 
       if (!msg?.message) return
+      if (votosVouc.has(`${msg.key?.remoteJid}:${msg.key?.id}`)) return
       if (msg.key.fromMe) return
 
       const jid = msg.key.remoteJid
@@ -863,7 +878,11 @@ async function montarBot() {
 
       const comando = comandos.get(nomeComando)
 
-      if (!comando) return
+      if (!comando) {
+        // Fallback somente na rodada do próprio participante; comandos existentes têm prioridade.
+        await rodadasVouc.obter(sock).fallback(jid, msg, text)
+        return
+      }
 
       if (jid.endsWith('@g.us')) {
         const caminhoConfigs = path.join(__dirname, 'comandos', 'dados', 'antias.json');
@@ -962,6 +981,7 @@ async function montarBot() {
     if (connection === 'close') {
       socketSeguro.atualizar(sock, false)
       agendadorAnuncios.fechar(sock)
+      rodadasVouc.fechar(sock)
       const codigo = lastDisconnect?.error?.output?.statusCode
       const conflito = codigo === DisconnectReason.connectionReplaced || codigo === 440
       console.warn('[conexao]', { evento: conflito ? 'sessao_substituida' : 'conexao_fechada', codigo: Number.isInteger(codigo) ? codigo : null, processo: idProcessoConexao, geracao })

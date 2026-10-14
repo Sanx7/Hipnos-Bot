@@ -45,6 +45,9 @@ module.exports = {
 🌙 /sairgrupo
 ➥ Retira o Hipnos do grupo mediante confirmação (somente dono, prazo de 30 segundos).
 
+🎨 /gartic-add palavra • /gartic-lista [página] • /gartic-remover palavra
+➥ Cadastre uma imagem respondendo à foto; consulte o catálogo ou peça a prévia de remoção. Exclusão exige confirmação em até 2 minutos.
+
 🌙 /comunicado — Envia comunicados oficiais a todos os grupos do Hipnos.
 ➥ Só dono; aceita texto ou resposta a imagem. Prévia com confirmação em 60 segundos.
 ➥ /comunicado confirmar • /comunicado cancelar • /comunicado parar

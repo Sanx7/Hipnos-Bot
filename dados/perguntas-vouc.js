@@ -8,10 +8,10 @@
 // Tom: brincadeira de grupo, com verdades leves e perguntas adultas.
 // Os desafios são ações pra fazer na hora, no próprio grupo.
 //
-// O comando sorteia UMA por chamada, SEM estado persistente (nada de Mongo nem
-// de bloqueio via jogos-ativos.js — nao existe rodada em andamento). A unica
-// memoria e a trava diaria deterministica, que nunca repete a mesma pergunta
-// pra mesma pessoa no mesmo dia. Ver a documentacao em:
+// O comando abre uma enquete por jogador/grupo, com validade de 2 minutos.
+// Estado temporário: dados/vouc-rodadas.js, sem ocupar jogos-ativos.js.
+// Conteúdo livre revisado: dados/vouc-conteudo-livre.json. Frases ausentes
+// dessa lista só são sorteadas com o modo adulto ativo. Ver o comando em:
 //   comandos/menu-brincadeiras/verdadeouconsequencia.js
 //
 // Para adicionar perguntas novas, basta acrescentar strings no array.

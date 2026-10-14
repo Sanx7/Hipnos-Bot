@@ -1,230 +1,60 @@
-// ============================================================
-// 🧪 teste-gartic.js — Testes OFFLINE do /gartic (sem WhatsApp e sem rede)
-// ============================================================
-// Usa injeção de dependências do próprio comando (_injetarSorteio /
-// _injetarBuscaFotos / _injetarDownload / _definirDuracao) para não tocar
-// na Pixabay. A thumbnail do ffmpeg roda de verdade (helper central com
-// fallback de JPEG 8x8 — nunca rejeita).
-//
-// Rode com: node scripts/teste-gartic.js
-// ============================================================
-
-const assert = require('assert')
-const gartic = require('../comandos/menu-brincadeiras/gartic')
-const jogosAtivos = require('../dados/jogos-ativos')
-
-let passou = 0
-function ok(nome, cond) {
-  if (!cond) throw new Error('FALHOU: ' + nome)
-  passou++
-  console.log(`  ✅ ${nome}`)
+﻿// Offline gameplay regression. Real ffmpeg thumbnail helper; no external APIs.
+process.env.MONGODB_URI=''
+process.env.MONGO_URI_RPG=''
+const assert=require('node:assert/strict')
+const fs=require('node:fs')
+const os=require('node:os')
+const {Jimp,JimpMime}=require('jimp')
+const gartic=require('../comandos/menu-brincadeiras/gartic')
+const jogos=require('../dados/jogos-ativos')
+const estado=require('../estado-bot')
+const prefixo=require('../prefixo')
+const {OWNER_NUMBERS}=require('../config')
+const G='120363000000000000@g.us',A='5511888888888@s.whatsapp.net'
+let passou=0,buffer
+function ambiente(){
+  const f={enviadas:[],selecoes:0,downloads:0,doc:{_id:'foto1',palavra:'Caf\u00e9',categoria:'comida'},ligado:true}
+  f.sock={user:{id:'5511666666666@s.whatsapp.net'},groupMetadata:async()=>({participants:[]}),sendMessage:async(jid,conteudo)=>{if(f.falharImagem&&conteudo.image)throw new Error('rede');f.enviadas.push(conteudo);return {}}}
+  f.msg={key:{remoteJid:G,participant:A,fromMe:false},message:{conversation:'/gartic'}}
+  gartic._injetarCatalogo(async(cat,excluidas)=>{f.selecoes++;f.categoria=cat;f.excluidas=excluidas;return f.doc})
+  gartic._injetarDownload(async()=>{f.downloads++;if(f.falharDownload)throw new Error('rede');return buffer})
+  estado.__definirColecaoTeste({findOne:async()=>({ligado:f.ligado})})
+  f.jogar=t=>gartic.executar(f.sock,G,f.msg,t||'/gartic')
+  return f
 }
-
-// ─── Helpers ───
-function fakeSock() {
-  const enviadas = []
-  return {
-    enviadas,
-    sendMessage: async (jid, conteudo, opts) => {
-      enviadas.push({ jid, conteudo, opts })
-      return {}
-    },
-    groupMetadata: async () => ({ participants: [] }),
-    user: { id: '5511999999999:3' }
-  }
+function limpar(){const d=jogos.obterJogo(G)?.dados;if(d?.timer)clearTimeout(d.timer);jogos.limparJogos();prefixo.__definirPrefixoTeste('/')}
+async function teste(nome,fn){try{await fn();passou++;console.log('OK '+nome)}finally{limpar()}}
+async function main(){
+  buffer=await new Jimp({width:32,height:20,color:0x669933ff}).getBuffer(JimpMime.jpeg)
+  prefixo.__definirPrefixoTeste('/')
+  await teste('nome e contrato do loader preservados',async()=>{assert.equal(gartic.nome,'gartic');assert.equal(typeof gartic.executar,'function');assert.equal(gartic.TIPO_JOGO,jogos.TIPOS.GARTIC)})
+  await teste('legenda revela categoria e prazo, nunca resposta',async()=>{const s=gartic.montarLegenda({palavra:'SAPATO',categoria:'objetos'},3);assert(s.includes('objetos'));assert(s.includes('3 minutos'));assert(!s.includes('SAPATO'))})
+  await teste('rodada envia imagem e thumbnail sem revelar palavra',async()=>{
+    const f=ambiente(),antes=new Set(fs.readdirSync(os.tmpdir()).filter(n=>n.startsWith('gartic_')));await f.jogar()
+    const foto=f.enviadas.find(c=>c.image);assert(foto);assert(Buffer.isBuffer(foto.jpegThumbnail));assert(foto.jpegThumbnail.length);assert(!foto.caption.includes('Caf\u00e9'))
+    const d=jogos.obterJogo(G).dados;assert.equal(d.palavra,'Caf\u00e9');assert.equal(d.duracaoMs,180000);assert.equal(f.downloads,1)
+    const depois=fs.readdirSync(os.tmpdir()).filter(n=>n.startsWith('gartic_'));assert(depois.every(n=>antes.has(n)))
+  })
+  await teste('catalogo vazio informa sem registrar jogo',async()=>{const f=ambiente();f.doc=null;await f.jogar();assert(f.enviadas.at(-1).text.includes('vazio'));assert.equal(f.downloads,0);assert.equal(jogos.obterJogo(G),null)})
+  await teste('imagem indisponivel respeita tres tentativas sem Pixabay',async()=>{const f=ambiente();f.falharDownload=true;await f.jogar();assert.equal(f.downloads,3);assert.equal(jogos.obterJogo(G),null);assert(f.enviadas.at(-1).text.includes('cat\u00e1logo'))})
+  await teste('falha Mongo na selecao nao presume catalogo vazio',async()=>{const f=ambiente();gartic._injetarCatalogo(async()=>{throw new Error('offline')});await f.jogar();assert.equal(f.downloads,0);assert(!f.enviadas.at(-1).text.includes('vazio'))})
+  await teste('rodada em andamento preservada e sem consulta ao catalogo',async()=>{const f=ambiente(),d={palavra:'PALAVRA ANTIGA',categoria:'objetos',inicio:Date.now(),duracaoMs:180000,sock:f.sock};jogos.registrarJogo(G,jogos.TIPOS.GARTIC,d);await f.jogar();assert.equal(jogos.obterJogo(G).dados,d);assert.equal(f.selecoes,0);assert(f.enviadas.at(-1).text.includes('J\u00c1 TEM UM GARTIC'))})
+  await teste('bloqueio cruzado com outro jogo preservado',async()=>{const f=ambiente();jogos.registrarJogo(G,jogos.TIPOS.VELHA,{partida:{}});await f.jogar();assert.equal(f.selecoes,0);assert.equal(jogos.obterJogo(G).tipo,jogos.TIPOS.VELHA)})
+  await teste('palpite errado silencioso; acerto ignora acento e menciona vencedor',async()=>{const f=ambiente();await f.jogar();const n=f.enviadas.length;assert.equal(await jogos.processarMensagemLivre(f.sock,G,f.msg,'abacaxi'),false);assert.equal(f.enviadas.length,n);assert.equal(await jogos.processarMensagemLivre(f.sock,G,f.msg,' CAFE '),true);assert.equal(jogos.obterJogo(G),null);assert.deepEqual(f.enviadas.at(-1).mentions,[A]);assert(f.enviadas.at(-1).text.includes('Caf\u00e9'))})
+  await teste('desistir/cancelar com prefixo dinamico preservam revelacao',async()=>{const f=ambiente();prefixo.__definirPrefixoTeste('!');await f.jogar('!gartic');assert(f.enviadas.find(c=>c.image).caption.includes('!gartic desistir'));await f.jogar('!gartic cancelar');assert.equal(jogos.obterJogo(G),null);assert(f.enviadas.at(-1).text.includes('Caf\u00e9'));assert(f.enviadas.at(-1).text.includes('!gartic'))})
+  await teste('categoria opcional filtrada e categoria catalogo aceita',async()=>{const f=ambiente();prefixo.__definirPrefixoTeste('!');await f.jogar('!gartic animais');assert.equal(f.categoria,'animais');await f.jogar('!gartic desistir');await f.jogar('!gartic catalogo');assert.equal(f.categoria,'cat\u00e1logo')})
+  await teste('expiracao mantem resposta e encerra registro/timer',async()=>{const f=ambiente();await f.jogar();gartic.aoExpirar(G);assert.equal(jogos.obterJogo(G),null);assert(f.enviadas.at(-1).text.includes('TEMPO ESGOTADO'));assert(f.enviadas.at(-1).text.includes('Caf\u00e9'))})
+  await teste('OFF bloqueia membro antes de sortear ou baixar',async()=>{const f=ambiente();f.ligado=false;await f.jogar();assert.equal(f.selecoes,0);assert.equal(f.downloads,0);assert.equal(f.enviadas.length,0)})
+  await teste('OFF permite dono conforme regra existente',async()=>{const f=ambiente();f.ligado=false;f.msg.key.participant=OWNER_NUMBERS[0]+'@s.whatsapp.net';await f.jogar();assert.equal(f.downloads,1)})
+  await teste('conexao fechada bloqueia imagem',async()=>{const f=ambiente();f.sock.ws={isOpen:false};await f.jogar();assert.equal(f.selecoes,0);assert.equal(f.downloads,0)})
+  await teste('OFF durante download impede publicacao',async()=>{const f=ambiente();gartic._injetarDownload(async()=>{f.ligado=false;estado.__definirColecaoTeste({findOne:async()=>({ligado:false})});return buffer});await f.jogar();assert.equal(jogos.obterJogo(G),null);assert.equal(f.enviadas.length,0)})
+  await teste('erro no envio da foto limpa somente a propria rodada',async()=>{const f=ambiente();f.falharImagem=true;await f.jogar();assert.equal(jogos.obterJogo(G),null)})
+  await teste('inicios simultaneos no grupo nao baixam duas imagens',async()=>{
+    const f=ambiente();let liberar,entrou=false;gartic._injetarCatalogo(async()=>{entrou=true;await new Promise(r=>{liberar=r});return f.doc})
+    const p=f.jogar();while(!entrou)await new Promise(r=>setImmediate(r));await f.jogar();liberar();await p;assert.equal(f.downloads,1);assert.equal(f.enviadas.filter(c=>c.image).length,1)
+  })
+  await teste('outro jogo iniciado durante busca nao e substituido',async()=>{const f=ambiente();gartic._injetarCatalogo(async()=>{jogos.registrarJogo(G,jogos.TIPOS.VELHA,{partida:{}});return f.doc});await f.jogar();assert.equal(jogos.obterJogo(G).tipo,jogos.TIPOS.VELHA);assert.equal(f.enviadas.filter(c=>c.image).length,0)})
+  await teste('privado avisa antes de acessar catalogo',async()=>{const f=ambiente();await gartic.executar(f.sock,A,f.msg,'/gartic');assert.equal(f.selecoes,0);assert(f.enviadas.at(-1).text.includes('grupo'))})
+  console.log(passou+' testes offline do jogo passaram.')
 }
-
-function fakeMsg(autor = '5511888888888@s.whatsapp.net') {
-  return {
-    key: { remoteJid: '120363000000000000@g.us', participant: autor, fromMe: false },
-    message: { conversation: 'palavra' }
-  }
-}
-
-// Estado das injeções
-const INJ = {
-  palavra: null,
-  fotos: null,
-  buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9, 0x00, 0x00]), // JPEG mínimo fake
-  nTentativasBusca: 0
-}
-gartic._injetarSorteio(() => INJ.palavra)
-gartic._injetarBuscaFotos(async (palavra) => {
-  INJ.nTentativasBusca++
-  if (INJ.fotos === null) return []
-  return INJ.fotos.map((u, i) => (i === 0 ? u : u + '?v=' + i))
-})
-gartic._injetarDownload(async () => INJ.buffer)
-
-const JID = '120363000000000000@g.us'
-const AVISO_SEM_CHAVE = 'PIXABAY_API_KEY não configurada'
-
-// Garante a chave desde o início do harness (o .env NÃO é carregado por
-// padrão neste processo de teste): o teste "sem chave" apaga e restaura.
-process.env.PIXABAY_API_KEY = 'chave-de-teste'
-
-console.log('🧪 /gartic — testes offline\n')
-
-// Corpo dos testes (usa await no topo → precisa de escopo async)
-;(async () => {
-
-// ─── 1) Exports no padrão do loader ───
-console.log('── Exports do comando ──')
-ok('exporta nome = "gartic"', gartic.nome === 'gartic')
-ok('exporta executar como função', typeof gartic.executar === 'function')
-ok('exporta descricao não vazia', typeof gartic.descricao === 'string' && gartic.descricao.length > 0)
-
-// ─── 2) Legenda não revela a resposta ───
-console.log('── Legenda (nunca revela a palavra) ──')
-{
-  const legenda = gartic.montarLegenda({ palavra: 'SAPATO', categoria: 'objetos' }, 3)
-  ok('menciona a categoria', legenda.includes('objetos'))
-  ok('menciona os minutos', legenda.includes('3'))
-  ok('NÃO revela a palavra', !legenda.toUpperCase().includes('SAPATO'))
-}
-
-// ─── 3) Palpites (ouvinte de texto livre) ───
-console.log('── Palpites em texto livre ──')
-{
-  const sock = fakeSock()
-  const dados = { palavra: 'SAPATO', categoria: 'objetos', inicio: Date.now(), duracaoMs: 60000, sock }
-  jogosAtivos.registrarJogo(JID, gartic.TIPO_JOGO, dados)
-
-  // chute errado → false (não consome, não encerra)
-  let ret = await gartic.aoReceberPalpite(sock, JID, fakeMsg(), 'girafa', dados)
-  ok('palpite errado → false', ret === false)
-  ok('palpite errado não encerra (registro segue)', jogosAtivos.estaAtivo(JID) === true)
-
-  // chute com acento e minúscula → acerto (normalização)
-  const dados2 = { palavra: 'Café', categoria: 'comida', inicio: Date.now(), duracaoMs: 60000, sock }
-  jogosAtivos.registrarJogo(JID, gartic.TIPO_JOGO, dados2)
-  const msgAcerto = fakeMsg('5511777777777@s.whatsapp.net')
-  ret = await gartic.aoReceberPalpite(sock, JID, msgAcerto, '  café ', dados2)
-  ok('palpite normalizado (acento/caixa) → true', ret === true)
-  ok('acerto encerra a rodada (registro limpo)', jogosAtivos.estaAtivo(JID) === false)
-  const final = sock.enviadas[sock.enviadas.length - 1]
-  ok('anuncia o vencedor com mention', final?.conteudo?.mentions?.includes('5511777777777@s.whatsapp.net'))
-  ok('mensagem contém a palavra', String(final?.conteudo?.text || '').includes('Café'))
-}
-
-// ─── 4) Sem chave → aviso, sem tocar na API ───
-console.log('── Sem PIXABAY_API_KEY ──')
-{
-  const chaveAntiga = process.env.PIXABAY_API_KEY
-  delete process.env.PIXABAY_API_KEY
-  const sock = fakeSock()
-  jogosAtivos.limparJogos()
-  await gartic.executar(sock, JID, fakeMsg(), '/gartic')
-  const aviso = sock.enviadas[0]?.conteudo?.text || ''
-  ok('avisa que a chave não está configurada', aviso.includes(AVISO_SEM_CHAVE))
-  ok('não chegou a sortear/buscar', INJ.nTentativasBusca === 0)
-  if (chaveAntiga) process.env.PIXABAY_API_KEY = chaveAntiga
-  else delete process.env.PIXABAY_API_KEY
-}
-
-// ─── 6) Rodada completa via comando (com injeções) ───
-console.log('── Rodada completa (fluxo do comando) ──')
-{
-  jogosAtivos.limparJogos()
-  INJ.palavra = { palavra: 'BANANA', categoria: 'frutas' }
-  INJ.fotos = ['https://exemplo.invalido/foto.jpg']
-  const sock = fakeSock()
-  await gartic.executar(sock, JID, fakeMsg(), '/gartic')
-
-  ok('uma mensagem de imagem foi enviada', sock.enviadas.some((e) => e.conteudo?.image !== undefined))
-  ok('rodada registrada no registro compartilhado', jogosAtivos.estaAtivo(JID) === true)
-
-  // segundo /gartic → "já tem um gartic"
-  const sock2 = fakeSock()
-  await gartic.executar(sock2, JID, fakeMsg(), '/gartic')
-  const aviso2 = sock2.enviadas[0]?.conteudo?.text || ''
-  ok('segundo /gartic mostra aviso de rodada ativa', aviso2.includes('JÁ TEM UM GARTIC'))
-  jogosAtivos.limparJogos()
-}
-
-// ─── 7) Busca sem resultado → tenta outra palavra (até 3) ───
-console.log('── Tentativas de busca (sem resultado) ──')
-{
-  jogosAtivos.limparJogos()
-  const palavrasSeq = [
-    { palavra: 'AAA', categoria: 'animais' },
-    { palavra: 'BBB', categoria: 'frutas' },
-    { palavra: 'CCC', categoria: 'objetos' }
-  ]
-  let i = 0
-  gartic._injetarSorteio(() => palavrasSeq[i++] || null)
-  gartic._injetarBuscaFotos(async () => []) // nunca devolve foto
-  const sock = fakeSock()
-  await gartic.executar(sock, JID, fakeMsg(), '/gartic')
-  const aviso = sock.enviadas[0]?.conteudo?.text || ''
-  ok('após 3 tentativas sem foto → aviso amigável', aviso.includes('não devolveu nenhuma imagem'))
-  ok('rodada NÃO fica registrada', jogosAtivos.estaAtivo(JID) === false)
-
-  // restaura as injeções
-  gartic._injetarSorteio(() => INJ.palavra)
-  gartic._injetarBuscaFotos(async (palavra) => (INJ.fotos === null ? [] : INJ.fotos))
-}
-
-// ─── 8) Timeout → revela resposta e encerra ───
-console.log('── Timeout (3 min) ──')
-{
-  jogosAtivos.limparJogos()
-  const sock = fakeSock()
-  const dados = { palavra: 'MELANCIA', categoria: 'frutas', inicio: Date.now(), duracaoMs: 60000, sock }
-  jogosAtivos.registrarJogo(JID, gartic.TIPO_JOGO, dados)
-  gartic.aoExpirar(JID)
-  const final = sock.enviadas[sock.enviadas.length - 1]
-  ok('revela a resposta no timeout', String(final?.conteudo?.text || '').includes('MELANCIA'))
-  ok('encerra a rodada no timeout', jogosAtivos.estaAtivo(JID) === false)
-}
-
-// ─── 9) processarMensagemLivre (gancho do bot.js) ───
-console.log('── Gancho de texto livre do bot.js ──')
-{
-  jogosAtivos.limparJogos()
-  const sock = fakeSock()
-  const dados = { palavra: 'ABACAXI', categoria: 'frutas', inicio: Date.now(), duracaoMs: 60000, sock }
-  jogosAtivos.registrarJogo(JID, gartic.TIPO_JOGO, dados)
-
-  // mensagem que não é palpite → não consome
-  let ret = await jogosAtivos.processarMensagemLivre(sock, JID, fakeMsg(), 'oi pessoal')
-  ok('texto comum → false (segue o fluxo)', ret === false)
-
-  // palpite certo → consome e encerra
-  ret = await jogosAtivos.processarMensagemLivre(sock, JID, fakeMsg(), 'abacaxi')
-  ok('palpite certo → true (mensagem consumida)', ret === true)
-  ok('registro limpo após acerto', jogosAtivos.estaAtivo(JID) === false)
-}
-
-// ─── 10) Uso fora de grupo → aviso ───
-console.log('── Uso fora de grupo ──')
-{
-  jogosAtivos.limparJogos()
-  process.env.PIXABAY_API_KEY = 'chave-de-teste'
-  const sock = fakeSock()
-  await gartic.executar(sock, '5511999999999@s.whatsapp.net', fakeMsg(), '/gartic')
-  const aviso = sock.enviadas[0]?.conteudo?.text || ''
-  ok('avisa que só funciona em grupo', aviso.includes('dentro de um grupo'))
-}
-
-jogosAtivos.limparJogos()
-
-  // ─── 5) Bloqueio cruzado (outro jogo rolando no grupo) ───
-  console.log('── Bloqueio cruzado 1 jogo por grupo ──')
-  {
-    jogosAtivos.limparJogos()
-    process.env.PIXABAY_API_KEY = 'chave-de-teste'
-    jogosAtivos.registrarJogo(JID, jogosAtivos.TIPOS.VELHA, { partida: {} })
-    const sock = fakeSock()
-    await gartic.executar(sock, JID, fakeMsg(), '/gartic')
-    const aviso = sock.enviadas[0]?.conteudo?.text || ''
-    ok('bloqueia quando há velha rolando', aviso.includes('jogo da velha'))
-    jogosAtivos.limparJogos()
-  }
-
-  console.log(`\n🎉 ${passou} testes passaram (gartic)\n`)
-  process.exit(0)
-})().catch((erro) => {
-  console.error('💥 teste-gartic:', erro?.message || erro)
-  process.exit(1)
-})
+main().catch(e=>{console.error(e);process.exitCode=1}).finally(()=>{limpar();gartic._injetarCatalogo();gartic._injetarDownload()})

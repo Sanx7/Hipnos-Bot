@@ -164,6 +164,10 @@ async function main() {
     const exclusoes = []
     const eventos = []
     const polls = []
+    const pollsEnviadas = []
+    const voucRespostas = []
+    const garticImagens = []
+    const rankingsChamados = []
     const respostasPrefixo = []
     const imagensTotag = []
     const downloadsTotag = []
@@ -171,6 +175,10 @@ async function main() {
     const mapaAfk = new Map()
     const mutados = new Map()
     const registro = new Map([['mute', { mutedUsers: mutados }]])
+    const vouc = require('../comandos/menu-brincadeiras/verdadeouconsequencia')
+    for (const nome of [vouc.nome, ...vouc.aliases]) registro.set(nome, vouc)
+    registro.set('gartic', require('../comandos/menu-brincadeiras/gartic'))
+    for (const comando of require('../comandos/menu-dono/gartic-catalogo')) registro.set(comando.nome, comando)
     const nukeMongo = require('./helpers/colecao-nuke-fake')()
     const nuke = require('../nuke').criarNuke({
       repositorio: require('../dados/nuke-mongo').criarRepositorio(async () => nukeMongo),
@@ -284,12 +292,16 @@ async function main() {
       sock: { ...sock, ev: { on(evento, fn) {
         if (!ouvintes.has(evento)) ouvintes.set(evento, [])
         ouvintes.get(evento).push(fn)
+      }, off(evento, fn) {
+        ouvintes.set(evento, (ouvintes.get(evento) || []).filter(ouvinte => ouvinte !== fn))
       } },
         async groupFetchAllParticipating() { return { [grupo]: { id: grupo } } },
         async groupLeave(jid) { assert.equal(jid, grupo); eventos.push('saida-grupo') },
         async sendMessage(jid, conteudo) {
           if (conteudo.text?.includes('Meu prefixo atual é:')) respostasPrefixo.push({ jid, texto: conteudo.text })
           if (conteudo.poll) polls.push(conteudo.poll)
+          if (conteudo.text?.includes('🌙 *HIPNOS —')) voucRespostas.push(conteudo)
+          if (conteudo.image && conteudo.caption?.includes('GARTIC DO SONHO')) garticImagens.push(conteudo)
           if (conteudo.image && conteudo.contextInfo?.mentionedJid) imagensTotag.push(conteudo)
           eventos.push(conteudo.delete ? 'delete' : 'resposta')
           if (conteudo.delete) {
@@ -300,10 +312,13 @@ async function main() {
             }])
           }
           const mensagemPoll = conteudo.poll ? await require('./helpers/enquete-nativa-fake').mensagemEnviada(jid, conteudo) : null
-          return { key: { remoteJid: jid, fromMe: true, id: `manutencao-${++sequencia}` }, ...(mensagemPoll ? { message: mensagemPoll.message } : {}) }
+          const resultado = { key: { remoteJid: jid, fromMe: true, id: `manutencao-${++sequencia}` }, ...(mensagemPoll ? { message: mensagemPoll.message } : {}) }
+          if (conteudo.poll) pollsEnviadas.push(resultado)
+          return resultado
         }
       },
       estadoBot: estado,
+      rodadasVouc: require('../dados/vouc-rodadas'),
       socketSeguro: require('../dados/socket-seguro'),
       respostaPrefixo: require('../dados/resposta-prefixo'),
       moderacaoFigurinhas,
@@ -324,7 +339,7 @@ async function main() {
       AVISAR_BLOQUEIO: false,
       antiApagadaHabilitada: async () => true,
       tratarRevogacao: async () => { eventos.push('revogacao'); return null },
-      rankingRegistro: { registrarComNumeroReal: async () => { eventos.push('ranking') } },
+      rankingRegistro: { registrarComNumeroReal: async (jid, sender) => { eventos.push('ranking'); rankingsChamados.push({ jid, sender }) } },
       capturaDiaria: { capturarMensagem: () => eventos.push('jornal') },
       cacheMensagens: { capturarMensagem: async () => { eventos.push('cache') } },
       extrairTextoComando: require('../dados/texto-comando').extrairTextoComando,
@@ -337,13 +352,16 @@ async function main() {
       processarMensagemLivre: async (...args) => {
         eventos.push('jogo')
         const jogos = require('../dados/jogos-ativos')
-        return ['enquete', 'enquete-admin'].includes(jogos.tipoAtivo(args[1])) ? jogos.processarMensagemLivre(...args) : false
+        return ['enquete', 'enquete-admin', 'gartic'].includes(jogos.tipoAtivo(args[1])) ? jogos.processarMensagemLivre(...args) : false
       },
       processarGatilhoIA: async () => eventos.push('ia')
     }
     require('../dados/mensagens-enviadas').acompanharSocket(contexto.sock)
     vm.runInNewContext(fonte.slice(inicio, fim), contexto)
-    return { eventos, exclusoes, protecoes, mapaAfk, mutados, polls, imagensTotag, downloadsTotag, respostasPrefixo, nukeMongo, sock: contexto.sock, async enviar(texto, sender = `${comum}@s.whatsapp.net`, conteudo, fromMe = false, jidDestino = grupo) {
+    return { eventos, exclusoes, protecoes, mapaAfk, mutados, polls, pollsEnviadas, voucRespostas, garticImagens, rankingsChamados, imagensTotag, downloadsTotag, respostasPrefixo, nukeMongo, registro, sock: contexto.sock,
+      async enviarLote(messages, type = 'notify') {
+        for (const fn of ouvintes.get('messages.upsert') || []) await fn({ messages, type })
+      }, async enviar(texto, sender = `${comum}@s.whatsapp.net`, conteudo, fromMe = false, jidDestino = grupo) {
       eventos.length = 0
       const mensagem = msg(sender)
       mensagem.key.remoteJid = jidDestino
@@ -354,6 +372,99 @@ async function main() {
     } }
   }
   const fluxo = criarHandler()
+  await teste('fallback VOUC no handler real nao intercepta comando existente', async () => {
+    const prefixo = require('../prefixo'), rodadas = require('../dados/vouc-rodadas')
+    const local = criarHandler()
+    require('../modoadulto').__definirColecaoTeste({ findOne: async () => ({ ativo: false }) })
+    const antes = local.voucRespostas.length
+    await estado.definirLigado(true); prefixo.__definirPrefixoTeste('!')
+    local.registro.set('verdade', { executar: async () => local.eventos.push('comando:verdade-existente') })
+    try {
+      await local.enviar('!vouc', `${comum}@s.whatsapp.net`)
+      await local.enviar('!verdade', `${comum}@s.whatsapp.net`)
+      assert.ok(local.eventos.includes('comando:verdade-existente'))
+      assert.equal(local.voucRespostas.length, antes)
+      assert.equal(rodadas.obter(local.sock).__teste.porJogador.size, 1)
+      await local.enviar('!consequencia', `${comum}@s.whatsapp.net`)
+      assert.equal(local.voucRespostas.length, antes + 1)
+    } finally { local.registro.delete('verdade'); rodadas.fechar(local.sock); prefixo.__definirPrefixoTeste('/') }
+  })
+  await teste('Gartic Cloudinary no handler: OFF bloqueia membro e dono LID lista com prefixo dinâmico', async () => {
+    const mongo = require('./helpers/gartic-fake').criarMongo()
+    require('../dados/gartic-mongo').__definirTeste(mongo)
+    await estado.definirLigado(false); require('../prefixo').__definirPrefixoTeste('!')
+    for (const nome of ['gartic', 'gartic-add', 'gartic-lista', 'gartic-remover']) {
+      await fluxo.enviar(`!${nome} cachorro`, '67890@lid')
+      assert.ok(!fluxo.eventos.includes('resposta'))
+    }
+    await fluxo.enviar('!gartic-lista', '12345@lid')
+    assert.ok(fluxo.eventos.includes('resposta'))
+    assert.equal(mongo.imagens.docs.size, 0)
+    await estado.definirLigado(true)
+    await fluxo.enviar('!gartic-add cachorro', '67890@lid', { extendedTextMessage: { text: '!gartic-add cachorro', contextInfo: { quotedMessage: { imageMessage: {} }, stanzaId: 'foto-catalogo' } } })
+    assert.equal(mongo.imagens.docs.size, 0)
+    assert.equal(mongo.controles.docs.size, 0)
+    require('../prefixo').__definirPrefixoTeste('/')
+  })
+  await teste('Gartic no handler real preserva acerto, fluxo de ranking e demais jogos', async () => {
+    const jogo = require('../comandos/menu-brincadeiras/gartic'), jogos = require('../dados/jogos-ativos')
+    const { Jimp, JimpMime } = require('jimp')
+    const imagem = await new Jimp({ width: 32, height: 20, color: 0x339966ff }).getBuffer(JimpMime.jpeg)
+    jogo._injetarCatalogo(async () => ({ _id: 'catalogo-offline', palavra: 'Café', categoria: 'comida' }))
+    jogo._injetarDownload(async () => imagem)
+    await estado.definirLigado(true); require('../prefixo').__definirPrefixoTeste('!')
+    const antes = fluxo.garticImagens.length
+    try {
+      await fluxo.enviar('!gartic', `${comum}@s.whatsapp.net`)
+      assert.equal(fluxo.garticImagens.length, antes + 1)
+      assert.equal(jogos.obterJogo(grupo).dados.palavra, 'Café')
+      const rankAntes = fluxo.rankingsChamados.length
+      await fluxo.enviar('cafe', `${comum}@s.whatsapp.net`)
+      assert.equal(jogos.obterJogo(grupo), null)
+      assert.equal(fluxo.rankingsChamados.length, rankAntes + 1)
+      assert.equal(fluxo.rankingsChamados.at(-1).sender, `${comum}@s.whatsapp.net`)
+      assert.ok(fluxo.eventos.includes('ranking'))
+      assert.ok(fluxo.eventos.includes('jogo'))
+      assert.ok(!fluxo.eventos.includes('ia'))
+    } finally {
+      const dados = jogos.obterJogo(grupo)?.dados
+      if (dados?.timer) clearTimeout(dados.timer)
+      jogos.removerJogo(grupo, jogos.TIPOS.GARTIC)
+      jogo._injetarCatalogo(); jogo._injetarDownload(); require('../prefixo').__definirPrefixoTeste('/')
+    }
+  })
+  await teste('VOUC no handler real: alias/prefixo, mencao LID e voto cifrado em segundo item do lote', async () => {
+    const v = require('../dados/vouc-rodadas'), fake = require('./helpers/enquete-nativa-fake')
+    require('../modoadulto').__definirColecaoTeste({ findOne: async () => ({ ativo: false }) })
+    await estado.definirLigado(true); require('../prefixo').__definirPrefixoTeste('!')
+    await fluxo.enviar('!vouc @pessoa', `${dono}@s.whatsapp.net`, { extendedTextMessage: { text: '!vouc @pessoa', contextInfo: { mentionedJid: ['67890@lid'] } } })
+    const original = fluxo.pollsEnviadas.at(-1)
+    assert.ok(original)
+    const voto = fake.voto({ mensagemEnquete: original, opcoes: v.OPCOES }, grupo, '67890@lid', [1], { timestamp: Date.now() + 1, criador: fluxo.sock.user.id })
+    await fluxo.enviarLote([{ key: { remoteJid: grupo, participant: `${dono}@s.whatsapp.net`, id: 'primeiro-item-vouc' }, message: { conversation: 'oi' } }, voto])
+    assert.equal(fluxo.voucRespostas.length, 1)
+    assert.ok(fluxo.voucRespostas[0].text.includes('CONSEQUÊNCIA'))
+    assert.deepEqual(fluxo.voucRespostas[0].mentions, [`${comum}@s.whatsapp.net`])
+    require('../prefixo').__definirPrefixoTeste('/')
+  })
+  await teste('VOUC no handler real: OFF bloqueia dono/voto/fallback; ON permite fallback', async () => {
+    const v = require('../dados/vouc-rodadas'), fake = require('./helpers/enquete-nativa-fake')
+    const antes = fluxo.voucRespostas.length
+    await estado.definirLigado(true)
+    await fluxo.enviar('/verdadeouconseq', `${comum}@s.whatsapp.net`)
+    const original = fluxo.pollsEnviadas.at(-1), quantidade = fluxo.pollsEnviadas.length
+    await estado.definirLigado(false)
+    await fluxo.enviar('/vouc', `${dono}@s.whatsapp.net`)
+    assert.equal(fluxo.pollsEnviadas.length, quantidade)
+    const voto = fake.voto({ mensagemEnquete: original, opcoes: v.OPCOES }, grupo, '67890@lid', [0], { timestamp: Date.now() + 1, criador: fluxo.sock.user.id })
+    await fluxo.enviar('', '67890@lid', voto.message)
+    await fluxo.enviar('/verdade', `${comum}@s.whatsapp.net`)
+    assert.equal(fluxo.voucRespostas.length, antes)
+    await estado.definirLigado(true); require('../prefixo').__definirPrefixoTeste('!')
+    await fluxo.enviar('!consequencia', `${comum}@s.whatsapp.net`)
+    assert.equal(fluxo.voucRespostas.length, antes + 1)
+    require('../prefixo').__definirPrefixoTeste('/')
+  })
   await teste('OFF: nuke real bloqueia admin comum e dono simula/cancela com prefixo dinâmico', async () => {
     await estado.definirLigado(false)
     const metadataOriginal = fluxo.sock.groupMetadata
