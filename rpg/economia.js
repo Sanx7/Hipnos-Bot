@@ -46,6 +46,58 @@ function retornoRegistro(registro, fingerprint) {
   if (registro.estado === 'recusada') return { ok: false, motivo: registro.motivo, repetida: true }
   return { ok: false, motivo: 'resultado_pendente', repetida: true }
 }
+async function executarOperacaoAuditada(meta, aplicar) {
+  const { remetente, destino = remetente, id, fingerprint, tipo, valorSolicitado = null } = meta
+  try {
+    return await db.usarContextoRpg(async ctx => {
+      // Reserva persistente FORA da transação. Se o processo morrer antes do
+      // commit, repetir a mensagem apenas consulta; não reexecuta a operação.
+      const leitura = { readPreference: 'primary', readConcern: { level: 'majority' } }
+      const antigo = await ctx.operacoes.findOne({ _id: id }, leitura)
+      if (antigo) return retornoRegistro(antigo, fingerprint)
+      try {
+        const reserva = await ctx.operacoes.insertOne({ _id: id, fingerprint, estado: 'pendente',
+          tipo, remetente: remetente.canonico, destinatario: destino.canonico,
+          valorSolicitado, criadoEm: Date.now() },
+        { writeConcern: { w: 'majority', wtimeout: 15000 } })
+        if (!reserva.acknowledged) return { ok: false, motivo: 'resultado_pendente' }
+      } catch (err) {
+        // Duplicate ou timeout da reserva: jamais presumir que é nossa.
+        const registro = await ctx.operacoes.findOne({ _id: id }, leitura).catch(() => null)
+        return registro ? retornoRegistro(registro, fingerprint) : { ok: false, motivo: 'resultado_pendente' }
+      }
+      try {
+        const tx = await db.executarTransacaoNoContexto(ctx, async (colecao, session, operacoes) => {
+          const execucao = await aplicar(colecao, session, operacoes)
+          const resultado = execucao.resultado
+          if (!resultado || resultado.ok !== true) throw erro('operacao_invalida')
+          const { antes, depois } = execucao.auditoria || {}
+          if (!antes || !depois) throw erro('operacao_invalida')
+          const finalizacao = await operacoes.updateOne({ _id: id, fingerprint, estado: 'pendente' },
+            { $set: { estado: 'concluida', resultado, concluidoEm: Date.now(),
+              antes, depois } }, { session })
+          if (finalizacao.modifiedCount !== 1) throw erro('operacao_conflitante')
+          return resultado
+        })
+        return tx.retorno
+      } catch (err) {
+        if (err.codigo === 'resultado_pendente' || !err.codigo) {
+          // Commit pode ter acontecido. Só um registro concluído é evidência.
+          const registro = await ctx.operacoes.findOne({ _id: id }, leitura).catch(() => null)
+          return registro ? retornoRegistro(registro, fingerprint) : { ok: false, motivo: 'resultado_pendente' }
+        }
+        // Erro conhecido antes de enviar commit; não existe sucesso oculto.
+        const r = await ctx.operacoes.updateOne({ _id: id, fingerprint, estado: 'pendente' },
+          { $set: { estado: 'recusada', motivo: err.codigo, concluidoEm: Date.now() } },
+          { writeConcern: { w: 'majority', wtimeout: 15000 } })
+        if (r.modifiedCount !== 1) return { ok: false, motivo: 'resultado_pendente' }
+        return { ok: false, motivo: err.codigo }
+      }
+    })
+  } catch (err) {
+    return { ok: false, motivo: err.codigo === 'transacao_indisponivel' ? err.codigo : 'resultado_pendente' }
+  }
+}
 async function executarFinanceira(tipo, a, b, valor, contexto) {
   let remetente, destino, id, fingerprint
   try {
@@ -57,26 +109,8 @@ async function executarFinanceira(tipo, a, b, valor, contexto) {
     id = identidadeOperacao(contexto, remetente)
     fingerprint = hash(JSON.stringify([tipo, remetente.canonico, destino.canonico, valor]))
   } catch (err) { return { ok: false, motivo: err.codigo || 'valor_invalido' } }
-  try {
-    return await db.usarContextoRpg(async ctx => {
-      // Reserva persistente FORA da transação. Se o processo morrer antes do
-      // commit, repetir a mensagem apenas consulta; não reexecuta a operação.
-      const leitura = { readPreference: 'primary', readConcern: { level: 'majority' } }
-      const antigo = await ctx.operacoes.findOne({ _id: id }, leitura)
-      if (antigo) return retornoRegistro(antigo, fingerprint)
-      try {
-        const reserva = await ctx.operacoes.insertOne({ _id: id, fingerprint, estado: 'pendente',
-          tipo, remetente: remetente.canonico, destinatario: destino.canonico,
-          valorSolicitado: valor, criadoEm: Date.now() },
-        { writeConcern: { w: 'majority', wtimeout: 15000 } })
-        if (!reserva.acknowledged) return { ok: false, motivo: 'resultado_pendente' }
-      } catch (err) {
-        // Duplicate ou timeout da reserva: jamais presumir que é nossa.
-        const registro = await ctx.operacoes.findOne({ _id: id }, leitura).catch(() => null)
-        return registro ? retornoRegistro(registro, fingerprint) : { ok: false, motivo: 'resultado_pendente' }
-      }
-      try {
-        const tx = await db.executarTransacaoNoContexto(ctx, async (colecao, session, operacoes) => {
+  return executarOperacaoAuditada({ remetente, destino, id, fingerprint, tipo, valorSolicitado: valor },
+    async (colecao, session) => {
           const opcoes = { session }
           const jogador = await db.obterJogador(colecao, remetente, opcoes)
           const alvo = tipo === 'transferir' ? await db.obterJogador(colecao, destino, opcoes) : jogador
@@ -114,32 +148,11 @@ async function executarFinanceira(tipo, a, b, valor, contexto) {
             saldoCarteira: atualizado.carteira, saldoBanco: atualizado.banco,
             novoSaldoRemetente: atualizado.carteira,
             novoSaldoDestinatario: alvoAtualizado.carteira }
-          const finalizacao = await operacoes.updateOne({ _id: id, fingerprint, estado: 'pendente' },
-            { $set: { estado: 'concluida', resultado, concluidoEm: Date.now(),
-              antes: { carteira: jogador.carteira, banco: jogador.banco,
-                destinatario: alvo.carteira }, depois: { carteira: atualizado.carteira,
-                banco: atualizado.banco, destinatario: alvoAtualizado.carteira } } }, opcoes)
-          if (finalizacao.modifiedCount !== 1) throw erro('operacao_conflitante')
-          return resultado
-        })
-        return tx.retorno
-      } catch (err) {
-        if (err.codigo === 'resultado_pendente' || !err.codigo) {
-          // Commit pode ter acontecido. Só um registro concluído é evidência.
-          const registro = await ctx.operacoes.findOne({ _id: id }, leitura).catch(() => null)
-          return registro ? retornoRegistro(registro, fingerprint) : { ok: false, motivo: 'resultado_pendente' }
-        }
-        // Erro conhecido antes de enviar commit; não existe sucesso oculto.
-        const r = await ctx.operacoes.updateOne({ _id: id, fingerprint, estado: 'pendente' },
-          { $set: { estado: 'recusada', motivo: err.codigo, concluidoEm: Date.now() } },
-          { writeConcern: { w: 'majority', wtimeout: 15000 } })
-        if (r.modifiedCount !== 1) return { ok: false, motivo: 'resultado_pendente' }
-        return { ok: false, motivo: err.codigo }
-      }
+          return { resultado, auditoria: {
+            antes: { carteira: jogador.carteira, banco: jogador.banco, destinatario: alvo.carteira },
+            depois: { carteira: atualizado.carteira, banco: atualizado.banco, destinatario: alvoAtualizado.carteira }
+          } }
     })
-  } catch (err) {
-    return { ok: false, motivo: err.codigo === 'transacao_indisponivel' ? err.codigo : 'resultado_pendente' }
-  }
 }
 async function moverSaldo(jid, valor, direcao, contexto) {
   return executarFinanceira(direcao, jid, null, valor, contexto)
@@ -148,4 +161,5 @@ async function transferirEntreJogadores(a, b, valor, contexto) {
   return executarFinanceira('transferir', a, b, valor, contexto)
 }
 module.exports = { formatarReais, parseValor, centavos, MAX_CENTAVOS,
-  ErroTransferencia, moverSaldo, transferirEntreJogadores }
+  ErroTransferencia, moverSaldo, transferirEntreJogadores,
+  executarOperacaoAuditada, identidadeOperacao, hash }

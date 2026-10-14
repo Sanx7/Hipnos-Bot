@@ -577,7 +577,7 @@ async function main() {
     db.__definirContextoTeste(mongo)
     const autor = comum + '@s.whatsapp.net'
     await mongo.jogadores.insertOne({ ...db.criarJogadorPadrao(autor), carteira: 100 })
-    for (const arquivo of ['registrar', 'ficha', 'carteira', 'depositar', 'sacar', 'transferir', 'testrpg']) {
+    for (const arquivo of ['registrar', 'ficha', 'carteira', 'depositar', 'sacar', 'transferir', 'testrpg', 'empregos', 'carreira', 'trabalhar', 'faculdades', 'matricular', 'estudar', 'faculdade', 'diplomas', 'trancar', 'retomar']) {
       const cmd = require('../comandos/rpg/' + arquivo)
       const wrapper = { executar: async (...args) => {
         fluxo.eventos.push('comando:rpg:' + cmd.nome)
@@ -590,7 +590,7 @@ async function main() {
     try {
       await estado.definirLigado(false)
       const antes = structuredClone(mongo.estado)
-      for (const nome of ['registrar', 'ficha', 'saldo', 'dep', 'retirar', 'pix', 'testrpg']) {
+      for (const nome of ['registrar', 'ficha', 'saldo', 'dep', 'retirar', 'pix', 'testrpg', 'empregos', 'carreira', 'trabalhar', 'faculdades', 'matricular', 'estudar', 'faculdade', 'diplomas', 'trancar', 'retomar']) {
         await fluxo.enviar('!' + nome, autor)
         assert.ok(!fluxo.eventos.some(e => e.startsWith('comando:rpg:')))
       }
@@ -600,10 +600,15 @@ async function main() {
       await estado.definirLigado(true)
       await fluxo.enviar('!dep 10', autor)
       assert.equal((await db.getPlayer(autor)).carteira, 90)
+      await fluxo.enviar('!registrar Ficticio M', autor)
+      await fluxo.enviar('!carreira faxineiro', autor)
+      assert.equal((await db.getPlayer(autor)).emprego, 'faxineiro')
+      await fluxo.enviar('!trabalhar', autor)
+      assert.equal((await db.getPlayer(autor)).carteira, 190)
       fluxo.protecoes.onlyAdmin = [grupo]
       await fluxo.enviar('!dep 10', '5511888881111@s.whatsapp.net')
       assert.ok(!fluxo.eventos.includes('comando:rpg:depositar'))
-      assert.equal((await db.getPlayer(autor)).carteira, 90)
+      assert.equal((await db.getPlayer(autor)).carteira, 190)
       delete fluxo.protecoes.onlyAdmin
       await fluxo.enviar('!saldo', autor, undefined, false, autor)
       assert.ok(fluxo.eventos.includes('comando:rpg:carteira'))
