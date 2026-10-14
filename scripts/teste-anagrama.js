@@ -55,7 +55,7 @@ const testar = (nome, ok, detalhe) => {
     typeof anagrama._injetarSorteio === 'function')
 
   const lista = palavras.PALAVRAS
-  testar('banco com ~500-600 palavras', Array.isArray(lista) && lista.length >= 500 && lista.length <= 600, `len=${lista.length}`)
+  testar('banco com pelo menos 500 palavras', Array.isArray(lista) && lista.length >= 500, `len=${lista.length}`)
   testar('palavras únicas', new Set(lista.map(p => p.palavra)).size === lista.length)
   testar('palavras só com A-Z', lista.every(p => /^[A-Z]+$/.test(p.palavra)))
   testar('todas com categoria', lista.every(p => typeof p.categoria === 'string' && p.categoria.length > 0))

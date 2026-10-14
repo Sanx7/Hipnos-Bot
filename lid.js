@@ -75,7 +75,7 @@ function ehLid(jid) {
 // gravado pela Baileys na sessão (com cache). Devolve os DÍGITOS do
 // telefone ou null (sem mapeamento/falha). NUNCA lança.
 // -------------------------------------------------------------------
-async function resolverLidParaTelefone(lidBruto) {
+async function resolverLidParaTelefone(lidBruto, opcoes = {}) {
   const lid = limparNumero(lidBruto)
   if (!lid) return null
 
@@ -85,11 +85,11 @@ async function resolverLidParaTelefone(lidBruto) {
     const telefone = await consultarSessao(lid)
     if (telefone) {
       cacheLidTelefone.set(lid, telefone)
-      console.log(`[lid] 🔎 LID ${lid} resolvido p/ o número real ${telefone}`)
+      if (!opcoes.silencioso) console.log(`[lid] 🔎 LID ${lid} resolvido p/ o número real ${telefone}`)
     }
     return telefone
   } catch (err) {
-    console.error('[lid] ⚠️ falha ao consultar o mapeamento LID→telefone na sessão:', err?.message || err)
+    if (!opcoes.silencioso) console.error('[lid] ⚠️ falha ao consultar o mapeamento LID→telefone na sessão:', err?.message || err)
     return null
   }
 }

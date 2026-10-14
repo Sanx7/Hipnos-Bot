@@ -23,7 +23,7 @@
 //    então nada quebra para quem já digitava "/" (ver prefixo.js).
 // ============================================================
 
-const { OWNER_NUMBERS, limparNumero, ehDonoDoBot } = require('../../config')
+const estadoBot = require('../../estado-bot')
 const prefixoComandos = require('../../prefixo')
 
 // 🔤 Opções que significam "volta ao padrão" (além de "/", que o próprio
@@ -33,15 +33,7 @@ const OPCOES_RESET = ['reset', 'resetar', 'padrao', 'padrão', 'default']
 // 👤 O remetente é DONO do bot? (1º teste direto pelo número real; em
 // grupo, confirma via metadados — padrão PROOF-LID do bot.js). Nunca lança.
 async function remetenteEhDono(sock, jid, sender) {
-  if (OWNER_NUMBERS.includes(limparNumero(sender))) return true
-  if (!String(jid || '').endsWith('@g.us')) return false
-  try {
-    const metadados = await sock.groupMetadata(jid)
-    return ehDonoDoBot(metadados?.participants || [], sender)
-  } catch (err) {
-    console.error('[set-prefix] falha ao buscar metadados (checando dono):', err?.message || err)
-    return false
-  }
+  return estadoBot.remetenteEhDono(sock, jid, sender)
 }
 
 // ─── 💬 Textos ───

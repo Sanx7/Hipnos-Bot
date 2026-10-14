@@ -1,8 +1,8 @@
 // Estado GLOBAL de uso do bot. Mesmo MongoDB principal, documento único.
 // Ausência do documento = ligado; falha de leitura = bloqueado, com retentativa.
 const { MongoClient } = require('mongodb')
-const { OWNER_NUMBERS, limparNumero } = require('./config')
-const { ehLid, resolverNumeroAlvo } = require('./lid')
+require('./config')
+const { ehLid } = require('./lid')
 
 let cliente = null
 let conexao = null
@@ -77,11 +77,9 @@ async function obterNumeroDono(sock, jid, sender) {
     let participantes = []
     if (ehLid(sender) && String(jid || '').endsWith('@g.us')) {
       try { participantes = (await sock.groupMetadata(jid))?.participants || [] } catch (_) { /* tenta sessão */ }
-      // Não casar os dígitos de um LID com o phoneNumber de outra pessoa.
-      participantes = participantes.filter(p => ehLid(p?.id) && limparNumero(p.id) === limparNumero(sender))
     }
-    const alvo = await resolverNumeroAlvo(participantes, sender)
-    return alvo.via && OWNER_NUMBERS.includes(alvo.numero) ? alvo.numero : null
+    const alvo = await require('./dados/identidade-participante').identificar(participantes, sender)
+    return alvo.dono ? alvo.numero : null
   } catch (_) {
     return null
   }

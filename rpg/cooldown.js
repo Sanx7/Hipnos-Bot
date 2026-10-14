@@ -14,11 +14,12 @@
 //   }
 //   // ... executa a ação ...
 //   setCooldown(player, 'trabalhar')
-//   await savePlayer(player.jid, player)
+//   // Este helper só modifica o objeto. savePlayer aceita somente nome/gênero.
+//   // Persistência de ações futuras exige reserva atômica específica.
 //
-// O cooldown fica em player.cooldowns[acao] = timestamp (ms). Todos os
-// comandos leem O MESMO player (objeto do getPlayer), então não há
-// persistência dupla nem dessincronização.
+// O cooldown fica somente em player.cooldowns[acao] = timestamp (ms).
+// getPlayer devolve leituras independentes. Este helper NÃO protege
+// concorrência entre processos nem persiste ações RPG.
 // ============================================================
 
 // -------------------------------------------------------------------
@@ -49,7 +50,7 @@ function checkCooldown(player, acao, tempoMs) {
 
 // -------------------------------------------------------------------
 // Registra o timestamp atual como o início do cooldown de `acao`.
-// Grava direto no objeto do player (o comando depois chama savePlayer).
+// Grava somente no objeto recebido; não persiste e não reserva atomicamente.
 // -------------------------------------------------------------------
 function setCooldown(player, acao) {
   if (!player || typeof player !== 'object') {

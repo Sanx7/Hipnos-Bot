@@ -571,6 +571,49 @@ async function main() {
     }
     await estado.definirLigado(false)
   })
+  await teste('RPG real: OFF, aliases, prefixo, privado e somente administradores preservados', async () => {
+    const db = require('../rpg/database')
+    const mongo = require('./helpers/rpg-mongo-fake').criarMongoFake()
+    db.__definirContextoTeste(mongo)
+    const autor = comum + '@s.whatsapp.net'
+    await mongo.jogadores.insertOne({ ...db.criarJogadorPadrao(autor), carteira: 100 })
+    for (const arquivo of ['registrar', 'ficha', 'carteira', 'depositar', 'sacar', 'transferir', 'testrpg']) {
+      const cmd = require('../comandos/rpg/' + arquivo)
+      const wrapper = { executar: async (...args) => {
+        fluxo.eventos.push('comando:rpg:' + cmd.nome)
+        return cmd.executar(...args)
+      } }
+      for (const nome of [cmd.nome, ...(cmd.aliases || [])]) fluxo.registro.set(nome, wrapper)
+    }
+    const prefixo = require('../prefixo')
+    prefixo.__definirPrefixoTeste('!')
+    try {
+      await estado.definirLigado(false)
+      const antes = structuredClone(mongo.estado)
+      for (const nome of ['registrar', 'ficha', 'saldo', 'dep', 'retirar', 'pix', 'testrpg']) {
+        await fluxo.enviar('!' + nome, autor)
+        assert.ok(!fluxo.eventos.some(e => e.startsWith('comando:rpg:')))
+      }
+      assert.deepEqual(mongo.estado, antes)
+      await fluxo.enviar('!registrar Dono M', '12345@lid')
+      assert.ok(fluxo.eventos.includes('comando:rpg:registrar'))
+      await estado.definirLigado(true)
+      await fluxo.enviar('!dep 10', autor)
+      assert.equal((await db.getPlayer(autor)).carteira, 90)
+      fluxo.protecoes.onlyAdmin = [grupo]
+      await fluxo.enviar('!dep 10', '5511888881111@s.whatsapp.net')
+      assert.ok(!fluxo.eventos.includes('comando:rpg:depositar'))
+      assert.equal((await db.getPlayer(autor)).carteira, 90)
+      delete fluxo.protecoes.onlyAdmin
+      await fluxo.enviar('!saldo', autor, undefined, false, autor)
+      assert.ok(fluxo.eventos.includes('comando:rpg:carteira'))
+    } finally {
+      delete fluxo.protecoes.onlyAdmin
+      prefixo.__definirPrefixoTeste('/')
+      db.__definirContextoTeste(null)
+      await estado.definirLigado(false)
+    }
+  })
   await teste('OFF: comandos reais de advertência e aliases bloqueiam ADM e permitem dono no roteador', async () => {
     const dados = require('../advertencias')
     dados.__definirColecaoTeste(require('./helpers/colecao-figurinhas-fake')())

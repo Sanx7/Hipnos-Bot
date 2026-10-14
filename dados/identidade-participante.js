@@ -9,6 +9,10 @@ async function identificar(participantes, jid) {
   const chave = identidade(jid)
   if (!chave) return { participante: null, numero: null, admin: false, dono: false }
   const exatos = participantes.filter(p => [p.id, p.phoneNumber, p.lid && `${limparNumero(p.lid)}@lid`].some(id => identidade(id) === chave))
+  if (exatos.length > 1 || exatos.some(p => new Set([p.id, p.phoneNumber]
+    .filter(id => identidade(id).startsWith('pn:')).map(limparNumero)).size > 1)) {
+    return { participante: null, numero: null, admin: false, dono: false }
+  }
   // O Baileys também pode informar id=PN + lid em campo separado. Entregar
   // esse par comprovado ao helper existente, sem comparar dígitos de namespaces.
   const pares = exatos.map(p => ({
@@ -20,6 +24,7 @@ async function identificar(participantes, jid) {
   const real = numero.via && numero.numero || null
   const encontrados = exatos.length ? exatos : real ? participantes.filter(p =>
     [p.id, p.phoneNumber].some(id => identidade(id) === `pn:${real}`)) : []
+  if (encontrados.length > 1) return { participante: null, numero: null, admin: false, dono: false }
   // Identidade ambígua não autoriza comandos nem uma punição.
   const participante = encontrados.length === 1 ? encontrados[0] : null
   return { participante, numero: real, admin: participante?.admin === 'admin' || participante?.admin === 'superadmin', dono: Boolean(real && OWNER_NUMBERS.includes(real)) }

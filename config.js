@@ -126,16 +126,20 @@ function ehAdminDoGrupo(participants, jid) {
 //      volta na comparação simples OWNER_NUMBERS.includes(limparNumero(jid))
 //      para não quebrar em contextos sem metadados de grupo.
 function ehDonoDoBot(participants, jid) {
-  const participante = acharParticipante(participants, jid)
-  if (participante) {
-    const numeros = [
-      limparNumero(participante.id),
-      limparNumero(participante.phoneNumber)
-    ].filter(Boolean)
-    if (numeros.some((numero) => OWNER_NUMBERS.includes(numero))) return true
+  const bruto = String(jid || '').trim()
+  if (/^\d+(?::\d+)?@s\.whatsapp\.net$/.test(bruto) || /^\d+$/.test(bruto)) {
+    return OWNER_NUMBERS.includes(limparNumero(bruto))
   }
-  // Fallback: sem metadados (privado, erro na busca) compara o JID direto
-  return OWNER_NUMBERS.includes(limparNumero(jid))
+  if (!/^\d+(?::\d+)?@lid$/.test(bruto)) return false
+  const lid = limparNumero(bruto)
+  const exatos = (participants || []).filter(p =>
+    (/@lid$/.test(p?.id || '') && limparNumero(p.id) === lid) ||
+    (p?.lid && limparNumero(p.lid) === lid))
+  if (exatos.length !== 1) return false
+  const numeros = [...new Set([exatos[0].id, exatos[0].phoneNumber]
+    .filter(id => /^\d+(?::\d+)?@s\.whatsapp\.net$/.test(id || ''))
+    .map(limparNumero))]
+  return numeros.length === 1 && OWNER_NUMBERS.includes(numeros[0])
 }
 
 // 👑 Lista de DONOS do bot — fonte única de verdade (usada pelo /dono e por
