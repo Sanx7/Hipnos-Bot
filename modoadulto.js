@@ -3,7 +3,7 @@
 // ============================================================
 // Mesmo padrão de conexão do resto do projeto (database.js, vip.js,
 // configuracoes-grupo.js): collection "modoAdulto", SINGLETON,
-// ping de saúde + reconexão, erros ruidosos relançados.
+// ping inicial + recuperação pelo driver, erros ruidosos relançados.
 // Documento: { grupo_id, ativo, atualizado_em }.
 // Índice único: { grupo_id: 1 }.
 // Exporta: definirModoAdulto(grupoId, ativo), modoAdultoAtivo(grupoId)
@@ -28,27 +28,24 @@ let modoTeste = false
 
 // -------------------------------------------------------------------
 // Obtém a collection do modo adulto, conectando se necessário.
-// Valida a conexão com ping antes de reusar e reconecta se a
-// anterior morreu. Erros são logados com causa provável e RELANÇADOS.
+// Reutiliza o cliente; o driver recupera a rede nas operações reais.
+// Erros são logados com causa provável e RELANÇADOS.
 // -------------------------------------------------------------------
+// Uma promessa por módulo: nenhum pool compartilhado com outros sistemas.
+let conexaoEmVoo = null
 async function obterColecaoModoAdulto() {
+  if (modoTeste && colecaoCacheada) return colecaoCacheada
+  if (colecaoCacheada && clienteMongo) return colecaoCacheada
+  if (!conexaoEmVoo) {
+    conexaoEmVoo = Promise.resolve().then(inicializarColecaoModoAdulto).finally(() => { conexaoEmVoo = null })
+  }
+  return conexaoEmVoo
+}
+async function inicializarColecaoModoAdulto() {
   // No modo teste, devolve a collection injetada SEM tocar em rede.
   if (modoTeste && colecaoCacheada) return colecaoCacheada
 
-  if (colecaoCacheada && clienteMongo) {
-    try {
-      await clienteMongo.db('admin').command({ ping: 1 })
-      return colecaoCacheada
-    } catch (erroPing) {
-      console.error(
-        '⚠️ [modo-adulto] conexão anterior com o MongoDB morreu — reconectando:',
-        erroPing?.message
-      )
-      try { await clienteMongo.close() } catch (e) { /* já morta */ }
-      clienteMongo = null
-      colecaoCacheada = null
-    }
-  }
+  if (colecaoCacheada && clienteMongo) return colecaoCacheada
 
   const uri = process.env.MONGODB_URI
   if (!uri) {

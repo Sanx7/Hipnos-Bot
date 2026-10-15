@@ -65,23 +65,20 @@ let clienteMongo = null
 let colecaoCacheada = null
 let modoTeste = false
 
+// Uma promessa por módulo: nenhum pool compartilhado com outros sistemas.
+let conexaoEmVoo = null
 async function obterColecaoPacks() {
   if (modoTeste && colecaoCacheada) return colecaoCacheada
-
-  if (colecaoCacheada && clienteMongo) {
-    try {
-      await clienteMongo.db('admin').command({ ping: 1 })
-      return colecaoCacheada
-    } catch (erroPing) {
-      console.error(
-        '⚠️ [packs] conexão anterior com o MongoDB morreu — reconectando:',
-        erroPing?.message
-      )
-      try { await clienteMongo.close() } catch (e) { /* já morta */ }
-      clienteMongo = null
-      colecaoCacheada = null
-    }
+  if (colecaoCacheada && clienteMongo) return colecaoCacheada
+  if (!conexaoEmVoo) {
+    conexaoEmVoo = Promise.resolve().then(inicializarColecaoPacks).finally(() => { conexaoEmVoo = null })
   }
+  return conexaoEmVoo
+}
+async function inicializarColecaoPacks() {
+  if (modoTeste && colecaoCacheada) return colecaoCacheada
+
+  if (colecaoCacheada && clienteMongo) return colecaoCacheada
 
   const uri = process.env.MONGODB_URI
   if (!uri) {

@@ -25,7 +25,7 @@
 //    LID e ganha o campo auxiliar `lid` — é ele que a migração encontra depois.
 //
 // ÍNDICE ÚNICO COMPOSTO: { grupo_id: 1, usuario_id: 1 }
-// CONEXÃO: singleton com ping de saúde e auto-reconexão.
+// CONEXÃO: singleton por módulo; recuperação da rede pelo driver.
 // ============================================================
 
 const { MongoClient } = require('mongodb')
@@ -42,24 +42,20 @@ let colecaoCacheada = null
 
 // -------------------------------------------------------------------
 // Obtém a collection de ranking, conectando se necessário.
-// Valida a conexão com ping antes de reusar e reconecta se morreu.
+// Reutiliza o cliente; o driver recupera a rede nas operações reais.
 // Erros são logados com causa provável e RELANÇADOS.
 // -------------------------------------------------------------------
+// Uma promessa por módulo: nenhum pool compartilhado com outros sistemas.
+let conexaoEmVoo = null
 async function obterColecaoRanking() {
-  if (colecaoCacheada && clienteMongo) {
-    try {
-      await clienteMongo.db('admin').command({ ping: 1 })
-      return colecaoCacheada
-    } catch (erroPing) {
-      console.error(
-        '⚠️ [database] conexão anterior com o MongoDB morreu — reconectando:',
-        erroPing?.message
-      )
-      try { await clienteMongo.close() } catch (e) { /* já morta */ }
-      clienteMongo = null
-      colecaoCacheada = null
-    }
+  if (colecaoCacheada && clienteMongo) return colecaoCacheada
+  if (!conexaoEmVoo) {
+    conexaoEmVoo = Promise.resolve().then(inicializarColecaoRanking).finally(() => { conexaoEmVoo = null })
   }
+  return conexaoEmVoo
+}
+async function inicializarColecaoRanking() {
+  if (colecaoCacheada && clienteMongo) return colecaoCacheada
 
   const uri = process.env.MONGODB_URI
   if (!uri) {
@@ -116,7 +112,10 @@ async function obterColecaoRanking() {
 // -------------------------------------------------------------------
 async function conectar() {
   try {
+    const jaInicializado = Boolean(colecaoCacheada && clienteMongo)
     await obterColecaoRanking()
+    // Preservar o contrato de diagnóstico desta API, sem ping duplo no boot.
+    if (jaInicializado) await clienteMongo.db('admin').command({ ping: 1 })
     return true
   } catch (err) {
     return false

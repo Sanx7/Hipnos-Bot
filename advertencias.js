@@ -23,8 +23,8 @@ let colecaoCacheada = null
 let modoTeste = false
 
 // -------------------------------------------------------------------
-// Obtém a collection de advertências, conectando se necessário. Valida a
-// conexão com ping antes de reusar e reconecta se a anterior morreu.
+// Obtém a collection de advertências, conectando se necessário. O driver
+// gerencia a recuperação da rede nas operações reais, sem ping por uso.
 // -------------------------------------------------------------------
 let conectando
 async function obterColecaoAdvertencias () {
@@ -37,20 +37,7 @@ async function conectarAdvertencias () {
   // 🧪 No modo teste, devolve a collection injetada SEM tocar em rede.
   if (modoTeste && colecaoCacheada) return colecaoCacheada
 
-  if (colecaoCacheada && clienteMongo) {
-    try {
-      await clienteMongo.db('admin').command({ ping: 1 })
-      return colecaoCacheada
-    } catch (erroPing) {
-      console.error(
-        '⚠️ [adv] conexão anterior com o MongoDB morreu — reconectando:',
-        erroPing?.message
-      )
-      try { await clienteMongo.close() } catch (e) { /* já morta */ }
-      clienteMongo = null
-      colecaoCacheada = null
-    }
-  }
+  if (colecaoCacheada && clienteMongo) return colecaoCacheada
 
   const uri = process.env.MONGODB_URI
   if (!uri) {

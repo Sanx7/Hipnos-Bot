@@ -133,21 +133,21 @@ function prefixosAceitos(prefixoAtual = cache || PREFIXO_PADRAO) {
 // -------------------------------------------------------------------
 // 🗄️ COLEÇÃO (MongoDB) — usada só por carregarPrefixo/definirPrefixo
 // -------------------------------------------------------------------
+// Uma promessa por módulo: nenhum pool compartilhado com outros sistemas.
+let conexaoEmVoo = null
 async function obterColecao() {
+  if (modoTeste && colecaoCacheada) return colecaoCacheada
+  if (colecaoCacheada && clienteMongo) return colecaoCacheada
+  if (!conexaoEmVoo) {
+    conexaoEmVoo = Promise.resolve().then(inicializarColecao).finally(() => { conexaoEmVoo = null })
+  }
+  return conexaoEmVoo
+}
+async function inicializarColecao() {
   // Modo teste: collection injetada, sem tocar em rede.
   if (modoTeste && colecaoCacheada) return colecaoCacheada
 
-  if (colecaoCacheada && clienteMongo) {
-    try {
-      await clienteMongo.db('admin').command({ ping: 1 })
-      return colecaoCacheada
-    } catch (erroPing) {
-      console.error('⚠️ [prefixo] conexão anterior com o MongoDB morreu — reconectando:', erroPing?.message)
-      try { await clienteMongo.close() } catch (e) { /* já morta */ }
-      clienteMongo = null
-      colecaoCacheada = null
-    }
-  }
+  if (colecaoCacheada && clienteMongo) return colecaoCacheada
 
   const uri = process.env.MONGODB_URI
   if (!uri) {
@@ -172,6 +172,7 @@ async function obterColecao() {
     console.log('✅ [prefixo] MongoDB conectado — o prefixo dos comandos persiste entre redeploys.')
     return colecaoCacheada
   } catch (erro) {
+    try { await clienteMongo?.close() } catch (_) { /* inicialização incompleta */ }
     clienteMongo = null
     colecaoCacheada = null
     throw erro

@@ -7,7 +7,7 @@
 //   - Collection dedicada: banco "whatsapp" (MONGODB_DB), collection
 //     "lembretes" (sobrescrevível via MONGODB_COLLECTION_LEMBRETE);
 //   - SINGLETON: um único MongoClient criado uma vez no processo;
-//   - PING DE SAÚDE a cada uso + reconexão automática se a conexão morreu;
+//   - Ping inicial preservado; recuperação da rede pelo driver;
 //   - ERROS RUIDOSOS: falha de conexão é logada com causa provável.
 //
 // ⚠️ POR QUE PERSISTIR NO MONGO (e não em memória/setTimeout)?
@@ -74,29 +74,26 @@ let colecaoCacheada = null
 let modoTeste = false
 
 // -------------------------------------------------------------------
-// Obtém a collection de lembretes, conectando se necessário. Valida a
-// conexão com ping antes de reusar e reconecta se a anterior morreu.
+// Obtém a collection de lembretes, conectando se necessário. O driver
+// gerencia a recuperação da rede nas operações reais, sem ping por uso.
 // Erros são logados com causa provável e RELANÇADOS (os comandos e o
 // agendador tratam).
 // -------------------------------------------------------------------
+// Uma promessa por módulo: nenhum pool compartilhado com outros sistemas.
+let conexaoEmVoo = null
 async function obterColecaoLembretes() {
+  if (modoTeste && colecaoCacheada) return colecaoCacheada
+  if (colecaoCacheada && clienteMongo) return colecaoCacheada
+  if (!conexaoEmVoo) {
+    conexaoEmVoo = Promise.resolve().then(inicializarColecaoLembretes).finally(() => { conexaoEmVoo = null })
+  }
+  return conexaoEmVoo
+}
+async function inicializarColecaoLembretes() {
   // 🧪 No modo teste, devolve a collection injetada SEM tocar em rede.
   if (modoTeste && colecaoCacheada) return colecaoCacheada
 
-  if (colecaoCacheada && clienteMongo) {
-    try {
-      await clienteMongo.db('admin').command({ ping: 1 })
-      return colecaoCacheada
-    } catch (erroPing) {
-      console.error(
-        '⚠️ [lembretes] conexão anterior com o MongoDB morreu — reconectando:',
-        erroPing?.message
-      )
-      try { await clienteMongo.close() } catch (e) { /* já morta */ }
-      clienteMongo = null
-      colecaoCacheada = null
-    }
-  }
+  if (colecaoCacheada && clienteMongo) return colecaoCacheada
 
   const uri = process.env.MONGODB_URI
   if (!uri) {

@@ -7,7 +7,7 @@
 //   - Collection dedicada: banco "whatsapp" (MONGODB_DB), collection
 //     "sugestoes" (sobrescrevível via MONGODB_COLLECTION_SUGESTOES);
 //   - SINGLETON: um único MongoClient criado uma vez no processo;
-//   - PING DE SAÚDE a cada uso + reconexão automática se a conexão morreu;
+//   - Ping inicial preservado; recuperação da rede pelo driver;
 //   - ERROS RUIDOSOS: falha de conexão é logada com causa provável e
 //     RELANÇADA (os comandos tratam e avisam o usuário em pt-BR).
 //
@@ -40,24 +40,21 @@ let colecaoCacheada = null
 // SEM tocar no MongoDB real.
 let modoTeste = false
 
-// Obtém a collection, conectando se necessário (ping + reconexão).
+// Obtém a collection, conectando uma vez (ping inicial preservado).
+// Uma promessa por módulo: nenhum pool compartilhado com outros sistemas.
+let conexaoEmVoo = null
 async function obterColecaoSugestoes() {
   if (modoTeste && colecaoCacheada) return colecaoCacheada
-
-  if (colecaoCacheada && clienteMongo) {
-    try {
-      await clienteMongo.db('admin').command({ ping: 1 })
-      return colecaoCacheada
-    } catch (erroPing) {
-      console.error(
-        '⚠️ [sugestoes] conexão anterior com o MongoDB morreu — reconectando:',
-        erroPing?.message
-      )
-      try { await clienteMongo.close() } catch (e) { /* já morta */ }
-      clienteMongo = null
-      colecaoCacheada = null
-    }
+  if (colecaoCacheada && clienteMongo) return colecaoCacheada
+  if (!conexaoEmVoo) {
+    conexaoEmVoo = Promise.resolve().then(inicializarColecaoSugestoes).finally(() => { conexaoEmVoo = null })
   }
+  return conexaoEmVoo
+}
+async function inicializarColecaoSugestoes() {
+  if (modoTeste && colecaoCacheada) return colecaoCacheada
+
+  if (colecaoCacheada && clienteMongo) return colecaoCacheada
 
   const uri = process.env.MONGODB_URI
   if (!uri) {

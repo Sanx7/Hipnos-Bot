@@ -35,17 +35,23 @@ function proximaMeiaNoiteLocal() {
   return new Date(agora.getTime() + diff)
 }
 
+// Uma promessa por módulo: nenhum pool compartilhado com outros sistemas.
+let conexaoEmVoo = null
 async function obterColecaoApagadas() {
-  if (colecaoApagadas && !modoTesteApagadas && clienteApagadas) {
-    try {
-      await clienteApagadas.db('admin').command({ ping: 1 })
-      return colecaoApagadas
-    } catch (e) {
-      try { await clienteApagadas.close() } catch (x) {}
+  if (modoTesteApagadas && colecaoApagadas) return colecaoApagadas
+  if (colecaoApagadas && clienteApagadas) return colecaoApagadas
+  if (!conexaoEmVoo) {
+    conexaoEmVoo = Promise.resolve().then(inicializarColecaoApagadas).catch(async erro => {
+      try { await clienteApagadas?.close() } catch (_) { /* inicialização incompleta */ }
       clienteApagadas = null
       colecaoApagadas = null
-    }
+      throw erro
+    }).finally(() => { conexaoEmVoo = null })
   }
+  return conexaoEmVoo
+}
+async function inicializarColecaoApagadas() {
+  if (colecaoApagadas && clienteApagadas) return colecaoApagadas
   if (modoTesteApagadas && colecaoApagadas) return colecaoApagadas
   const uri = process.env.MONGODB_URI
   if (!uri) return null

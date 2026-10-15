@@ -8,7 +8,7 @@
 //   - Collection dedicada: banco "whatsapp" (MONGODB_DB), collection
 //     "afks" (sobrescrevível via MONGODB_COLLECTION_AFK);
 //   - SINGLETON: um único MongoClient criado uma vez no processo;
-//   - PING DE SAÚDE a cada uso + reconexão automática se a conexão morreu;
+//   - Ping inicial preservado; recuperação da rede pelo driver;
 //   - ERROS RUIDOSOS: falha de conexão é logada com causa provável e
 //     RELANÇADA (o comando /afk e o bloco do bot.js tratam).
 //
@@ -49,27 +49,24 @@ let modoTeste = false
 
 // -------------------------------------------------------------------
 // Obtém a collection de AFKs, conectando se necessário. Valida a conexão
-// com ping antes de reusar e reconecta se a anterior morreu. Erros são
+// com ping inicial; o driver recupera a rede nas operações reais. Erros são
 // logados com causa provável e RELANÇADOS.
 // -------------------------------------------------------------------
+// Uma promessa por módulo: nenhum pool compartilhado com outros sistemas.
+let conexaoEmVoo = null
 async function obterColecaoAfk() {
+  if (modoTeste && colecaoCacheada) return colecaoCacheada
+  if (colecaoCacheada && clienteMongo) return colecaoCacheada
+  if (!conexaoEmVoo) {
+    conexaoEmVoo = Promise.resolve().then(inicializarColecaoAfk).finally(() => { conexaoEmVoo = null })
+  }
+  return conexaoEmVoo
+}
+async function inicializarColecaoAfk() {
   // 🧪 No modo teste, devolve a collection injetada SEM tocar em rede.
   if (modoTeste && colecaoCacheada) return colecaoCacheada
 
-  if (colecaoCacheada && clienteMongo) {
-    try {
-      await clienteMongo.db('admin').command({ ping: 1 })
-      return colecaoCacheada
-    } catch (erroPing) {
-      console.error(
-        '⚠️ [afk] conexão anterior com o MongoDB morreu — reconectando:',
-        erroPing?.message
-      )
-      try { await clienteMongo.close() } catch (e) { /* já morta */ }
-      clienteMongo = null
-      colecaoCacheada = null
-    }
-  }
+  if (colecaoCacheada && clienteMongo) return colecaoCacheada
 
   const uri = process.env.MONGODB_URI
   if (!uri) {

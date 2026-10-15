@@ -44,32 +44,34 @@ const FUSO_DIA = 'America/Sao_Paulo'
 
 // -------------------------------------------------------------------
 // 🗄️ SINGLETON de conexão (mesmo padrão do configuracoes-grupo.js):
-// um único MongoClient por processo, ping de saúde a cada uso e
+// um único MongoClient por módulo, ping apenas no início e
 // reconexão automática quando a conexão morre.
 // -------------------------------------------------------------------
 let clienteMongo = null
 let colecaoCacheada = null
 let modoTeste = false
 
-async function obterColecaoBrincadeiras () {
+// Uma promessa por módulo: nenhum pool compartilhado com outros sistemas.
+let conexaoEmVoo = null
+async function obterColecaoBrincadeiras() {
+  if (modoTeste && colecaoCacheada) return colecaoCacheada
+  if (colecaoCacheada && clienteMongo) return colecaoCacheada
+  if (!conexaoEmVoo) {
+    conexaoEmVoo = Promise.resolve().then(inicializarColecaoBrincadeiras).catch(async erro => {
+      try { await clienteMongo?.close() } catch (_) { /* inicialização incompleta */ }
+      clienteMongo = null
+      colecaoCacheada = null
+      throw erro
+    }).finally(() => { conexaoEmVoo = null })
+  }
+  return conexaoEmVoo
+}
+async function inicializarColecaoBrincadeiras() {
   // 🧪 Modo teste: usa a collection fake, NUNCA toca em conexão real.
   if (modoTeste && colecaoCacheada) return colecaoCacheada
 
-  // Conexão viva? Reusa. Morta? Descarta e reconecta.
-  if (colecaoCacheada && clienteMongo) {
-    try {
-      await clienteMongo.db('admin').command({ ping: 1 })
-      return colecaoCacheada
-    } catch (erroPing) {
-      console.error(
-        '⚠️ [aleatorios] conexão anterior com o MongoDB morreu — reconectando:',
-        erroPing?.message || erroPing
-      )
-      try { await clienteMongo.close() } catch (e) { /* já morta */ }
-      clienteMongo = null
-      colecaoCacheada = null
-    }
-  }
+  // Reusar o pool: falhas de operações reais continuam sendo propagadas.
+  if (colecaoCacheada && clienteMongo) return colecaoCacheada
 
   const uri = process.env.MONGODB_URI
   if (!uri) {
