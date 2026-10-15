@@ -8,6 +8,7 @@
 // Fuso: America/Sao_Paulo (mesmo do restante do projeto).
 // ============================================================
 const { MongoClient } = require('mongodb')
+const { randomUUID } = require('node:crypto')
 
 const FUSO_JORNAL = 'America/Sao_Paulo'
 const NOME_BANCO_JORNAL = process.env.MONGODB_DB || 'whatsapp'
@@ -17,6 +18,12 @@ const MAX_TEXTO_MSG = 500
 
 let clienteJornal = null
 let colecaoJornal = null
+let inicializando = null
+let modoTeste = false
+// Uma marca por processo/dia, mantida no próprio documento e no mesmo TTL.
+// O maior número confirmado impede reaplicar até uma tentativa muito atrasada.
+const escritor = randomUUID()
+const persistencias = new Map()
 
 function chaveDataLocal (agora = new Date()) {
   const partes = new Intl.DateTimeFormat('en-CA', {
@@ -72,6 +79,7 @@ function registrarNoAcumulado (grupoId, autor, texto) {
 
 // PARTE 2/4 — Mongo com TTL + leitura + hook do bot
 async function obterColecaoJornal () {
+  if (modoTeste) return colecaoJornal
   if (colecaoJornal && clienteJornal) {
     try {
       await clienteJornal.db('admin').command({ ping: 1 })
@@ -84,45 +92,148 @@ async function obterColecaoJornal () {
   }
   const uri = process.env.MONGODB_URI
   if (!uri) return null
-  clienteJornal = new MongoClient(uri, { serverSelectionTimeoutMS: 8000 })
-  await clienteJornal.connect()
-  const col = clienteJornal.db(NOME_BANCO_JORNAL).collection(NOME_COLECAO_JORNAL)
-  await col.createIndex({ grupo: 1, data: 1 }, { unique: true, name: 'idx_jornal_grupo_data' })
-  await col.createIndex({ expiraEm: 1 }, { expireAfterSeconds: 0, name: 'idx_jornal_ttl' })
-  colecaoJornal = col
-  return col
+  if (!inicializando) {
+    inicializando = (async () => {
+      const cliente = new MongoClient(uri, { serverSelectionTimeoutMS: 8000 })
+      try {
+        await cliente.connect()
+        const col = cliente.db(NOME_BANCO_JORNAL).collection(NOME_COLECAO_JORNAL)
+        await col.createIndex({ grupo: 1, data: 1 }, { unique: true, name: 'idx_jornal_grupo_data' })
+        await col.createIndex({ expiraEm: 1 }, { expireAfterSeconds: 0, name: 'idx_jornal_ttl' })
+        clienteJornal = cliente
+        colecaoJornal = col
+        return col
+      } catch (e) {
+        await cliente.close().catch(() => {})
+        throw e
+      }
+    })()
+  }
+  try { return await inicializando } finally { inicializando = null }
 }
 
-async function espelharNoMongo (grupoId, dia) {
-  try {
+function estadoPersistencia (grupoId, data) {
+  const chave = JSON.stringify([grupoId, data])
+  if (!persistencias.has(chave)) {
+    persistencias.set(chave, { grupoId, data, confirmadas: [], pendentes: [], sequencia: 0, carregado: false, carga: null, execucao: null })
+  }
+  return persistencias.get(chave)
+}
+
+function atualizarMemoria (estado) {
+  if (estado.data !== chaveDataLocal()) return
+  acumuladoMemoria.set(estado.grupoId, {
+    data: estado.data,
+    mensagens: estado.confirmadas.concat(estado.pendentes.map(p => p.mensagem)).slice(-MAX_MSG_GRUPO)
+  })
+}
+
+async function carregarHistorico (estado, col) {
+  if (estado.carregado) return
+  if (!estado.carga) {
+    estado.carga = (async () => {
+      const doc = await col.findOne({ grupo: estado.grupoId, data: estado.data }, { projection: { mensagens: 1, _jornalRevisao: 1 } })
+      estado.confirmadas = Array.isArray(doc?.mensagens) ? doc.mensagens.slice(-MAX_MSG_GRUPO) : []
+      estado.revisao = doc?._jornalRevisao ?? 0
+      if (!Number.isSafeInteger(estado.revisao) || estado.revisao < 0) throw new Error('Revisão inválida')
+      estado.carregado = true
+      atualizarMemoria(estado)
+    })()
+  }
+  try { await estado.carga } finally { estado.carga = null }
+}
+
+function atualizacaoIncremental (entrada) {
+  // Pipeline atômico: conteúdo nunca é interpretado como expressão MongoDB.
+  // A sequência avança junto da entrada; repetir o comando vira um no-op.
+  return [{ $replaceWith: { $cond: [
+    { $or: [
+      { $gte: [{ $ifNull: [`$_jornalGravacoes.${escritor}`, 0] }, entrada.sequencia] },
+      { $ne: [{ $ifNull: ['$_jornalRevisao', 0] }, entrada.revisao] }
+    ] },
+    // Se o TTL removeu o documento entre tentativas, um upsert atrasado
+    // sem efeito também precisa expirar (não deixar um documento órfão).
+    { $mergeObjects: [{ mensagens: { $literal: [] }, expiraEm: { $literal: entrada.expiraEm } }, '$$ROOT'] },
+    { $mergeObjects: ['$$ROOT', {
+      mensagens: { $slice: [{ $concatArrays: [{ $ifNull: ['$mensagens', []] }, { $literal: [entrada.mensagem] }] }, -MAX_MSG_GRUPO] },
+      expiraEm: { $literal: entrada.expiraEm },
+      _jornalRevisao: entrada.revisao + 1,
+      _jornalGravacoes: { $mergeObjects: [{ $ifNull: ['$_jornalGravacoes', {}] }, { $literal: { [escritor]: entrada.sequencia } }] }
+    }] }
+  ] } }]
+}
+
+function espelharNoMongo (estado) {
+  if (estado.execucao) return estado.execucao
+  estado.execucao = Promise.resolve().then(async () => {
     const col = await obterColecaoJornal()
     if (!col) return
-    await col.updateOne(
-      { grupo: grupoId, data: dia.data },
-      { $set: { mensagens: dia.mensagens, expiraEm: proximaMeiaNoiteLocal() } },
-      { upsert: true }
-    )
-  } catch (e) {
-    console.error('[jornal] aviso: espelho Mongo falhou:', e?.message || e)
+    await carregarHistorico(estado, col)
+    while (estado.pendentes.length) {
+      const entrada = estado.pendentes[0]
+      // Uma falha nunca deve ressuscitar um documento além da retenção original.
+      if (entrada.expiraEm.getTime() <= Date.now()) {
+        estado.pendentes.shift()
+        continue
+      }
+      estado.enviando = entrada
+      // A revisão impede uma operação antiga de um processo encerrado de
+      // inserir conteúdo fora de ordem depois da recuperação por outro processo.
+      entrada.revisao ??= estado.revisao
+      const atualizacao = atualizacaoIncremental(entrada)
+      for (let tentativa = 0; ; tentativa++) {
+        try {
+          const resultado = await col.updateOne(
+            { grupo: estado.grupoId, data: estado.data }, atualizacao, { upsert: true, writeConcern: { w: 'majority' } }
+          )
+          if (resultado?.acknowledged !== true) throw new Error('Escrita sem confirmação')
+          if (!resultado.modifiedCount && !resultado.upsertedCount) {
+            const doc = await col.findOne({ grupo: estado.grupoId, data: estado.data }, { projection: { [`_jornalGravacoes.${escritor}`]: 1 } })
+            if (!(doc?._jornalGravacoes?.[escritor] >= entrada.sequencia)) throw new Error('Revisão do jornal mudou')
+          }
+          break
+        } catch (e) {
+          // Confirmação perdida e corrida de upsert podem repetir exatamente
+          // a mesma operação. Após duas falhas, guardar a fila para nova atividade.
+          if (tentativa >= 1) throw e
+        }
+      }
+      estado.confirmadas = estado.confirmadas.concat([entrada.mensagem]).slice(-MAX_MSG_GRUPO)
+      estado.revisao = entrada.revisao + 1
+      estado.pendentes.shift()
+      estado.enviando = null
+      atualizarMemoria(estado)
+    }
+  }).catch(() => {
+    console.error('[jornal] aviso: persistencia adiada; entradas mantidas em memoria')
+  }).finally(() => { estado.execucao = null; estado.enviando = null })
+  return estado.execucao
+}
+
+function limparPersistenciasExpiradas () {
+  const hoje = chaveDataLocal()
+  for (const [chave, estado] of persistencias) {
+    if (estado.data !== hoje && !estado.execucao && !estado.carga) persistencias.delete(chave)
   }
 }
 
 async function lerAcumulado (grupoId) {
   const chave = chaveDataLocal()
   const dia = acumuladoMemoria.get(grupoId)
-  if (dia && dia.data === chave && dia.mensagens.length) return dia
+  const existente = persistencias.get(JSON.stringify([grupoId, chave]))
+  if (!existente && dia?.data === chave && dia.mensagens.length) return dia
+  const estado = existente || estadoPersistencia(grupoId, chave)
   try {
-    const col = await obterColecaoJornal()
-    if (!col) return dia && dia.data === chave ? dia : { data: chave, mensagens: [] }
-    const doc = await col.findOne({ grupo: grupoId, data: chave })
-    if (doc && Array.isArray(doc.mensagens) && doc.mensagens.length) {
-      acumuladoMemoria.set(grupoId, { data: chave, mensagens: doc.mensagens.slice(-MAX_MSG_GRUPO) })
-      return acumuladoMemoria.get(grupoId)
+    if (!estado.carregado) {
+      const col = await obterColecaoJornal()
+      if (col) await carregarHistorico(estado, col)
     }
-  } catch (e) {
-    console.error('[jornal] aviso: leitura Mongo falhou:', e?.message || e)
+    if (estado.pendentes.length) espelharNoMongo(estado)
+  } catch (_) {
+    console.error('[jornal] aviso: historico Mongo indisponivel')
   }
-  return dia && dia.data === chave ? dia : { data: chave, mensagens: [] }
+  const atual = acumuladoMemoria.get(grupoId)
+  return atual?.data === chave ? atual : { data: chave, mensagens: [] }
 }
 
 function capturarMensagem (msg, jid) {
@@ -140,8 +251,16 @@ function capturarMensagem (msg, jid) {
     const texto = extrairTextoLivre(conteudo)
     if (deveIgnorar(texto)) return
     const autor = msg.pushName || 'alguem'
+    limparPersistenciasExpiradas()
     const dia = registrarNoAcumulado(String(jid), String(autor).slice(0, 60), texto)
-    espelharNoMongo(String(jid), dia).catch(() => {})
+    const estado = estadoPersistencia(String(jid), dia.data)
+    estado.pendentes.push({ mensagem: { ...dia.mensagens[dia.mensagens.length - 1] }, sequencia: ++estado.sequencia, expiraEm: proximaMeiaNoiteLocal() })
+    // Somente as últimas 500 entradas fazem parte do jornal. Preservar também
+    // a operação em voo até sua confirmação, sem fila ilimitada durante quedas.
+    while (estado.pendentes.length > MAX_MSG_GRUPO + (estado.enviando ? 1 : 0)) {
+      estado.pendentes.splice(estado.enviando ? 1 : 0, 1)
+    }
+    espelharNoMongo(estado)
   } catch (e) {
     console.error('[jornal] captura falhou:', e?.message || e)
   }
@@ -153,6 +272,7 @@ module.exports = {
   extrairTextoLivre, deveIgnorar, registrarNoAcumulado,
   FUSO_JORNAL, MAX_MSG_GRUPO, MAX_TEXTO_MSG,
   NOME_COLECAO_JORNAL, acumuladoMemoria,
-  _injetarColecao: (c) => { colecaoJornal = c || null; clienteJornal = null },
-  _limparMemoria: () => acumuladoMemoria.clear()
+  _injetarColecao: (c) => { modoTeste = true; colecaoJornal = c || null; clienteJornal = null },
+  _limparMemoria: () => { acumuladoMemoria.clear(); persistencias.clear() },
+  _aguardarPersistencia: () => Promise.all([...persistencias.values()].map(espelharNoMongo))
 }
