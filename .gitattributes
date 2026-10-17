@@ -1,2 +1,3 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+scripts/npm-shell-sem-canvas.sh text eol=lf

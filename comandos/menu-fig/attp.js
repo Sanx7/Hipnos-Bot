@@ -32,7 +32,9 @@ const { execFile } = require('child_process')
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
-const { createCanvas } = require('canvas')
+const { DISABLE_CANVAS, limitarComandosCanvas } = require('../../dados/compatibilidade-canvas')
+let createCanvas
+if (!DISABLE_CANVAS) ({ createCanvas } = require('canvas'))
 const opentype = require('opentype.js')
 const { Sticker, StickerTypes } = require('wa-sticker-formatter')
 
@@ -269,3 +271,5 @@ module.exports = {
   }
 }
 
+// Apenas os recursos que usam Canvas ficam indisponíveis neste modo.
+limitarComandosCanvas([module.exports], ['attp'])

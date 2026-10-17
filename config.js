@@ -42,6 +42,9 @@ function carregarDotEnv() {
 }
 carregarDotEnv()
 
+// Compatibilidade temporária: somente o valor explícito true desativa Canvas.
+const DISABLE_CANVAS = String(process.env.DISABLE_CANVAS || '').trim().toLowerCase() === 'true'
+
 // 👑 DONOS DO BOT (lista de números, somente dígitos, com DDI).
 // ⚠️ Os donos do bot SEMPRE podem usar os comandos, independente do modo
 // somente admin estar ativo ou não.
@@ -177,6 +180,7 @@ const RODAPE_MENU = [
 ].join('\n')
 
 module.exports = {
+  DISABLE_CANVAS,
   OWNER_NUMBERS,
   AVISAR_BLOQUEIO,
   limparNumero,

@@ -31,7 +31,9 @@ const path = require('path')
 const { execFile } = require('child_process')
 const { Jimp, JimpMime, loadFont } = require('jimp')
 const { SANS_32_WHITE, SANS_64_WHITE } = require('jimp/fonts')
-const { createCanvas, loadImage } = require('canvas')
+const { DISABLE_CANVAS, limitarComandosCanvas } = require('../../dados/compatibilidade-canvas')
+let createCanvas, loadImage
+if (!DISABLE_CANVAS) ({ createCanvas, loadImage } = require('canvas'))
 
 const { caminhoFfmpeg, apagarComRetry } = require('../menu-utilitario/audio-extrator')
 
@@ -740,3 +742,8 @@ module.exports.compor = {
 module.exports.ErroEfeitoVisual = ErroEfeitoVisual
 module.exports.LIMITE_BYTES_IMAGEM = LIMITE_BYTES_IMAGEM
 module.exports.FILTROS = { onda: FILTRO_ONDA, vhs: FILTRO_VHS, entidade: FILTRO_ENTIDADE }
+
+// Apenas os recursos que usam Canvas ficam indisponíveis neste modo.
+limitarComandosCanvas(module.exports, [
+  'glitchgif', 'rotacao3d', 'fogogif', 'derreter', 'naoolhe', 'falha', 'impostor', 'gun'
+])

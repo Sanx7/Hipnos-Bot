@@ -60,7 +60,9 @@ const fs = require('fs')
 const os = require('os')
 const path = require('path')
 const { Jimp, JimpMime } = require('jimp')
-const { createCanvas, loadImage } = require('canvas')
+const { DISABLE_CANVAS, limitarComandosCanvas } = require('../../dados/compatibilidade-canvas')
+let createCanvas, loadImage
+if (!DISABLE_CANVAS) ({ createCanvas, loadImage } = require('canvas'))
 const { caminhoFfmpeg, apagarComRetry } = require('../menu-utilitario/audio-extrator')
 // 🎨 Tema VIP (/temavip — campo `temaVip` no documento do VIP): paleta de
 // fundo/texto/destaque escolhida por QUEM INVOCOU o comando de par. Sem tema
@@ -915,3 +917,9 @@ module.exports.ErroEfeitos = ErroEfeitos
 // 🧪 Os filtros LOCais do jimp, p/ o teste provar que cada um realmente
 // transforma a imagem (ex.: o /espelhar precisa inverter os pixels).
 module.exports.compor.filtro = filtroLocal
+
+// Apenas os recursos que usam Canvas ficam indisponíveis neste modo.
+limitarComandosCanvas(module.exports, [
+  'kiss', 'kissme', 'ship', 'shipme', 'clown', 'slap', 'spank',
+  'batslap', 'beautiful', 'bobross', 'ad', 'rip', 'apagar'
+])

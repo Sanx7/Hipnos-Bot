@@ -21,7 +21,9 @@ const { execFile } = require('child_process')
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
-const { createCanvas } = require('canvas')
+const { DISABLE_CANVAS, limitarComandosCanvas } = require('../../dados/compatibilidade-canvas')
+let createCanvas
+if (!DISABLE_CANVAS) ({ createCanvas } = require('canvas'))
 const { Sticker, StickerTypes } = require('wa-sticker-formatter')
 
 // ─── Estilo visual "Brat" ───
@@ -229,3 +231,5 @@ module.exports = [
   criarComando({ nome: 'bratvid', animado: true, id: 'hipnos_bratvid' })
 ]
 
+// Apenas os recursos que usam Canvas ficam indisponíveis neste modo.
+limitarComandosCanvas(module.exports, ['brat', 'bratvid'])
