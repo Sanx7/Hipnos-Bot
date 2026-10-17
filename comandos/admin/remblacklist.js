@@ -6,6 +6,8 @@ const { limparNumero, ehDonoDoBot } = require('../../config');
 
 // 🪪 Resolução LID→número real (menção/reply pode chegar como "@lid")
 const { resolverNumeroAlvo } = require('../../lid');
+const { obterAlvoBlacklist } = require('../../dados/blacklist-alvo');
+const { obterPrefixo } = require('../../prefixo');
 
 // Caminho corrigido apontando para comandos/dados
 const BANCO_BLACKLIST = path.join(__dirname, '..', 'dados', 'blacklist.json');
@@ -16,10 +18,11 @@ function lerBlacklist() {
       return [];
     }
     const dados = fs.readFileSync(BANCO_BLACKLIST, 'utf-8');
-    return JSON.parse(dados);
+    const lista = JSON.parse(dados);
+    if (!Array.isArray(lista) || lista.some(n => typeof n !== 'string' || !/^\d+$/.test(n))) throw new Error('Blacklist inválida');
+    return lista;
   } catch (err) {
-    console.error("Erro ao ler blacklist.json:", err);
-    return [];
+    throw new Error('Falha ao ler blacklist');
   }
 }
 
@@ -27,7 +30,7 @@ function salvarBlacklist(lista) {
   try {
     fs.writeFileSync(BANCO_BLACKLIST, JSON.stringify(lista, null, 2));
   } catch (err) {
-    console.error("Erro ao salvar blacklist.json:", err);
+    throw new Error('Falha ao salvar blacklist');
   }
 }
 
@@ -49,7 +52,7 @@ module.exports = {
           const metadados = await sock.groupMetadata(jid)
           participantes = metadados.participants
         } catch (e) {
-          console.error('Sem metadados do grupo (remblacklist):', e?.message || e);
+          console.warn('[remblacklist] Metadados indisponíveis.');
         }
       }
       if (!ehDonoDoBot(participantes, sender)) {
@@ -58,25 +61,13 @@ module.exports = {
         }, { quoted: msg });
       }
 
-      const args = text.split(' ').slice(1);
-      const contextInfo = msg.message.extendedTextMessage?.contextInfo;
-      let alvo = contextInfo?.mentionedJid?.[0] || contextInfo?.participant;
-
-      // Se passou o número digitado puro (ex: /remblacklist 5511999999999)
-      if (!alvo && args.length > 0) {
-        const numeroLimpo = args[0].replace(/\D/g, '');
-        if (numeroLimpo.length >= 10) {
-          alvo = `${numeroLimpo}@s.whatsapp.net`;
-        }
-      }
+      const alvo = obterAlvoBlacklist(msg, text)?.jid;
 
       if (!alvo) {
         return await sock.sendMessage(jid, {
-          text: '🌑 O ritual falhou...\nMarque um ser ou responda sua mensagem para que Hipnos o remova do limbo.'
+          text: `⚠️ Mencione a pessoa, responda à mensagem dela ou use ${await obterPrefixo()}remblacklist <número internacional>.\nExemplos: 55139757976987 ou +55 (13) 97579-76987.\nInforme um único número, com DDI e DDD (10–15 dígitos).`
         }, { quoted: msg });
       }
-
-      let listaAtual = lerBlacklist();
 
       // 🪪 RESOLUÇÃO LID→NÚMERO REAL (lid.js): a menção/reply pode chegar como
       // "@lid" enquanto o JSON guarda o número REAL — sem resolver, o indexOf
@@ -85,12 +76,13 @@ module.exports = {
       const resolucao = await resolverNumeroAlvo(participantes, alvo);
       const alvoBrutoLimpo = limparNumero(alvo);
       const variantes = [...new Set([resolucao.numero, alvoBrutoLimpo].filter(Boolean))];
+      const listaAtual = lerBlacklist();
 
       // Remove TODAS as variantes presentes do mesmo alvo
       let removidos = 0;
       for (const variante of variantes) {
-        const index = listaAtual.indexOf(variante);
-        if (index !== -1) {
+        let index;
+        while ((index = listaAtual.indexOf(variante)) !== -1) {
           listaAtual.splice(index, 1);
           removidos += 1;
         }
@@ -103,17 +95,18 @@ module.exports = {
       }
 
       if (removidos > 1) {
-        console.log(`[remblacklist] 🪪 ${removidos} variantes do mesmo alvo removidas (limpeza de LID legado)`);
+        console.log('[remblacklist] Variantes legadas removidas.');
       }
 
       salvarBlacklist(listaAtual);
 
       return await sock.sendMessage(jid, {
-        text: '🌑⚖️ O perdão de Hipnos foi concedido. A alma foi libertada da lista negra.'
+        text: `✅ Número ${resolucao.numero || alvoBrutoLimpo} removido da lista negra de Hipnos.`
       }, { quoted: msg });
 
     } catch (err) {
-      console.error('Erro no comando remblacklist:', err);
+      console.warn('[remblacklist] Operação não concluída.');
+      await sock.sendMessage(jid, { text: '⚠️ Não consegui concluir a remoção. Confira o armazenamento e a identificação do alvo.' }, { quoted: msg }).catch(() => {});
     }
   }
 };

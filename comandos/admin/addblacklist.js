@@ -2,11 +2,14 @@ const fs = require('fs');
 const path = require('path');
 
 // Configuração global do bot (helpers de dono — verificação PROOF-LID)
-const { limparNumero, ehDonoDoBot } = require('../../config');
+const { ehDonoDoBot } = require('../../config');
 
 // 🪪 Resolução LID→número real (menção/reply pode chegar como "@lid")
 const { resolverNumeroAlvo } = require('../../lid');
 const { ehProprioBot, respostaAutoexpulsao } = require('../../dados/protecao-bot');
+const { obterAlvoBlacklist } = require('../../dados/blacklist-alvo');
+const { identificar } = require('../../dados/identidade-participante');
+const { obterPrefixo } = require('../../prefixo');
 
 // Caminho atualizado apontando para a pasta 'dados'
 const BANCO_BLACKLIST = path.join(__dirname, '..', 'dados', 'blacklist.json');
@@ -24,10 +27,11 @@ function lerBlacklist() {
       return [];
     }
     const dados = fs.readFileSync(BANCO_BLACKLIST, 'utf-8');
-    return JSON.parse(dados);
+    const lista = JSON.parse(dados);
+    if (!Array.isArray(lista) || lista.some(n => typeof n !== 'string' || !/^\d+$/.test(n))) throw new Error('Blacklist inválida');
+    return lista;
   } catch (err) {
-    console.error("Erro ao ler blacklist.json:", err);
-    return [];
+    throw new Error('Falha ao ler blacklist');
   }
 }
 
@@ -35,7 +39,7 @@ function salvarBlacklist(lista) {
   try {
     fs.writeFileSync(BANCO_BLACKLIST, JSON.stringify(lista, null, 2));
   } catch (err) {
-    console.error("Erro ao salvar blacklist.json:", err);
+    throw new Error('Falha ao salvar blacklist');
   }
 }
 
@@ -58,7 +62,7 @@ module.exports = {
           const metadados = await sock.groupMetadata(jid)
           participantes = metadados.participants
         } catch (e) {
-          console.error('Sem metadados do grupo (addblacklist):', e?.message || e);
+          console.warn('[addblacklist] Metadados indisponíveis.');
         }
       }
       if (!ehDonoDoBot(participantes, sender)) {
@@ -67,21 +71,12 @@ module.exports = {
         }, { quoted: msg });
       }
 
-      const args = text.split(' ').slice(1);
-      const contextInfo = msg.message.extendedTextMessage?.contextInfo;
-
-      let alvo = contextInfo?.mentionedJid?.[0] || contextInfo?.participant;
-
-      if (!alvo && args.length > 0) {
-        const numeroLimpo = args[0].replace(/\D/g, '');
-        if (numeroLimpo.length >= 10) {
-          alvo = `${numeroLimpo}@s.whatsapp.net`;
-        }
-      }
+      const selecionado = obterAlvoBlacklist(msg, text);
+      const alvo = selecionado?.jid;
 
       if (!alvo) {
         return await sock.sendMessage(jid, {
-          text: '🌑 O ritual falhou...\nMarque um ser ou responda sua mensagem para que Hipnos o condene ao limbo.'
+          text: `⚠️ Mencione a pessoa, responda à mensagem dela ou use ${await obterPrefixo()}addblacklist <número internacional>.\nExemplos: 55139757976987 ou +55 (13) 97579-76987.\nInforme um único número, com DDI e DDD (10–15 dígitos).`
         }, { quoted: msg });
       }
 
@@ -97,8 +92,6 @@ module.exports = {
         }, { quoted: msg });
       }
 
-      let listaAtual = lerBlacklist();
-
       // 🪪 RESOLUÇÃO LID→NÚMERO REAL (lid.js): a menção/reply pode chegar como
       // "175952680210489@lid" em grupos com LID habilitado. Gravar o LID no
       // blacklist.json quebrava a checagem automática de entrada (o bot.js
@@ -106,17 +99,26 @@ module.exports = {
       // (metadados do grupo → mapeamento da sessão). Número digitado é direto.
       const resolucao = await resolverNumeroAlvo(participantes, alvo);
       if (!resolucao.numero || resolucao.via === null) {
-        console.warn(
-          `[addblacklist] 🪪 LID ${resolucao.numero || limparNumero(alvo)} não resolvível p/ número real — recusando para NÃO gravar LID`
-        );
+        console.warn('[addblacklist] Identidade do alvo não resolvida; cadastro recusado.');
         return await sock.sendMessage(jid, {
           text: '🪪 *Não consegui identificar o número real desse alvo* (o WhatsApp entregou só o LID).\n\nCondene direto pelo número: */addblacklist 5511999999999*.'
         }, { quoted: msg });
       }
       const alvoLimpo = resolucao.numero;
-      if (resolucao.via !== 'direto') {
-        console.log(`[addblacklist] 🪪 alvo resolvido de @lid p/ número real via ${resolucao.via}: ${alvoLimpo}`);
+      const jidReal = `${alvoLimpo}@s.whatsapp.net`;
+      // Revalida depois da resolução de sessão, inclusive para donos por LID.
+      if (ehDonoDoBot(participantes, jidReal)) {
+        return await sock.sendMessage(jid, { text: '⛔ Não é possível executar essa ação contra o dono do bot.' }, { quoted: msg });
       }
+      if (await ehProprioBot(sock, jid, jidReal, participantes)) return await sock.sendMessage(jid, { text: respostaAutoexpulsao() }, { quoted: msg });
+
+      let alvoRemocao = alvo;
+      if (selecionado.digitado) {
+        const membro = await identificar(participantes || [], jidReal);
+        alvoRemocao = membro.participante?.id || null;
+      }
+      // Sem awaits entre leitura, deduplicação e escrita do mesmo JSON.
+      const listaAtual = lerBlacklist();
 
       if (listaAtual.includes(alvoLimpo)) {
         return await sock.sendMessage(jid, {
@@ -130,23 +132,18 @@ module.exports = {
 
       // Tenta remover o alvo do grupo atual
       try {
-        await sock.groupParticipantsUpdate(jid, [alvo], 'remove');
+        if (jid.endsWith('@g.us') && alvoRemocao) await sock.groupParticipantsUpdate(jid, [alvoRemocao], 'remove');
       } catch (e) {
-        console.error('Erro ao remover usuário do grupo:', e);
+        console.warn('[addblacklist] Remoção no grupo não concluída; cadastro mantido.');
       }
 
       await sock.sendMessage(jid, {
-        text: 
-`🌑⚖️ JULGAMENTO DE HIPNOS
-
-☠️ O veredito foi selado...
-👤 Um espírito foi lançado ao limbo
-
-💀 "O silêncio agora o acompanha eternamente."`
+        text: `✅ Número ${alvoLimpo} adicionado à lista negra de Hipnos.`
       }, { quoted: msg });
 
     } catch (err) {
-      console.error('Erro no comando addblacklist:', err);
+      console.warn('[addblacklist] Operação não concluída.');
+      await sock.sendMessage(jid, { text: '⚠️ Não consegui concluir o cadastro. Confira o armazenamento e a identificação do alvo.' }, { quoted: msg }).catch(() => {});
     }
   }
 };

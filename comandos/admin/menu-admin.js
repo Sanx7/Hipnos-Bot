@@ -111,10 +111,10 @@ module.exports = {
 
 ☠️ BLACKLIST & PUNIÇÕES
 
-☠️ /addblacklist @membro
+☠️ /addblacklist @membro ou <número internacional>
 ➥ Condena uma alma à blacklist eterna.
 
-🕊️ /remblacklist @membro
+🕊️ /remblacklist @membro ou <número internacional>
 ➥ Perdoa e liberta um número da blacklist.
 
 📕 /blacklist
