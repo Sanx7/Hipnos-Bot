@@ -11,10 +11,21 @@ O prefixo abaixo é um exemplo; os comandos seguem o prefixo configurado no bot.
 /emojilista
 ```
 
-O terceiro exemplo atualiza o emoji de `ana`. Cadastrar/remover exige
-administrador ou dono do bot, usando a verificação existente de identidade
-PN/LID. Falha de metadados ou identidade sem comprovação não autoriza alterações.
-A lista é pública dentro do grupo. Os comandos também aparecem no menu admin.
+O terceiro exemplo atualiza o emoji de `ana`. Qualquer membro do grupo pode
+cadastrar um termo novo. Somente seu criador, administradores ou donos do bot
+podem atualizar/remover um registro existente, usando a identificação PN/LID já
+adotada pelo projeto. Falha de metadados ou identidade sem comprovação não
+autoriza alterações. A lista é pública dentro do grupo. Os comandos também
+aparecem no menu admin; os controles globais ON/OFF e somente-admin do roteador
+permanecem inalterados.
+
+Cada registro novo armazena `criador` como `pn:<numero comprovado>` ou, quando
+o membro só tem LID identificado nos metadados, `lid:<identificador>`. A autoria
+original não muda quando um administrador ou dono atualiza o emoji. Aliases
+comprovados nos metadados permitem reconhecer o criador entre PN e LID; números
+iguais em namespaces diferentes ou aliases ambíguos não comprovam autoria.
+Registros antigos sem criador (ou com identificador inválido) só podem ser
+alterados/removidos por administradores ou donos, sem atribuição retroativa.
 
 Termos: 1–60 caracteres, até cinco palavras, letras/números, espaços, hífen e
 apóstrofo. Sem regex fornecida pelo usuário. Aceita um único emoji, incluindo
@@ -46,10 +57,12 @@ Mensagens acima de 4096 unidades UTF-16 são ignoradas por este recurso.
 Reutiliza a conexão e a coleção de `configuracoes-grupo.js`, respeitando
 `MONGODB_URI`, `MONGODB_DB` e `MONGODB_COLLECTION_CONFIG_GRUPO` existentes.
 Não cria outro MongoClient, novas dependências ou índices. No documento existente
-com `grupo_id`, grava somente `reacoes_palavras: [{ termo, emoji }]` e
+com `grupo_id`, grava somente `reacoes_palavras: [{ termo, emoji, criador }]` e
 `reacoes_versao`. Welcome, IA, banner e demais campos não são sobrescritos.
 Atualizações usam comparação de versão (CAS), até cinco tentativas, preservando
-o limite mesmo em cadastros simultâneos. Documento inválido não é substituído.
+o limite mesmo em cadastros simultâneos. A autorização é reavaliada sobre o
+registro atual a cada tentativa, sem depender do cache. Documento inválido não
+é substituído. Não há migração automática de autoria dos registros antigos.
 
 O cache dura 30 segundos e contém até 500 grupos, incluindo resultados vazios.
 Consultas simultâneas do mesmo grupo são agrupadas; falhas recebem espera de
@@ -83,7 +96,7 @@ módulo bloqueia conexões de rede. Os testes de compatibilidade que incluem o
 modo normal precisam do Canvas já instalado localmente, sem reinstalação.
 Não houve conexão com WhatsApp/MongoDB reais nem validação na LatamHost.
 
-Resultados offline: 18 cenários do módulo, 85 testes ON/OFF, loader com 597
+Resultados offline: 23 cenários do módulo, 85 testes ON/OFF, loader com 597
 entradas, compatibilidade Canvas nos dois modos e 16 verificações do shell.
 Regressões adicionais: 82 verificações de conexões MongoDB, 78 de antiflood,
 116 de limite de caracteres e 178 de antigolpe. A comparação com HEAD no teste

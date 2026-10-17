@@ -9,6 +9,15 @@ const { OWNER_NUMBERS } = require('../config')
 const lid = require('../lid')
 lid.__definirConsultaSessaoTeste(async () => null)
 const G = '12345@g.us', H = '67890@g.us'
+const adminTeste = { identidades: ['pn:5511999990002'], privilegiado: true }
+// Fixtures de persistência operam como admin; testes de permissão usam a API
+// real sem preencher autor automaticamente.
+function repositorioTeste(colecao, agora) {
+  const repo = r.criarRepositorio(colecao, agora)
+  return { ...repo,
+    registrar: (jid, termo, emoji) => repo.registrar(jid, termo, emoji, adminTeste),
+    remover: (jid, termo) => repo.remover(jid, termo, adminTeste) }
+}
 let total = 0
 async function teste(nome, fn) { await fn(); total++; console.log(`OK: ${nome}`) }
 const registros = Object.freeze([{ termo: 'ana', emoji: '❤️' }, { termo: 'bom dia', emoji: '☀️' }, { termo: 'joão', emoji: '👋' }, { termo: 'ana maria', emoji: '😀' }])
@@ -33,13 +42,13 @@ async function main() {
     for (const e of ['😀', '❤️', '👍🏽', '👨‍👩‍👧‍👦', '🇧🇷', '1️⃣', '☀️']) assert.equal(r.validarEmoji(e), e)
     for (const e of ['', 'ok', '1', '🇧', '😀😀', '🏽', '😀 oi']) assert.throws(() => r.validarEmoji(e))
   })
-  const col = criarColecao(), repo = r.criarRepositorio(async () => col)
+  const col = criarColecao(), repo = repositorioTeste(async () => col)
   await teste('persistência por JID, isolamento, atualização e remoção normalizada', async () => {
     col.docs.set(G, { grupo_id: G, welcome: true, ia_interativa: true, banner_customizado: 'preservado' })
     await repo.registrar(G, 'ANA', '😀'); await repo.registrar(H, 'ana', '🌙')
     await repo.registrar(G, 'Ana', '❤️')
-    assert.deepEqual(await repo.obter(G), [{ termo: 'ana', emoji: '❤️' }])
-    assert.deepEqual(await repo.obter(H), [{ termo: 'ana', emoji: '🌙' }])
+    assert.deepEqual(await repo.obter(G), [{ termo: 'ana', emoji: '❤️', criador: adminTeste.identidades[0] }])
+    assert.deepEqual(await repo.obter(H), [{ termo: 'ana', emoji: '🌙', criador: adminTeste.identidades[0] }])
     assert.equal(await repo.remover(G, 'ANA'), true)
     assert.equal(await repo.remover(G, 'ana'), false)
     assert.equal((await repo.obter(H)).length, 1)
@@ -55,13 +64,13 @@ async function main() {
     assert.equal((await repo.obter(G, true)).length, 50)
     await repo.registrar(G, 'termo0', '🌙')
     assert.equal((await repo.obter(G)).find(x => x.termo === 'termo0').emoji, '🌙')
-    const outra = r.criarRepositorio(async () => col)
+    const outra = repositorioTeste(async () => col)
     await Promise.all([repo.registrar(H, 'b', '😀'), outra.registrar(H, 'c', '👋')])
     assert.deepEqual((await repo.obter(H, true)).map(x => x.termo).sort(), ['ana', 'b', 'c'])
   })
   await teste('cache, leituras coalescidas, invalidação e indisponibilidade do banco', async () => {
     let agora = 1000
-    const cache = r.criarRepositorio(async () => col, () => agora)
+    const cache = repositorioTeste(async () => col, () => agora)
     const inicio = col.leituras
     await Promise.all([cache.obter(H), cache.obter(H), cache.obter(H)])
     assert.equal(col.leituras - inicio, 1)
@@ -77,47 +86,128 @@ async function main() {
   await teste('documento corrompido não gera reação nem permite sobrescrita', async () => {
     const quebrada = criarColecao()
     quebrada.docs.set(G, { grupo_id: G, reacoes_palavras: [{ termo: 'ana', emoji: 'texto inválido' }] })
-    const q = r.criarRepositorio(async () => quebrada)
+    const q = repositorioTeste(async () => quebrada)
     await assert.rejects(q.obter(G)); await assert.rejects(q.registrar(G, 'ana', '😀'))
   })
 
   const dono = '5511999990001', admin = '5511999990002', membro = '5511999990003'
   const originais = [...OWNER_NUMBERS]; OWNER_NUMBERS.push(dono)
   try {
-    let operacoes = 0
-    const comandos = criarComandos({ registrar: async () => { operacoes++; return true }, remover: async () => { operacoes++; return true }, obter: async () => [] })
+    const permissoesCol = criarColecao()
+    const permissoesRepo = r.criarRepositorio(async () => permissoesCol)
+    const comandos = criarComandos(permissoesRepo)
     const envios = []
     let falharMeta = false
+    const participantes = [{ id: `${admin}@s.whatsapp.net`, lid: '123@lid', admin: 'admin' },
+      { id: `${membro}@s.whatsapp.net`, lid: '456@lid' }, { id: '5511999990004@s.whatsapp.net' }, { id: '789@lid' }, { id: '789@s.whatsapp.net' }]
     const sock = { sendMessage: async (jid, c) => envios.push(c), groupMetadata: async () => {
       if (falharMeta) throw new Error('Sem metadados')
-      return { participants: [{ id: `${admin}@s.whatsapp.net`, lid: '123@lid', admin: 'admin' }, { id: `${membro}@s.whatsapp.net` }] }
+      return { participants: participantes }
     } }
     const executar = (nome, autor, texto, jid = G) => comandos.find(c => c.nome === nome).executar(sock, jid, { key: { remoteJid: jid, participant: autor } }, texto)
-    await teste('membro comum não cadastra/remove; lista é pública e só funciona em grupo', async () => {
+    await teste('qualquer membro cadastra, criador é persistido e lista é pública', async () => {
       await executar('emojiregistrar', `${membro}@s.whatsapp.net`, '/emojiregistrar ana 😀')
-      await executar('emojiremover', `${membro}@s.whatsapp.net`, '/emojiremover ana')
-      assert.equal(operacoes, 0)
+      assert.deepEqual(await permissoesRepo.obter(G), [{ termo: 'ana', emoji: '😀', criador: `pn:${membro}` }])
       await executar('emojilista', `${membro}@s.whatsapp.net`, '/emojilista')
-      assert.match(envios.at(-1).text, /Nenhuma/)
+      assert.match(envios.at(-1).text, /ana → 😀/)
       await executar('emojiregistrar', `${dono}@s.whatsapp.net`, '/emojiregistrar ana 😀', `${membro}@s.whatsapp.net`)
-      assert.equal(operacoes, 0)
+      assert.equal(permissoesCol.docs.size, 1)
+    })
+    await teste('terceiros não atualizam/removem, mesmo após leitura em cache', async () => {
+      await permissoesRepo.obter(G)
+      for (const [nome, texto] of [['emojiregistrar', '/emojiregistrar ana 👋'], ['emojiremover', '/emojiremover ana']]) {
+        await executar(nome, '5511999990004@s.whatsapp.net', texto)
+        assert.match(envios.at(-1).text, /Somente quem criou/)
+      }
+      assert.equal((await permissoesRepo.obter(G))[0].emoji, '😀')
+    })
+    await teste('criador atualiza por LID comprovado e remove por PN', async () => {
+      await executar('emojiregistrar', '456@lid', '!emojiregistrar ana ❤️')
+      assert.equal((await permissoesRepo.obter(G))[0].emoji, '❤️')
+      assert.equal((await permissoesRepo.obter(G))[0].criador, `pn:${membro}`)
+      participantes.push({ id: `${membro}@s.whatsapp.net`, lid: '999@lid' })
+      await executar('emojiregistrar', '456@lid', '!emojiregistrar ana 🌙')
+      assert.match(envios.at(-1).text, /Somente quem criou/)
+      participantes.pop()
+      await executar('emojiremover', `${membro}@s.whatsapp.net`, '!emojiremover ana')
+      assert.equal((await permissoesRepo.obter(G)).length, 0)
     })
     await teste('admin PN/LID e dono podem cadastrar/remover com prefixo dinâmico', async () => {
-      await executar('emojiregistrar', `${admin}@s.whatsapp.net`, '!emojiregistrar Ana Maria 😀')
-      await executar('emojiremover', '123@lid', '!emojiremover Ana Maria')
+      await executar('emojiregistrar', `${membro}@s.whatsapp.net`, '!emojiregistrar Ana Maria 😀')
+      await executar('emojiregistrar', '123@lid', '!emojiregistrar Ana Maria 👋')
+      assert.equal((await permissoesRepo.obter(G))[0].criador, `pn:${membro}`)
+      await executar('emojiremover', `${dono}@s.whatsapp.net`, '!emojiremover Ana Maria')
       await executar('emojiregistrar', `${dono}@s.whatsapp.net`, '!emojiregistrar ana ❤️')
-      assert.equal(operacoes, 3)
+      assert.equal((await permissoesRepo.obter(G))[0].criador, `pn:${dono}`)
+      await executar('emojiremover', `${admin}@s.whatsapp.net`, '!emojiremover ana')
+      assert.equal((await permissoesRepo.obter(G)).length, 0)
+    })
+    await teste('legado sem criador só aceita admin/dono e não ganha autoria presumida', async () => {
+      permissoesCol.docs.set(H, { grupo_id: H, reacoes_palavras: [{ termo: 'legado', emoji: '😀' }] })
+      for (const [nome, texto] of [['emojiregistrar', '/emojiregistrar legado 👋'], ['emojiremover', '/emojiremover legado']]) {
+        await executar(nome, `${membro}@s.whatsapp.net`, texto, H)
+        assert.match(envios.at(-1).text, /Somente quem criou/)
+      }
+      await executar('emojiregistrar', '123@lid', '/emojiregistrar legado 🌙', H)
+      assert.deepEqual(await permissoesRepo.obter(H), [{ termo: 'legado', emoji: '🌙' }])
+      await executar('emojiremover', `${dono}@s.whatsapp.net`, '/emojiremover legado', H)
+      assert.equal((await permissoesRepo.obter(H)).length, 0)
+    })
+    await teste('membro LID sem telefone mantém namespace e não confunde PN de mesmos dígitos', async () => {
+      await executar('emojiregistrar', '789@lid', '/emojiregistrar lua 🌙')
+      assert.equal((await permissoesRepo.obter(G))[0].criador, 'lid:789')
+      await executar('emojiregistrar', '789@s.whatsapp.net', '/emojiregistrar lua 😀')
+      assert.match(envios.at(-1).text, /Somente quem criou/)
+      participantes[2].lid = '789@lid'
+      await executar('emojiregistrar', '5511999990004@s.whatsapp.net', '/emojiregistrar lua 😀')
+      assert.match(envios.at(-1).text, /Somente quem criou/)
+      delete participantes[2].lid
+      await executar('emojiregistrar', '789@lid', '/emojiregistrar lua 👋')
+      assert.equal((await permissoesRepo.obter(G))[0].emoji, '👋')
+      // Associação PN/LID fornecida pelos metadados permite reconhecer a autoria antiga.
+      participantes[3] = { id: '5511999990005@s.whatsapp.net', lid: '789@lid' }
+      await executar('emojiremover', '5511999990005@s.whatsapp.net', '/emojiremover lua')
+      assert.equal((await permissoesRepo.obter(G)).length, 0)
     })
     await teste('LID sem prova, metadados indisponíveis e entrada inválida não escrevem', async () => {
+      const escritas = permissoesCol.escritas
       await executar('emojiregistrar', `${dono}@lid`, '/emojiregistrar ana 😀')
       falharMeta = true
       await executar('emojiremover', `${admin}@s.whatsapp.net`, '/emojiremover ana')
       falharMeta = false
       await executar('emojiregistrar', `${admin}@s.whatsapp.net`, '/emojiregistrar ana texto')
       await executar('emojiregistrar', `${admin}@s.whatsapp.net`, '/emojiregistrar a.* 😀')
-      assert.equal(operacoes, 3)
+      assert.equal(permissoesCol.escritas, escritas)
+      await executar('emojiregistrar', '5511000000000@s.whatsapp.net', '/emojiregistrar estranho 😀')
+      assert.equal(permissoesCol.escritas, escritas)
     })
   } finally { OWNER_NUMBERS.splice(0, OWNER_NUMBERS.length, ...originais) }
+
+  await teste('autor obrigatório e concorrência não permite tomar cadastro de outro criador', async () => {
+    const c = criarColecao(), p = r.criarRepositorio(async () => c)
+    const a = { identidades: ['pn:5511999990003'], privilegiado: false }
+    const b = { identidades: ['pn:5511999990004'], privilegiado: false }
+    await assert.rejects(p.registrar(G, 'ana', '😀'))
+    const resultados = await Promise.allSettled([p.registrar(G, 'ana', '😀', a), p.registrar(G, 'ana', '👋', b)])
+    assert.equal(resultados.filter(x => x.status === 'fulfilled').length, 1)
+    assert.equal(resultados.find(x => x.status === 'rejected').reason.code, 'REACAO_NAO_AUTORIZADA')
+    assert.equal((await p.obter(G))[0].criador, a.identidades[0])
+    // Simula remoção/recriação por outro autor entre a leitura e a escrita CAS.
+    const update = c.updateOne
+    let conflito = false
+    c.updateOne = async (filtro, mudanca, opcoes) => {
+      if (!conflito && filtro.reacoes_versao !== undefined) {
+        conflito = true
+        const doc = c.docs.get(G)
+        doc.reacoes_palavras = [{ termo: 'ana', emoji: '🌙', criador: b.identidades[0] }]
+        doc.reacoes_versao++
+      }
+      return update(filtro, mudanca, opcoes)
+    }
+    await assert.rejects(p.registrar(G, 'ana', '❤️', a), { code: 'REACAO_NAO_AUTORIZADA' })
+    assert.equal((await p.obter(G, true))[0].emoji, '🌙')
+    await assert.rejects(p.remover(G, 'ana', a), { code: 'REACAO_NAO_AUTORIZADA' })
+  })
 
   let agora = 1700000000000, aberta = true
   const envios = []

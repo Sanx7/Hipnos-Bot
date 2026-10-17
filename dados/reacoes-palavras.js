@@ -29,7 +29,13 @@ function validarRegistros(registros) {
     if (!r || normalizarTermo(r.termo) !== r.termo || validarEmoji(r.emoji) !== r.emoji || termos.has(r.termo)) throw new Error('Registros inválidos')
     termos.add(r.termo)
   }
-  return registros.map(r => Object.freeze({ termo: r.termo, emoji: r.emoji }))
+  return registros.map(r => Object.freeze({ termo: r.termo, emoji: r.emoji,
+    ...(identidadeValida(r.criador) ? { criador: r.criador } : {}) }))
+}
+function identidadeValida(id) { return typeof id === 'string' && /^(pn|lid):\d+$/.test(id) }
+function validarAutor(autor) {
+  if (!autor || !Array.isArray(autor.identidades) || !autor.identidades.length || autor.identidades.length > 4 ||
+      !autor.identidades.every(identidadeValida) || typeof autor.privilegiado !== 'boolean') throw new Error('Autor não identificado')
 }
 function limitarMapa(mapa, max) { while (mapa.size > max) mapa.delete(mapa.keys().next().value) }
 
@@ -61,8 +67,9 @@ function criarRepositorio(obterColecao = obterColecaoConfiguracoes, agora = Date
   }
   // CAS altera só os campos desta função, sem sobrescrever welcome/IA/banner.
   // A versão também faz o limite resistir a cadastros simultâneos.
-  async function alterar(jid, termoBruto, emoji) {
+  async function alterar(jid, termoBruto, emoji, autor) {
     grupoValido(jid)
+    validarAutor(autor)
     const termo = normalizarTermo(termoBruto)
     if (emoji !== null) validarEmoji(emoji)
     try {
@@ -76,11 +83,16 @@ function criarRepositorio(obterColecao = obterColecaoConfiguracoes, agora = Date
         const registros = validarRegistros(doc?.reacoes_palavras ?? [])
         const indice = registros.findIndex(r => r.termo === termo)
         if (emoji === null && indice < 0) return false
+        // Revalidado em cada tentativa CAS: terceiros não assumem um cadastro
+        // concorrente e registros legados nunca ganham um criador presumido.
+        if (indice >= 0 && !autor.privilegiado && !autor.identidades.includes(registros[indice].criador)) {
+          throw Object.assign(new Error('Somente criador, administrador ou dono'), { code: 'REACAO_NAO_AUTORIZADA' })
+        }
         if (emoji !== null && indice < 0 && registros.length >= MAX_REGISTROS) throw new Error('Limite de 50 registros atingido')
         const novos = registros.map(r => ({ ...r }))
         if (emoji === null) novos.splice(indice, 1)
-        else if (indice >= 0) novos[indice] = { termo, emoji }
-        else novos.push({ termo, emoji })
+        else if (indice >= 0) novos[indice] = { ...novos[indice], emoji }
+        else novos.push({ termo, emoji, criador: autor.identidades[0] })
         if (doc?.reacoes_versao !== undefined && (!Number.isSafeInteger(doc.reacoes_versao) || doc.reacoes_versao < 0 || doc.reacoes_versao >= Number.MAX_SAFE_INTEGER)) throw new Error('Versão inválida')
         const resultado = await col.updateOne({ grupo_id: jid,
           reacoes_versao: doc?.reacoes_versao ?? { $exists: false }
@@ -90,7 +102,7 @@ function criarRepositorio(obterColecao = obterColecaoConfiguracoes, agora = Date
       throw new Error('Configuração concorrente; tente novamente')
     } finally { revisao++; cache.delete(jid) }
   }
-  return { obter, registrar: (jid, termo, emoji) => alterar(jid, termo, emoji), remover: (jid, termo) => alterar(jid, termo, null) }
+  return { obter, registrar: (jid, termo, emoji, autor) => alterar(jid, termo, emoji, autor), remover: (jid, termo, autor) => alterar(jid, termo, null, autor) }
 }
 
 const padroes = new WeakMap()

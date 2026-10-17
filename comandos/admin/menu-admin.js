@@ -41,7 +41,7 @@ module.exports = {
 👥 GESTÃO DE MEMBROS
 
 😀 ${prefixo}emojiregistrar <palavra ou nome> <emoji>
-➥ Cadastra ou atualiza uma reação automática neste grupo (ADM ou dono).
+➥ Qualquer membro cadastra; só criador, ADM ou dono atualiza/remove.
 ➥ ${prefixo}emojiremover <palavra ou nome> · ${prefixo}emojilista
 ➥ Até 50 registros por grupo; palavras inteiras, sem distinguir maiúsculas.
 
