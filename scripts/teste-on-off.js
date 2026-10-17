@@ -163,6 +163,8 @@ async function main() {
     const ouvintes = new Map()
     const exclusoes = []
     const eventos = []
+    const reacoesEnviadas = []
+    let processarReacoes = async () => false
     const polls = []
     const pollsEnviadas = []
     const voucRespostas = []
@@ -303,6 +305,7 @@ async function main() {
           if (conteudo.text?.includes('🌙 *HIPNOS —')) voucRespostas.push(conteudo)
           if (conteudo.image && conteudo.caption?.includes('GARTIC DO SONHO')) garticImagens.push(conteudo)
           if (conteudo.image && conteudo.contextInfo?.mentionedJid) imagensTotag.push(conteudo)
+          if (conteudo.react) reacoesEnviadas.push(conteudo.react)
           eventos.push(conteudo.delete ? 'delete' : 'resposta')
           if (conteudo.delete) {
             exclusoes.push(conteudo.delete)
@@ -321,6 +324,7 @@ async function main() {
       rodadasVouc: require('../dados/vouc-rodadas'),
       socketSeguro: require('../dados/socket-seguro'),
       respostaPrefixo: require('../dados/resposta-prefixo'),
+      reacoesPalavras: { processar: (...args) => processarReacoes(...args) },
       moderacaoFigurinhas,
       moderacaoAntiflood: require('../dados/moderacao-antiflood'),
       moderacaoLimiteCaractere: require('../dados/moderacao-limitecaractere'),
@@ -359,6 +363,7 @@ async function main() {
     require('../dados/mensagens-enviadas').acompanharSocket(contexto.sock)
     vm.runInNewContext(fonte.slice(inicio, fim), contexto)
     return { eventos, exclusoes, protecoes, mapaAfk, mutados, polls, pollsEnviadas, voucRespostas, garticImagens, rankingsChamados, imagensTotag, downloadsTotag, respostasPrefixo, nukeMongo, registro, sock: contexto.sock,
+      reacoesEnviadas, definirReacoes(fn) { processarReacoes = fn },
       async enviarLote(messages, type = 'notify') {
         for (const fn of ouvintes.get('messages.upsert') || []) await fn({ messages, type })
       }, async enviar(texto, sender = `${comum}@s.whatsapp.net`, conteudo, fromMe = false, jidDestino = grupo) {
@@ -1254,6 +1259,45 @@ async function main() {
     fluxo.mapaAfk.set(comum, { desde: Date.now() - 60000 })
     await fluxo.enviar('pular')
     for (const evento of ['jogo', 'ia', 'resposta', 'afk-removido']) assert.ok(fluxo.eventos.includes(evento), evento)
+  })
+  await teste('reações: consulta pendente não bloqueia ranking, jogos ou IA', async () => {
+    const local = criarHandler()
+    let liberar, consultaIniciada = false
+    const consulta = new Promise(resolve => { liberar = resolve })
+    const p = require('../dados/reacoes-palavras').criarProcessador({ repositorio: { obter: () => { consultaIniciada = true; return consulta } } })
+    local.definirReacoes(p.processar)
+    await estado.definirLigado(true)
+    require('../prefixo').__definirPrefixoTeste('/')
+    await local.enviar('Ana chegou')
+    assert.equal(consultaIniciada, true)
+    for (const evento of ['ranking', 'jogo', 'ia']) assert.ok(local.eventos.includes(evento), evento)
+    assert.equal(local.reacoesEnviadas.length, 0)
+    liberar([{ termo: 'ana', emoji: '😀' }])
+    await new Promise(resolve => setImmediate(resolve))
+    assert.equal(local.reacoesEnviadas.length, 1)
+    assert.equal(local.reacoesEnviadas[0].text, '😀')
+    assert.equal(local.reacoesEnviadas[0].key.fromMe, false)
+  })
+  await teste('reações: moderação, OFF, mute, bot e comandos mantêm precedência', async () => {
+    const local = criarHandler()
+    let chamadas = 0
+    local.definirReacoes(async () => { chamadas++; return false })
+    await estado.definirLigado(false)
+    await local.enviar('ana')
+    assert.equal(chamadas, 0)
+    await estado.definirLigado(true)
+    await local.enviar('/menu')
+    await local.enviar('/inexistente ana')
+    await local.enviar('ana', `${comum}@s.whatsapp.net`, undefined, true)
+    local.mutados.set(`${comum}@s.whatsapp.net`, true)
+    await local.enviar('ana')
+    local.mutados.clear()
+    local.protecoes.antiLink = [grupo]
+    await local.enviar('ana https://exemplo.com')
+    assert.equal(chamadas, 0)
+    local.protecoes.antiLink = []
+    await local.enviar('ana')
+    assert.equal(chamadas, 1)
   })
   console.log(`\n${passou} testes passaram.`)
 }

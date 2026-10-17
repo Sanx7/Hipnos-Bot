@@ -169,6 +169,7 @@ const { comandos } = require('./comandos-registry')
 // persistência e cache vivem todos em prefixo.js — aqui só consumimos.
 const prefixoComandos = require('./prefixo')
 const respostaPrefixo = require('./dados/resposta-prefixo')
+const reacoesPalavras = require('./dados/reacoes-palavras')
 const estadoBot = require('./estado-bot')
 const rodadasVouc = require('./dados/vouc-rodadas')
 const mensagensEnviadas = require('./dados/mensagens-enviadas')
@@ -852,6 +853,8 @@ async function montarBot() {
       const nomeComando = prefixoComandos.resolverNomeComando(text)
 
       if (nomeComando === null) {
+        // Acessório: não consome palpites/IA nem aguarda MongoDB ou Baileys.
+        void reacoesPalavras.processar(sock, msg, { tipo: type, texto: text, nomeComando })
         try {
           if (await processarMensagemLivre(sock, jid, msg, text)) return
         } catch (errPalpite) {

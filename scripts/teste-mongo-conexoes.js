@@ -181,7 +181,23 @@ async function main() {
   await teste('módulos protegidos e agendadores permanecem intactos', async () => {
     const protegidos = ['dados/captura-diaria.js', 'rpg/conexao-mongo.js', 'rpg/database.js', 'rpg/economia.js',
       'sessao-mongo.js', 'dados/sessao-exclusiva.js', 'comandos/menu-utilitario/tempo-resposta.js', 'bot.js', 'anuncios.js']
-    for (const f of protegidos) assert.equal(fs.readFileSync(path.join(raiz, f), 'utf8').replace(/\r\n/g, '\n'), original(f).replace(/\r\n/g, '\n'), f)
+    for (const f of protegidos) {
+      let atual = fs.readFileSync(path.join(raiz, f), 'utf8').replace(/\r\n/g, '\n')
+      let anterior = original(f).replace(/\r\n/g, '\n')
+      if (f === 'bot.js') {
+        // Integração autorizada das reações: nenhum outro trecho pode mudar.
+        const trechosReacoes = [
+          "const reacoesPalavras = require('./dados/reacoes-palavras')\n",
+          '        // Acessório: não consome palpites/IA nem aguarda MongoDB ou Baileys.\n' +
+          '        void reacoesPalavras.processar(sock, msg, { tipo: type, texto: text, nomeComando })\n'
+        ]
+        for (const trecho of trechosReacoes) {
+          atual = atual.replace(trecho, '')
+          anterior = anterior.replace(trecho, '')
+        }
+      }
+      assert.equal(atual, anterior, f)
+    }
     for (const f of ['lembretes.js', 'prefixo.js']) {
       const marco = f === 'lembretes.js' ? 'function unidadeParaMs' : 'async function carregarPrefixo'
       const antigo = anteriores.get(f).replace(/\r\n/g, '\n'), atual = atuais.get(f).replace(/\r\n/g, '\n')

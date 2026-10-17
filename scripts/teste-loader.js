@@ -76,7 +76,7 @@ for (const cmd of [require('../comandos/menu-brincadeiras/enquete')[0], require(
     if (comandos.get(nome) !== cmd) process.exitCode = 1
   }
 }
-for (const cmd of [...require('../comandos/admin/figurinhas-moderacao'), ...require('../comandos/admin/advertencias-consultas')]) {
+for (const cmd of [...require('../comandos/admin/figurinhas-moderacao'), ...require('../comandos/admin/advertencias-consultas'), ...require('../comandos/admin/emojis-palavras')]) {
   if (comandos.get(cmd.nome) !== cmd) {
     console.error(`❌ Implementação inesperada para /${cmd.nome}`)
     process.exitCode = 1

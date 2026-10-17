@@ -40,6 +40,11 @@ module.exports = {
 
 👥 GESTÃO DE MEMBROS
 
+😀 ${prefixo}emojiregistrar <palavra ou nome> <emoji>
+➥ Cadastra ou atualiza uma reação automática neste grupo (ADM ou dono).
+➥ ${prefixo}emojiremover <palavra ou nome> · ${prefixo}emojilista
+➥ Até 50 registros por grupo; palavras inteiras, sem distinguir maiúsculas.
+
 🛡️ ${prefixo}antigolpe on · off · status (também ${prefixo}antiscam · ${prefixo}antifraude)
 ➥ ${prefixo}antigolpe modo alerta · apagar · adv
 ➥ ${prefixo}antigolpe sensibilidade baixa · media · alta

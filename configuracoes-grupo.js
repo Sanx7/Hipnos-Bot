@@ -513,6 +513,8 @@ async function antiApagadaHabilitada(grupoIdBruto) {
 }
 
 module.exports = {
+  // Reutiliza a conexão/coleção existente para extensões por grupo.
+  obterColecaoConfiguracoes,
   obterConfiguracoes,
   definirWelcome,
   welcomeHabilitado,
