@@ -70,6 +70,7 @@ function ambiente(perfil, fonte) {
       if (nome.endsWith('/config')) return { limparNumero, ehDonoDoBot: () => false }
       if (nome.endsWith('/lid')) return { resolverLidParaTelefone: async () => null, resolverNumeroAlvo: async () => ({ numero: '', via: null }) }
       if (nome === './temas-vip') return {}
+      if (nome === './dados/afk-migracao') return require('../dados/afk-migracao')
       if (nome === '@whiskeysockets/baileys') return { normalizeMessageContent: m => m }
       if (['node:async_hooks', 'node:crypto', 'crypto'].includes(nome)) return require(nome)
       throw new Error('Importação não permitida no teste: ' + nome)
@@ -141,7 +142,15 @@ async function main() {
         destino.comandos += t.estado.comandos.length
         destino.bytesBson += t.estado.comandos.reduce((s, c) => s + BSON.serialize(c).length, 0)
       }
-      const negocio = t => t.estado.comandos.filter(c => !c.ping)
+      if (arquivo === 'afk.js') {
+        const indice = contextos[1].estado.comandos.find(c => c.createIndexes)
+        assert.equal(indice.createIndexes, 'afks_por_grupo')
+        assert.deepEqual(indice.indexes, [{ key: { grupo_id: 1, numero: 1 }, unique: true, name: 'idx_afks_grupo_numero' }])
+      }
+      // AFK muda intencionalmente de coleção/índice; a carga e o cliente
+      // continuam equivalentes. Demais módulos mantêm comparação integral.
+      const negocio = t => t.estado.comandos.filter(c => !c.ping && (arquivo !== 'afk.js' || !c.createIndexes))
+        .map(c => arquivo === 'afk.js' && c.find ? { ...c, find: 'afk_escopo_validado' } : c)
       assert.deepEqual(negocio(contextos[0]), negocio(contextos[1]))
     })
   }
@@ -185,6 +194,16 @@ async function main() {
       let atual = fs.readFileSync(path.join(raiz, f), 'utf8').replace(/\r\n/g, '\n')
       let anterior = original(f).replace(/\r\n/g, '\n')
       if (f === 'bot.js') {
+        // Somente o bloco AFK mudou seu escopo; teste-afk.js executa o bloco
+        // real em dois grupos. O restante do listener/lifecycle segue idêntico.
+        const semBlocoAfk = texto => {
+          const inicio = texto.indexOf('      // 💤━━━━━━━━', texto.indexOf('const podeInteragir ='))
+          const fim = texto.indexOf('      // 💤━━━━━━━━', inicio + 25)
+          assert.ok(inicio >= 0 && fim > inicio)
+          return texto.slice(0, inicio) + texto.slice(fim)
+        }
+        atual = semBlocoAfk(atual)
+        anterior = semBlocoAfk(anterior)
         // Integração autorizada das reações: nenhum outro trecho pode mudar.
         const trechosReacoes = [
           "const reacoesPalavras = require('./dados/reacoes-palavras')\n",

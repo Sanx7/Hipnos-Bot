@@ -2,7 +2,7 @@
 // 💤 AFK — Marca o usuário como ausente (/afk)
 // ============================================
 // Uso: /afk <motivo opcional>
-//   - Marca o remetente como AFK no MongoDB (collection "afks", via afk.js);
+//   - Marca o remetente apenas no grupo/conversa atual (via afk.js);
 //   - Se já estava AFK, atualiza motivo e timestamp;
 //   - Motivo padrão quando não informado: "Ausente no momento".
 //
@@ -16,7 +16,7 @@ const { definirAfk, resolverJidAfk, MOTIVO_PADRAO } = require('../afk')
 
 module.exports = {
   nome: 'afk',
-  descricao: 'Marca você como ausente. Uso: /afk <motivo opcional>',
+  descricao: 'Marca você como ausente nesta conversa. Uso: /afk <motivo opcional>',
 
   async executar(sock, jid, msg, text) {
     try {
@@ -32,22 +32,19 @@ module.exports = {
         try {
           participantes = (await sock.groupMetadata(jid))?.participants || null
         } catch (errMeta) {
-          console.error('[afk] sem metadados do grupo p/ resolver @lid do remetente:', errMeta?.message || errMeta)
+          console.warn('[afk] Metadados indisponíveis para identificar remetente.')
         }
       }
       const { numero, via } = await resolverJidAfk(participantes, sender)
-      if (!numero) return
-      if (String(sender || '').endsWith('@lid')) {
-        if (via) console.log(`[afk] 🪪 remetente resolvido de @lid p/ o número real ${numero} via ${via}`)
-        else console.warn('[afk] 🪪 @lid do remetente não resolvível — gravando o LID cru (best-effort)')
-      }
+      if (!numero || !via) return await sock.sendMessage(jid, { text: '🪪 Não consegui comprovar seu número de WhatsApp. Tente novamente quando sua identificação estiver disponível; nenhum AFK foi alterado.' }, { quoted: msg })
 
       // Motivo: tudo depois de "/afk " (o texto chega cru ao comando).
       // Extrai o 1º token (o nome do comando) e junta o resto.
       const partes = String(text || '').trim().split(/\s+/)
       const motivo = partes.slice(1).join(' ').trim() || MOTIVO_PADRAO
 
-      const registro = await definirAfk(numero, motivo)
+      const escopoAfk = jid.endsWith('@g.us') ? jid : `${numero}@s.whatsapp.net`
+      const registro = await definirAfk(escopoAfk, numero, motivo)
 
       await sock.sendMessage(jid, {
         text:
@@ -57,7 +54,7 @@ module.exports = {
           `qualquer mensagem por aqui, removo o status automaticamente. 🌙`
       }, { quoted: msg })
     } catch (erro) {
-      console.error('⚠️ [afk] falha ao ativar o modo ausente:', erro?.message || erro)
+      console.warn('[afk] Falha ao ativar o modo ausente.')
       await sock.sendMessage(jid, {
         text: '❌ Não consegui registrar seu status AFK agora (falha no banco de dados). Tente de novo em instantes.'
       }, { quoted: msg }).catch(() => {})

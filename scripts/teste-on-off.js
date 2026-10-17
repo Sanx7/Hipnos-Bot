@@ -349,8 +349,14 @@ async function main() {
       extrairTextoComando: require('../dados/texto-comando').extrairTextoComando,
       comandos: registro,
       resolverJidAfk: async (_, jid) => ({ numero: require('../config').limparNumero(jid), via: 'direto' }),
-      buscarVariosAfk: async () => { eventos.push('afk'); return mapaAfk },
-      removerAfk: async () => eventos.push('afk-removido'),
+      buscarVariosAfk: async (escopo, numeros) => {
+        assert.ok(/@(?:g\.us|s\.whatsapp\.net)$/.test(escopo)); assert.ok(Array.isArray(numeros))
+        eventos.push('afk'); return mapaAfk
+      },
+      removerAfk: async (escopo, numero) => {
+        assert.ok(/@(?:g\.us|s\.whatsapp\.net)$/.test(escopo)); assert.equal(typeof numero, 'string')
+        eventos.push('afk-removido'); return mapaAfk.get(numero) || null
+      },
       formatarDuracao: () => '1 minuto', MOTIVO_PADRAO: 'ausente',
       prefixoComandos: require('../prefixo'),
       processarMensagemLivre: async (...args) => {

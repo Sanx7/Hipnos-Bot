@@ -6,7 +6,7 @@
 // mesmo padrão de conexão já usado no resto do projeto
 // (database.js, vip.js, configuracoes-grupo.js):
 //   - Collection dedicada: banco "whatsapp" (MONGODB_DB), collection
-//     "afks" (sobrescrevível via MONGODB_COLLECTION_AFK);
+//     "afks_por_grupo" (base legada via MONGODB_COLLECTION_AFK + sufixo);
 //   - SINGLETON: um único MongoClient criado uma vez no processo;
 //   - Ping inicial preservado; recuperação da rede pelo driver;
 //   - ERROS RUIDOSOS: falha de conexão é logada com causa provável e
@@ -18,15 +18,18 @@
 //
 // ESTRUTURA DO DOCUMENTO (collection "afks"):
 //   {
-//     numero: "5511999999999",   // apenas dígitos (único)
+//     grupo_id: "12036...@g.us", // grupo; privado usa o chat PN canônico
+//     numero: "5511999999999",   // telefone comprovado, nunca LID cru
 //     motivo: "Ausente no momento",
 //     desde:  1700000000000      // início da ausência (ms)
 //   }
 //
-// ÍNDICE ÚNICO: { numero: 1 } — 1 documento por usuário.
+// Coleção ativa: <MONGODB_COLLECTION_AFK>_por_grupo.
+// ÍNDICE ÚNICO: { grupo_id: 1, numero: 1 }. Coleção legada intacta.
 // ============================================================
 
 const { MongoClient } = require('mongodb')
+const { nomesAfk, prepararColecaoAfk } = require('./dados/afk-migracao')
 
 // ⚙️ config.js carrega o .env da raiz para o process.env (mesmo padrão de
 // vip.js / configuracoes-grupo.js) — garante que MONGODB_URI exista mesmo
@@ -35,6 +38,7 @@ require('./config')
 
 const NOME_BANCO = process.env.MONGODB_DB || 'whatsapp'
 const NOME_COLECAO = process.env.MONGODB_COLLECTION_AFK || 'afks'
+const NOME_COLECAO_GRUPOS = nomesAfk(NOME_COLECAO).ativo
 
 // Motivo padrão quando o usuário usa /afk sem argumento.
 const MOTIVO_PADRAO = 'Ausente no momento'
@@ -80,25 +84,20 @@ async function inicializarColecaoAfk() {
   }
 
   try {
-    console.log(`🗄️ [afk] conectando ao MongoDB (db: ${NOME_BANCO}, collection: ${NOME_COLECAO})...`)
+    console.log('[afk] Conectando ao armazenamento por grupo...')
     clienteMongo = new MongoClient(uri, { serverSelectionTimeoutMS: 15000 })
     await clienteMongo.connect()
     await clienteMongo.db('admin').command({ ping: 1 })
 
-    const colecao = clienteMongo.db(NOME_BANCO).collection(NOME_COLECAO)
-
-    // Índice único: 1 registro de AFK por número (evita duplicados)
-    await colecao.createIndex(
-      { numero: 1 },
-      { unique: true, name: 'idx_afks_numero' }
-    )
+    // Não remove o índice único global nem modifica documentos da origem.
+    const colecao = await prepararColecaoAfk(clienteMongo.db(NOME_BANCO), NOME_COLECAO)
 
     colecaoCacheada = colecao
     console.log('✅ [afk] MongoDB conectado — o status AFK persiste entre redeploys.')
     return colecaoCacheada
   } catch (erro) {
     console.error('════════════════════════════════════════════════════════')
-    console.error('💥 FALHA AO CONECTAR AO MONGODB (AFKs):', erro?.message)
+    console.error('[afk] Falha de inicialização do armazenamento por grupo.')
     console.error('   Causas mais comuns:')
     console.error('   → MONGODB_URI com usuário/senha/cluster errados')
     console.error('   → IP não liberado no Atlas: Network Access → 0.0.0.0/0')
@@ -112,16 +111,25 @@ async function inicializarColecaoAfk() {
   }
 }
 // -------------------------------------------------------------------
-// 💤 definirAfk(numero, motivo): marca (ou atualiza) o usuário como AFK.
+// 💤 definirAfk(grupoId, numero, motivo): AFK apenas nesta conversa.
 // Se já estava AFK, sobrescreve motivo e "desde" (upsert atômico).
 // Retorna o documento gravado. Lança em falha de conexão (o chamador
 // trata — comando /afk ou bot.js).
 // -------------------------------------------------------------------
-async function definirAfk(numeroBruto, motivo) {
-  const numero = String(numeroBruto || '').replace(/\D/g, '')
-  if (!numero) return null
+function validarEscopo(grupoId) {
+  if (typeof grupoId !== 'string' || !/^(?:\d+(?:-\d+)?@g\.us|\d+@s\.whatsapp\.net)$/.test(grupoId)) throw new Error('Escopo AFK inválido')
+  return grupoId
+}
+function validarNumero(numero) {
+  if (typeof numero !== 'string' || !/^\d+$/.test(numero)) throw new Error('Identidade AFK inválida')
+  return numero
+}
+async function definirAfk(grupoId, numeroBruto, motivo) {
+  const grupo_id = validarEscopo(grupoId)
+  const numero = validarNumero(numeroBruto)
 
   const documento = {
+    grupo_id,
     numero,
     motivo: String(motivo || '').trim() || MOTIVO_PADRAO,
     desde: Date.now()
@@ -129,7 +137,7 @@ async function definirAfk(numeroBruto, motivo) {
 
   const colecao = await obterColecaoAfk()
   await colecao.updateOne(
-    { numero },
+    { grupo_id, numero },
     { $set: documento },
     { upsert: true }
   )
@@ -138,48 +146,49 @@ async function definirAfk(numeroBruto, motivo) {
 }
 
 // -------------------------------------------------------------------
-// 👋 removerAfk(numero): remove o status AFK do usuário e devolve o
+// 👋 removerAfk(grupoId, numero): remove só nesta conversa e devolve o
 // documento removido (com motivo e "desde", usados pela mensagem de
 // "bem-vindo de volta"). Retorna null se não estava AFK.
 // Lança em falha de conexão.
 // -------------------------------------------------------------------
-async function removerAfk(numeroBruto) {
-  const numero = String(numeroBruto || '').replace(/\D/g, '')
-  if (!numero) return null
+async function removerAfk(grupoId, numeroBruto) {
+  const grupo_id = validarEscopo(grupoId)
+  const numero = validarNumero(numeroBruto)
 
   const colecao = await obterColecaoAfk()
-  const removido = await colecao.findOneAndDelete({ numero })
+  const removido = await colecao.findOneAndDelete({ grupo_id, numero })
   // MongoDB devolve { value: doc } em versões antigas do driver e o doc
   // direto nas novas — cobrimos os dois formatos.
-  return removido?.value || removido || null
+  return removido && Object.hasOwn(removido, 'value') ? removido.value : removido || null
 }
 
 // -------------------------------------------------------------------
-// 🔎 buscarAfk(numero): doc do usuário (ou null se não está AFK).
+// 🔎 buscarAfk(grupoId, numero): nunca consulta outros grupos ou legados.
 // -------------------------------------------------------------------
-async function buscarAfk(numeroBruto) {
-  const numero = String(numeroBruto || '').replace(/\D/g, '')
-  if (!numero) return null
+async function buscarAfk(grupoId, numeroBruto) {
+  const grupo_id = validarEscopo(grupoId)
+  const numero = validarNumero(numeroBruto)
   const colecao = await obterColecaoAfk()
-  return colecao.findOne({ numero })
+  return colecao.findOne({ grupo_id, numero })
 }
 
 // -------------------------------------------------------------------
-// 🔎 buscarVariosAfk(numeros[]): checa TODOS os candidatos (remetente +
+// 🔎 buscarVariosAfk(grupoId, numeros[]): candidatos da conversa atual.
 // mencionados/respondidos) com UMA ÚNICA consulta $in — eficiência
 // exigida pelo bloco do bot.js (1 ida ao Mongo por mensagem recebida).
 // Retorna um Map { numero → documento } apenas com quem ESTÁ AFK.
 // -------------------------------------------------------------------
-async function buscarVariosAfk(numeros) {
+async function buscarVariosAfk(grupoId, numeros) {
+  const grupo_id = validarEscopo(grupoId)
   const lista = [...new Set((numeros || [])
-    .map((n) => String(n || '').replace(/\D/g, ''))
+    .map((n) => n ? validarNumero(n) : '')
     .filter(Boolean))]
 
   const mapa = new Map()
   if (!lista.length) return mapa
 
   const colecao = await obterColecaoAfk()
-  const documentos = await colecao.find({ numero: { $in: lista } }).toArray()
+  const documentos = await colecao.find({ grupo_id, numero: { $in: lista } }).toArray()
   for (const doc of documentos) mapa.set(doc.numero, doc)
   return mapa
 }
@@ -189,11 +198,8 @@ async function buscarVariosAfk(numeros) {
 // real "@s.whatsapp.net" ou LID "@lid") para o NÚMERO REAL indexado na
 // base de AFKs — mesmo padrão de VIP/RPG//ban//adv (lid.js).
 // Ordem (igual ao resolverNumeroAlvo): direto → metadados → mapeamento.
-// Se o LID não for resolvível agora, devolve { numero: <lid cru>,
-// via: null } para o chamador decidir (o bloco do bot.js usa o cru
-// como best-effort, igual ao comportamento anterior — só que agora
-// TENTA os metadados antes, que era o que faltava).
-// Nunca lança: em falha devolve o cru com via: null.
+// Sem prova de telefone, não usa LID cru como se fosse PN.
+// Nunca lança: em falha devolve numero vazio e via null.
 // -------------------------------------------------------------------
 function obterResolverNumeroAlvo() {
   return require('./lid').resolverNumeroAlvo
@@ -203,12 +209,11 @@ async function resolverJidAfk(participants, jidBruto) {
   try {
     const resolver = obterResolverNumeroAlvo()
     const { numero, via } = await resolver(participants, jidBruto)
-    if (numero) return { numero, via }
+    if (numero && via) return { numero, via }
   } catch (err) {
-    console.error('[afk] ⚠️ falha ao resolver JID via lid.js:', err?.message || err)
+    console.warn('[afk] Identidade indisponível; status preservado.')
   }
-  const cru = String(jidBruto || '').split('@')[0].split(':')[0].replace(/\D/g, '')
-  return { numero: cru, via: null }
+  return { numero: '', via: null }
 }
 
 // -------------------------------------------------------------------
@@ -264,6 +269,7 @@ module.exports = {
   MOTIVO_PADRAO,
   NOME_BANCO,
   NOME_COLECAO,
+  NOME_COLECAO_GRUPOS,
   __definirColecaoTeste
 }
 

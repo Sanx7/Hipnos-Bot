@@ -717,19 +717,14 @@ async function montarBot() {
       //      (contextInfo.participant do quoted) está AFK? → avisa o chat,
       //      cobrindo TODAS as pessoas AFK da mesma mensagem, não só a 1ª.
       //
-      // 🏠 PRIVADO: não há menção em conversa individual, mas a remoção
-      // automática continua valendo. DECISÃO DE DESIGN (documentada): no
-      // privado, quando alguém escreve PARA um usuário AFK (sem comando),
-      // o bot também avisa que ele está ausente — é o análogo natural da
-      // menção no grupo e evita a impressão de que a pessoa te ignorou.
+      // Cada grupo tem AFKs independentes. Privados usam uma conversa PN
+      // própria: nunca consultam nem removem um AFK de grupo.
       //
       // ⚡ EFICIÊNCIA: remetente + todos os alvos (mencionados/respondidos)
       // são resolvidos e consultados com UMA ÚNICA busca $in (buscarVariosAfk).
       // 🪪 LID: menções e remetente podem chegar como "@lid" — resolvemos
-      // para o número real via afk.js→lid.js (metadados + mapeamento, com
-      // cache) antes de consultar, já que a base guarda números reais
-      // (mesmo padrão de VIP/RPG//ban//adv). Sem os metadados, o @lid cru
-      // nunca bateria com o número salvo e o aviso não era enviado.
+      // para o número real via afk.js→lid.js. Sem prova, não compara LID cru
+      // com números de telefone e mantém o status inalterado.
       // 🛡️ Nada aqui lança: falha de banco/rede é logada e o fluxo segue.
       try {
         // 📋 Candidatos: remetente + jids vindos de menções/reply
@@ -741,7 +736,7 @@ async function montarBot() {
         const jidsAlvoBrutos = [
           ...(contextoInfo?.mentionedJid || []),
           // Reply sem menção explícita: o autor da mensagem citada
-          ...(contextoInfo?.participant && !contextoInfo.mentionedJid?.length
+          ...(contextoInfo?.participant
             ? [contextoInfo.participant]
             : [])
         ].filter(Boolean)
@@ -757,40 +752,38 @@ async function montarBot() {
           try {
             participantesAfk = (await sock.groupMetadata(jid))?.participants || null
           } catch (errMetaAfk) {
-            console.error('[afk] sem metadados do grupo p/ resolver @lid:', errMetaAfk?.message || errMetaAfk)
+            console.warn('[afk] Metadados indisponíveis para consultar identidades.')
           }
         }
 
-        // 🪪 Resolve LID → número real (best-effort; sem mapeamento, usa o cru)
+        // 🪪 Só inclui números comprovados por PN/metadados/sessão.
         const numerosAlvo = []
         for (const jidAlvo of jidsAlvoBrutos) {
-          const { numero, via } = await resolverJidAfk(participantesAfk, jidAlvo)
+          const { numero } = await resolverJidAfk(participantesAfk, jidAlvo)
           if (!numero) continue
-          if (String(jidAlvo).endsWith('@lid')) {
-            if (via) console.log(`[afk] 🪪 menção resolvida de @lid p/ o número real ${numero} via ${via}`)
-            else console.warn('[afk] 🪪 menção @lid não resolvível — comparando o LID cru (best-effort)')
-          }
           numerosAlvo.push(numero)
         }
 
         const { numero: numeroRemetente } = await resolverJidAfk(participantesAfk, sender)
         // Só é "o próprio /afk" se for exatamente o comando (não /afkxyz etc.)
-        const ehComandoAfk = /^\/afk(\s|$)/i.test(text.trim())
+        await prefixoComandos.obterPrefixo()
+        const ehComandoAfk = prefixoComandos.resolverNomeComando(text) === 'afk'
+        const escopoAfk = jid.endsWith('@g.us') ? jid : numeroRemetente ? `${numeroRemetente}@s.whatsapp.net` : null
 
         // ⚡ UMA consulta só: remetente + todos os alvos de uma vez
-        const afkMapa = await buscarVariosAfk(
+        const afkMapa = escopoAfk ? await buscarVariosAfk(escopoAfk,
           [numeroRemetente, ...numerosAlvo].filter(Boolean)
-        )
+        ) : new Map()
 
         // ── 1) 👋 O REMETENTE estava AFK e voltou ──
         // Se a mensagem é o próprio /afk, NÃO removemos: o comando apenas
         // atualiza o motivo/timestamp (definirAfk cuida disso lá embaixo).
         const docRemetente = afkMapa.get(numeroRemetente)
         if (docRemetente && !(ehComandoAfk && jid === msg.key.remoteJid)) {
-          await removerAfk(numeroRemetente)
+          const removido = await removerAfk(escopoAfk, numeroRemetente)
           afkMapa.delete(numeroRemetente) // não avisar que ele "está ausente" na mesma msg
-          const tempoFora = formatarDuracao(Date.now() - (docRemetente.desde || Date.now()))
-          if (podeInteragir) await sock.sendMessage(jid, {
+          const tempoFora = formatarDuracao(Date.now() - (removido?.desde || Date.now()))
+          if (removido && podeInteragir) await sock.sendMessage(jid, {
             text:
               `👋 Bem-vindo(a) de volta, @${numeroRemetente}! ` +
               `Você estava ausente há *${tempoFora}*.`,
@@ -799,11 +792,8 @@ async function montarBot() {
         }
 
         // ── 2) 💤 ALVOS (mencionados/respondidos) que estão AFK ──
-        // Em grupo: apenas os mencionados/respondidos. No privado: DECISÃO
-        // documentada acima — qualquer mensagem PARA um usuário AFK avisa.
-        const alvosParaAvisar = jid.endsWith('@g.us')
-          ? numerosAlvo
-          : [...numerosAlvo, numeroRemetente].filter((n) => n !== numeroRemetente)
+        // Somente candidatos da conversa atual; aliases repetidos geram um aviso.
+        const alvosParaAvisar = [...new Set(numerosAlvo)]
 
         const avisos = []
         for (const numeroAlvo of alvosParaAvisar) {
@@ -826,7 +816,7 @@ async function montarBot() {
         }
       } catch (erroAfk) {
         // 🛡️ A checagem de AFK NUNCA derruba o listener nem o fluxo de comandos
-        console.error('⚠️ [afk] falha na checagem de AFK (fluxo segue normal):', erroAfk?.message || erroAfk)
+        console.warn('[afk] Falha na consulta; fluxo normal preservado.')
       }
       // 💤━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
