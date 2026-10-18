@@ -100,7 +100,7 @@ async function obterFotoCitada(msg) {
   return { buffer }
 }
 
-async function gerarThumbnailJpeg(buffer) {
+async function gerarThumbnailJpeg(buffer, gun = false) {
   const id = `efv-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
   const entrada = path.join(os.tmpdir(), `${id}.png`)
   const saida = path.join(os.tmpdir(), `${id}-thumb.jpg`)
@@ -109,8 +109,8 @@ async function gerarThumbnailJpeg(buffer) {
     await new Promise((resolver) => {
       execFile(
         caminhoFfmpeg(),
-        ['-y', '-nostdin', '-i', entrada, '-vf', 'scale=64:-1', '-vframes', '1', saida],
-        { timeout: TIMEOUT_THUMB_MS, maxBuffer: 10 * 1024 * 1024 },
+        ['-y', '-nostdin', ...(gun ? ['-threads', '1'] : []), '-i', entrada, '-vf', 'scale=64:-1', '-vframes', '1', ...(gun ? ['-threads', '1', '-filter_threads', '1'] : []), saida],
+        { timeout: TIMEOUT_THUMB_MS, maxBuffer: gun ? 65536 : 10 * 1024 * 1024, ...(gun ? { killSignal: 'SIGKILL', windowsHide: true } : {}) },
         () => resolver()
       )
     })
@@ -119,7 +119,8 @@ async function gerarThumbnailJpeg(buffer) {
       if (jpeg.length > 0) return jpeg.toString('base64')
     }
   } catch (err) {
-    console.error('[efeitos-visuais] thumb falhou:', err?.message || err)
+    if (gun) console.error('[gun]', { evento: 'miniatura_fallback' })
+    else console.error('[efeitos-visuais] thumb falhou:', err?.message || err)
   } finally {
     await apagarComRetry(entrada)
     await apagarComRetry(saida)
@@ -133,8 +134,8 @@ async function enviarVideo(sock, jid, msg, buffer, caption) {
   }, { quoted: msg })
 }
 
-async function enviarImagem(sock, jid, msg, buffer, caption) {
-  const jpegThumbnail = await gerarThumbnailJpeg(buffer)
+async function enviarImagem(sock, jid, msg, buffer, caption, gun = false) {
+  const jpegThumbnail = await gerarThumbnailJpeg(buffer, gun)
   return sock.sendMessage(jid, { image: buffer, caption, jpegThumbnail }, { quoted: msg })
 }
 
@@ -663,32 +664,38 @@ async function comporCerebro(bufferFoto) {
 }
 
 // --- 14. gun: mira sobre a foto ---
-async function comporGun(bufferFoto) {
-  const LADO = 480
-  return renderizador.renderizarPng(LADO, LADO, bufferFoto, (ctx, img) => {
-    const escala = Math.max(LADO / img.width, LADO / img.height)
-    ctx.drawImage(img, (LADO - img.width * escala) / 2, (LADO - img.height * escala) / 2, img.width * escala, img.height * escala)
-    const cx = LADO / 2 + ((bufferFoto.length % 61) - 30)
-    const cy = LADO / 2 + ((bufferFoto.length % 47) - 23)
-    ctx.strokeStyle = '#ff0000'
-    ctx.lineWidth = 5
-    ctx.beginPath()
-    ctx.arc(cx, cy, 70, 0, Math.PI * 2)
-    ctx.stroke()
-    ctx.beginPath()
-    ctx.arc(cx, cy, 40, 0, Math.PI * 2)
-    ctx.stroke()
-    ctx.beginPath()
-    ctx.moveTo(cx - 95, cy)
-    ctx.lineTo(cx + 95, cy)
-    ctx.moveTo(cx, cy - 95)
-    ctx.lineTo(cx, cy + 95)
-    ctx.stroke()
-    ctx.fillStyle = '#ff0000'
-    ctx.beginPath()
-    ctx.arc(cx, cy, 6, 0, Math.PI * 2)
-    ctx.fill()
-  })
+function comporGun(bufferFoto, reserva) {
+  return reserva ? reserva.renderizarPng('gun', bufferFoto) : renderizador.renderizarPng('gun', bufferFoto)
+}
+
+function comandoGun() {
+  const comando = comandoEstatico({ nome: 'gun', descricao: 'Mira sobre a foto (responda a foto).', legenda: '🎯 Na mira do limbo', compor: comporGun })
+  comando.executar = async (sock, jid, msg) => {
+    try {
+      await renderizador.executarExclusivo(async reserva => {
+        // Reserva ANTES de baixar; nenhuma chamada extra mantém buffers em fila.
+        const entrada = await obterFotoCitada(msg)
+        const tarefa = comporGun(entrada.buffer, reserva)
+        entrada.buffer = null
+        let saida = await tarefa
+        try {
+          reserva.verificarMemoria()
+          await enviarImagem(sock, jid, msg, saida, '🎯 Na mira do limbo', true)
+        }
+        finally { saida = null }
+      })
+    } catch (falha) {
+      const mensagens = {
+        GUN_OCUPADO: '⏳ O /gun está ocupado. Tente novamente quando a imagem atual terminar.',
+        GUN_MEMORIA: '⚠️ Memória insuficiente para o /gun agora. Tente novamente em instantes.',
+        GUN_DIMENSOES: '⚠️ Imagem grande demais para o /gun. Use até 8 megapixels (8.388.608 pixels), 8192 pixels por lado e 20 MB.'
+      }
+      console.error('[gun]', { evento: mensagens[falha?.code] ? 'recusado' : 'falha' })
+      try { await sock.sendMessage(jid, { text: mensagens[falha?.code] || avisoPara('gun', falha) }, { quoted: msg }) }
+      catch (_) { /* socket indisponível: não propagar falha ao listener */ }
+    }
+  }
+  return comando
 }
 
 
@@ -722,7 +729,7 @@ module.exports = [
   comandoEstatico({ nome: 'conquista', descricao: 'Card conquista desbloqueada (responda a foto).', legenda: '🏆 Conquista desbloqueada!', compor: comporConquista }),
   comandoEstatico({ nome: 'impostor', descricao: 'Astronauta com a foto de visor (responda a foto).', legenda: '🚀 Ha um impostor...', compor: comporImpostor }),
   comandoEstatico({ nome: 'cerebro', descricao: 'Cerebro expandindo (responda a foto).', legenda: '🧠 Cerebro expandindo', compor: comporCerebro }),
-  comandoEstatico({ nome: 'gun', descricao: 'Mira sobre a foto (responda a foto).', legenda: '🎯 Na mira do limbo', compor: comporGun })
+  comandoGun()
 ]
 
 module.exports._injetar = (overrides) => {

@@ -3,6 +3,9 @@
 const assert = require('node:assert/strict')
 const { spawnSync } = require('node:child_process')
 const Module = require('node:module')
+const fs = require('node:fs')
+const os = require('node:os')
+const path = require('node:path')
 process.env.MONGODB_URI = ''
 process.env.MONGO_URI_RPG = ''
 process.env.DISABLE_CANVAS = 'true'
@@ -24,20 +27,63 @@ if (!modo) {
 async function main() {
   const carregar = Module._load
   let falharBackend = modo === 'falha-backend'
+  let falhaProcesso = ''
+  let falhaMiniatura = false
   let tentativasCanvas = 0
   Module._load = function (nome, ...args) {
     if (nome === 'canvas' && modo !== 'visual') {
       tentativasCanvas++
       throw new Error('Canvas antigo proibido')
     }
-    if (nome === '@napi-rs/canvas' && falharBackend) throw new Error('Binding indisponível')
+    if (nome === '@napi-rs/canvas') throw new Error('Binding nativo proibido no processo principal')
     return carregar.call(this, nome, ...args)
+  }
+  const cp = require('node:child_process')
+  const execOriginal = cp.execFile
+  let filhos = 0, picoWorker = 0, picoFfmpeg = 0, picoConjunto = 0
+  let picoPai = 0
+  const ativos = new Map()
+  function amostrar() {
+    const pai = process.memoryUsage().rss
+    picoPai = Math.max(picoPai, pai)
+    let soma = pai
+    if (process.platform === 'linux') for (const [pid, worker] of ativos) {
+      try {
+        const rss = Number(fs.readFileSync(`/proc/${pid}/status`, 'utf8').match(/^VmRSS:\s+(\d+)/m)?.[1] || 0) * 1024
+        soma += rss
+        if (!worker) picoFfmpeg = Math.max(picoFfmpeg, rss)
+      } catch (_) {}
+    }
+    picoConjunto = Math.max(picoConjunto, soma)
+  }
+  cp.execFile = (file, args, options, callback) => {
+    const worker = args.some(a => a.endsWith('renderizador-canvas-worker.js'))
+    if (worker) {
+      filhos++
+      assert.equal(options.env.MONGODB_URI, undefined)
+      assert.equal(options.env.NODE_OPTIONS, undefined)
+      if (falharBackend) {
+        const script = args[1], argumentos = args.slice(1)
+        args = ['-e', `const M=require('module'),load=M._load;M._load=function(n,...a){if(n==='@napi-rs/canvas')throw new Error('Binding ausente');return load.call(this,n,...a)};process.argv=[process.execPath,...${JSON.stringify(argumentos)}];require(${JSON.stringify(script)})`]
+      }
+      if (falhaProcesso === 'fatal') args = ['-e', 'process.kill(process.pid,"SIGKILL")']
+      if (falhaProcesso === 'timeout') { args = ['-e', 'setInterval(()=>{},1000)']; options = { ...options, timeout: 50 } }
+    }
+    if (!worker && falhaMiniatura) { file = process.execPath; args = ['-e', 'process.exit(7)'] }
+    const filho = execOriginal(file, args, options, (erro, stdout, stderr) => {
+      if (worker && !erro) picoWorker = Math.max(picoWorker, JSON.parse(stdout).picoRssBytes)
+      amostrar()
+      callback(erro, stdout, stderr)
+    })
+    if (filho.pid) ativos.set(filho.pid, worker)
+    filho.once('close', () => ativos.delete(filho.pid))
+    return filho
   }
   // Importar o comando não deve carregar nem exigir o novo binding.
   const efv = require('../comandos/menu-efeitos/efeitos-visuais')
   assert.equal(require.cache[require.resolve('@napi-rs/canvas')], undefined)
   const { Jimp, JimpMime } = require('jimp')
-  const { renderizarPng } = require('../func/renderizador-canvas')
+  const { executarExclusivo, LIMITES } = require('../func/renderizador-canvas')
   const foto = await new Jimp({ width: 480, height: 480, color: 0x3366ccff }).getBuffer(JimpMime.png)
   const gun = efv.find(c => c.nome === 'gun')
   const msg = origem => ({ key: { id: 'offline' }, message: origem })
@@ -61,9 +107,9 @@ async function main() {
       assert.match(saidas[0].text, /Não consegui aplicar/)
       assert.equal(saidas[0].image, undefined)
       falharBackend = false
-      assert.ok(Buffer.isBuffer(await efv.compor.gun(foto)), 'fila recupera após falha do binding')
+      assert.ok(Buffer.isBuffer(await efv.compor.gun(foto)), 'reserva recupera após falha do filho')
     } finally { console.error = erroOriginal }
-    console.log('OK: binding ausente não quebra loader; erro amigável e recuperação sem fallback ao Canvas antigo.')
+    console.log('OK: filho com falha não quebra loader/bot; erro amigável e recuperação sem binding no pai.')
   }
 
   if (modo === 'comando') {
@@ -75,6 +121,8 @@ async function main() {
       assert.ok(Buffer.isBuffer(saida.image))
       assert.equal(saida.caption, '🎯 Na mira do limbo')
       assert.ok(saida.jpegThumbnail, 'miniatura explícita, sem geração automática da Baileys')
+      const thumb = await Jimp.read(Buffer.from(saida.jpegThumbnail, 'base64'))
+      assert.equal(thumb.width, 64, 'FFmpeg real deve gerar a miniatura, sem cair no fallback')
       assert.equal(chamadas[0][2].quoted, caso)
       const imagem = await Jimp.read(saida.image)
       assert.equal(imagem.width, 480)
@@ -92,18 +140,61 @@ async function main() {
       efv._injetar({ baixarMidia: async () => Buffer.from('imagem inválida') })
       assert.match((await executar(entrada))[0].text, /Não consegui aplicar/)
     } finally { console.error = erroOriginal }
-    assert.ok(Buffer.isBuffer(await efv.compor.gun(foto)), 'fila recupera após imagem inválida')
+    assert.ok(Buffer.isBuffer(await efv.compor.gun(foto)), 'reserva recupera após imagem inválida')
 
-    // Uma ativa, duas aguardando; excesso recusado sem iniciar outra decodificação.
-    let liberar, ativas = 0, pico = 0
+    // Uma ativa, NENHUMA aguardando, sem download adicional.
+    let liberar
     const portao = new Promise(resolve => { liberar = resolve })
-    const desenhar = async () => { ativas++; pico = Math.max(pico, ativas); await portao; ativas-- }
-    const tarefas = [0, 1, 2].map(() => renderizarPng(8, 8, foto, desenhar))
-    await assert.rejects(renderizarPng(8, 8, foto, desenhar), /ocupado/)
+    efv._injetar({ baixarMidia: async () => { downloads++; await portao; return foto } })
+    const pendente = gun.executar(sock, 'offline', entrada)
+    await new Promise(resolve => setImmediate(resolve))
+    const antes = downloads, antesFilhos = filhos
+    for (let i = 0; i < 3; i++) assert.match((await executar(entrada))[0].text, /ocupado/)
+    assert.equal(downloads, antes)
+    assert.equal(filhos, antesFilhos)
     liberar()
-    await Promise.all(tarefas)
-    assert.equal(pico, 1)
-    console.log('OK: reply/legenda, PNG 480x480, caption/quoted/thumbnail, recusas, fila limitada e recuperação.')
+    await pendente
+    // A reserva também permanece até terminar o envio (após render + FFmpeg).
+    let envioIniciado, terminarEnvio
+    const iniciou = new Promise(resolve => { envioIniciado = resolve })
+    const esperarEnvio = new Promise(resolve => { terminarEnvio = resolve })
+    const ativo = gun.executar({ sendMessage: async () => { envioIniciado(); await esperarEnvio } }, 'offline', entrada)
+    await iniciou
+    assert.match((await executar(entrada))[0].text, /ocupado/)
+    terminarEnvio(); await ativo
+    await assert.rejects(executarExclusivo(async () => { throw new Error('desenho') }), /desenho/)
+    const rss = process.memoryUsage, disponivel = process.availableMemory
+    try {
+      process.memoryUsage = () => ({ rss: LIMITES.rssBot + 1 })
+      assert.match((await executar(entrada))[0].text, /Memória insuficiente/)
+      process.memoryUsage = rss; process.availableMemory = () => LIMITES.livre - 1
+      assert.match((await executar(entrada))[0].text, /Memória insuficiente/)
+    } finally { process.memoryUsage = rss; process.availableMemory = disponivel }
+    const contador = filhos
+    for (const [w, h] of [[10000, 480], [4000, 3000]]) {
+      const enorme = Buffer.from(foto); enorme.writeUInt32BE(w, 16); enorme.writeUInt32BE(h, 20)
+      efv._injetar({ baixarMidia: async () => enorme })
+      assert.match((await executar(entrada))[0].text, /8 megapixels/)
+    }
+    assert.equal(filhos, contador, 'dimensões recusadas antes de iniciar decoder')
+    efv._injetar({ baixarMidia: async () => foto })
+    falhaMiniatura = true
+    const fallback = await executar(entrada)
+    falhaMiniatura = false
+    assert.ok(Buffer.isBuffer(fallback[0].image), 'falha de FFmpeg não impede envio da imagem')
+    assert.equal((await Jimp.read(Buffer.from(fallback[0].jpegThumbnail, 'base64'))).width, 8)
+    const antesTmp = fs.readdirSync(os.tmpdir()).filter(n => n.startsWith('hipnos-render-'))
+    for (const caso of ['fatal', 'timeout']) {
+      falhaProcesso = caso
+      assert.match((await executar(entrada))[0].text, /Não consegui aplicar/)
+      falhaProcesso = ''
+      assert.ok(Buffer.isBuffer(await efv.compor.gun(foto)))
+    }
+    await efv.compor.gun(foto)
+    assert.deepEqual(fs.readdirSync(os.tmpdir()).filter(n => n.startsWith('hipnos-render-')), antesTmp)
+    await gun.executar({ sendMessage: () => { throw new Error('socket indisponível') } }, 'offline', entrada)
+    assert.ok(Buffer.isBuffer(await efv.compor.gun(foto)), 'falha de envio não mantém reserva')
+    console.log('OK: visual/fluxo, nenhuma fila/download extra, reserva até envio, limites de memória/pixels, filho fatal/timeout e limpeza.')
   }
 
   if (modo === 'visual') {
@@ -150,22 +241,25 @@ async function main() {
   if (modo === 'memoria') {
     assert.equal(typeof global.gc, 'function', 'execute com --expose-gc')
     const mb = n => +(n / 1024 / 1024).toFixed(2)
-    // Entrada de 12 MP: maior que as fotos usuais e muito maior que a saída.
-    const grande = await new Jimp({ width: 4000, height: 3000, color: 0x3366ccff }).getBuffer(JimpMime.jpeg)
+    const grande = await new Jimp({ width: 4096, height: 2048, color: 0x3366ccff }).getBuffer(JimpMime.jpeg)
     global.gc()
     const inicial = process.memoryUsage().rss
-    let pico = inicial
-    for (let i = 0; i < 30; i++) {
-      const out = await efv.compor.gun(i % 5 === 0 ? grande : foto)
-      assert.equal(out.toString('ascii', 1, 4), 'PNG')
-      pico = Math.max(pico, process.memoryUsage().rss)
-      global.gc()
-    }
+    picoPai = inicial; picoConjunto = inicial
+    const timer = setInterval(amostrar, 5)
+    try { for (let i = 0; i < 20; i++) {
+      efv._injetar({ baixarMidia: async () => i % 4 === 0 ? grande : foto })
+      const saidas = await executar(reply({ imageMessage: {} }))
+      assert.ok(Buffer.isBuffer(saidas[0]?.image), 'render + FFmpeg devem completar')
+    } } finally { clearInterval(timer) }
+    global.gc()
     const final = process.memoryUsage().rss
-    pico = Math.max(pico, process.resourceUsage().maxRSS * 1024)
-    assert.ok(pico < 512 * 1024 * 1024, `pico isolado ${mb(pico)} MiB`)
+    // Worker termina antes do FFmpeg: não somar picos de fases que não coexistem.
+    // 64 MiB para FFmpeg se não medido; 32 MiB adicionais de margem operacional.
+    const estimativa = 287 * 1024 * 1024 + Math.max(0, picoPai - inicial) + Math.max(picoWorker, picoFfmpeg, 64 * 1024 * 1024) + 32 * 1024 * 1024
+    assert.ok(picoConjunto < 512 * 1024 * 1024, `pico amostrado ${mb(picoConjunto)} MiB`)
+    assert.ok(estimativa < 512 * 1024 * 1024, `estimativa com base 287 MiB ${mb(estimativa)} MiB`)
     assert.ok(final - inicial < 96 * 1024 * 1024, `crescimento retido ${mb(final - inicial)} MiB`)
-    console.log('OK: memória isolada, 30 renders (6 JPEG 4000x3000): ' + JSON.stringify({ node: process.version, plataforma: process.platform, rssInicialMiB: mb(inicial), picoProcessoMiB: mb(pico), rssFinalMiB: mb(final), crescimentoMiB: mb(final - inicial) }))
+    console.log('OK: memória, 20 fluxos completos (5 JPEG 4096x2048): ' + JSON.stringify({ node: process.version, plataforma: process.platform, rssInicialMiB: mb(inicial), picoPaiMiB: mb(picoPai), picoWorkerMiB: mb(picoWorker), picoFfmpegLinuxMiB: mb(picoFfmpeg), picoConjuntoAmostradoLinuxMiB: process.platform === 'linux' ? mb(picoConjunto) : null, rssFinalMiB: mb(final), estimativaComBase287MiB: mb(estimativa) }))
   }
   if (modo !== 'visual') assert.equal(tentativasCanvas, 0, 'gun não deve tentar node-canvas')
 }

@@ -7,11 +7,13 @@ usa o novo backend nos dois modos. Não é necessário alterar a flag.
 
 ## Implementação
 
-- `func/renderizador-canvas.js`: adaptador CommonJS com import sob demanda,
-  carregamento de imagem, callback de desenho 2D e exportação PNG. Uma tarefa
-  ativa e duas aguardando no máximo; excesso retorna o aviso de falha já usado
-  pelo comando. A fila avança também quando o binding, a imagem ou o desenho
-  falham. A superfície de saída é reduzida após a exportação para liberar pixels.
+- `func/renderizador-canvas.js`: adaptador CommonJS com uma reserva ativa e
+  **nenhuma fila**. A reserva cobre download, desenho, miniatura e envio. Chamadas
+  extras são recusadas antes de baixar mídia. O decoder Skia roda somente em
+  `func/renderizador-canvas-worker.js`, processo descartável sem credenciais.
+- O worker encerra antes de começar o FFmpeg. O sistema recupera suas alocações
+  nativas ao encerrar. Buffers de entrada/saída não são guardados pelo adaptador;
+  arquivos temporários são apagados em `finally`, inclusive após falha/timeout.
 - `/gun`: preserva saída PNG 480×480, escala cover centralizada, posição da mira
   baseada no tamanho do buffer ORIGINAL, vermelho, espessura 5, raios 70/40/6 e
   segmentos de 95 pixels. Mantém reply ou legenda de foto, caption, quoted,
@@ -19,9 +21,24 @@ usa o novo backend nos dois modos. Não é necessário alterar a flag.
 - Nenhum fallback para o Canvas antigo. Binding novo ausente/quebrado é tratado
   na execução; não impede o loader de registrar os outros comandos.
 
-O adaptador serializa somente a renderização. Downloads e miniaturas continuam
-no fluxo original. Não há mudanças em Baileys, MongoDB, Jimp, Sharp ou FFmpeg.
-Não há mudanças em `.env`, sessão, dados persistidos ou painel da hospedagem.
+Apenas o `/gun` usa essa reserva completa. Sua miniatura limita FFmpeg a uma
+thread, com timeout e limite de log; os outros comandos mantêm seus parâmetros.
+Não há mudanças em dependências, `.env`, sessão, dados persistidos ou painel.
+
+Para o orçamento de memória de 512 MiB, `/gun` verifica cabeçalhos antes de
+decodificar e aceita até 8.388.608 pixels, 8192 pixels por lado e 20 MiB de entrada.
+SVG não é aceito como foto. A geometria e os formatos raster usuais são preservados
+dentro desses limites; imagens maiores recebem aviso em vez de serem decodificadas.
+`image-size` já é uma dependência declarada do formatter e é resolvida a partir
+desse pacote, sem adicionar dependências ou depender do hoisting.
+
+A operação é recusada se o RSS do bot superar 320 MiB ou se
+`process.availableMemory()` informar menos de 160 MiB livres. A checagem ocorre
+antes do download, antes do worker e antes do FFmpeg. Isso é admissão conservadora,
+não uma reserva de RAM do sistema. O heap JS do worker tem teto de 64 MiB, que
+**não** limita a memória nativa; o teste Linux continua limitado por cgroup.
+
+Plano de implantação e reversão: [gun-latamhost.md](gun-latamhost.md).
 
 ## Dependências
 
@@ -58,19 +75,25 @@ antialiasing; não exige PNGs ou pixels idênticos entre Cairo e Skia.
 
 Também verifica envio com reply/legenda, quoted/caption/miniatura, falta de foto,
 mídia errada, entrada acima de 20 MiB, imagem corrompida, binding ausente,
-recuperação da fila, serialização e recusa de excesso. O Canvas antigo é proibido
+recuperação da reserva, recusa imediata sem download extra, bloqueio até o envio,
+dimensões e pouca memória, falha fatal/timeout do filho e limpeza. O Canvas antigo é proibido
 nesses cenários e usado apenas como referência no teste visual. Miniaturas usam
 FFmpeg real local, sem conexões externas.
 
-O cenário de memória roda em processo separado com `--expose-gc`: 30
-renderizações, incluindo seis JPEG de 4000×3000 (12 MP). Reporta RSS inicial,
-pico do processo (inclui alocações nativas) e RSS final; exige pico inferior a
-512 MiB e crescimento retido inferior a 96 MiB. Não mede heap JS apenas.
+O cenário de memória roda em processo separado com `--expose-gc`: 20 fluxos
+completos, incluindo cinco JPEG de 4096×2048 (limite de pixels), miniatura por
+FFmpeg real e envio simulado. Sem GC forçado entre chamadas. Reporta pico do
+worker e RSS inicial/final do pai; no Linux amostra também RSS do pai + filhos
+Node/FFmpeg em `/proc`. O cgroup do workflow cobre o conjunto, inclusive cache
+de arquivos e picos não capturados pela amostragem.
 
-Resultado local em Windows/Node.js 24.17.0: picos de 220,48 e 221,68 MiB em dois
-ensaios, sem crescimento retido positivo após GC. As comparações
-visuais apresentaram diferença média máxima de aproximadamente 0,20/255.
-Esses valores são sintéticos e podem variar entre execuções e plataformas.
+Também estima o total com base conservadora de 287 MiB para o bot, aumento do RSS
+do pai e maior pico entre worker/FFmpeg (não coexistem no `/gun`), mais 32 MiB de
+margem. Reserva 64 MiB estimados para FFmpeg se a medição não estiver disponível.
+Resultado local Windows/Node.js 24.17.0: pico do worker 94,75 MiB; estimativa total
+414,71 MiB. FFmpeg não teve RSS medido no Windows. As comparações visuais tiveram
+diferença média máxima inferior a 0,20/255. Esses números não são garantia de
+consumo real na LatamHost e devem ser revalidados em Linux nesta revisão.
 
 O teste de compatibilidade executa o loader e a inicialização em VM com
 fronteiras externas mockadas: Canvas ausente/quebrado, modo normal e comparação
@@ -106,10 +129,9 @@ de executar o script. Isso não grava `.env` nem configura a hospedagem.
    e com chamadas concorrentes. GC forçado e processo isolado não representam
    a produção. Conferir erros, limites, limpeza dos temporários e os 23 bloqueios.
 
-O limite de 20 MiB de entrada comprimida foi preservado; ele não limita pixels
-decodificados. A fila reduz concorrência, mas não garante que toda imagem caiba
-nos 512 MB junto ao bot. Imagens de dimensões extremas e o consumo do processo
-completo ainda precisam de validação Linux antes de liberar publicação. Um teto
-de pixels exigiria uma decisão adicional sobre os formatos/entradas aceitos.
+O teto de pixels agora limita a imagem aceita antes da decodificação. Processo
+descartável protege o bot de falhas nativas do renderizador, mas não torna um OOM
+global impossível. Outros comandos podem iniciar subprocessos simultaneamente;
+essa carga deve fazer parte da validação de capacidade antes da publicação.
 
 Não houve teste na LatamHost, WhatsApp ou MongoDB reais, commit, push ou deploy.

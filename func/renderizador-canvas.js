@@ -1,31 +1,81 @@
-// Renderização local com Skia. Não importa node-canvas, config ou serviços.
-// Uma tarefa ativa e até duas aguardando: limita concorrência e buffers retidos.
-let backend
-let ocupadas = 0
-let fila = Promise.resolve()
-const MAX_TAREFAS = 3
+// Uma operação por vez, sem fila; o binding nativo existe somente no filho.
+const fs = require('node:fs/promises')
+const os = require('node:os')
+const path = require('node:path')
+const { execFile } = require('node:child_process')
+const { createRequire } = require('node:module')
+const LIMITES = Object.freeze({ bytes: 20 * 1024 * 1024, pixels: 8 * 1024 * 1024,
+  lado: 8192, rssBot: 320 * 1024 * 1024, livre: 160 * 1024 * 1024, timeout: 15000 })
+let ocupado = false
 
-async function renderizarPng(largura, altura, bufferImagem, desenhar) {
-  if (ocupadas >= MAX_TAREFAS) throw new Error('Renderizador ocupado.')
-  ocupadas++
-  const anterior = fila
-  let liberar
-  fila = new Promise(resolve => { liberar = resolve })
-  let canvas
-  try {
-    await anterior
-    // Lazy: pacote/binding ausente não impede o loader nem outros comandos.
-    backend ||= require('@napi-rs/canvas')
-    const imagem = await backend.loadImage(bufferImagem)
-    canvas = backend.createCanvas(largura, altura)
-    await desenhar(canvas.getContext('2d'), imagem)
-    return canvas.toBuffer('image/png')
-  } finally {
-    // Libera a superfície de saída sem depender do próximo ciclo de GC.
-    if (canvas) { canvas.width = 1; canvas.height = 1 }
-    ocupadas--
-    liberar()
-  }
+function erro(codigo) { return Object.assign(new Error('Renderização indisponível.'), { code: codigo }) }
+
+function verificarMemoria() {
+  if (process.memoryUsage().rss > LIMITES.rssBot || process.availableMemory() < LIMITES.livre) throw erro('GUN_MEMORIA')
 }
 
-module.exports = { renderizarPng }
+function validarImagem(buffer) {
+  if (!Buffer.isBuffer(buffer) || !buffer.length) throw erro('GUN_IMAGEM')
+  if (buffer.length > LIMITES.bytes) throw erro('GUN_DIMENSOES')
+  // Dependência já declarada do formatter; não depender do hoisting do npm.
+  const requererFormatter = createRequire(require.resolve('wa-sticker-formatter/package.json'))
+  let dimensoes
+  try { dimensoes = requererFormatter('image-size').imageSize(buffer) } catch (_) { throw erro('GUN_IMAGEM') }
+  const { width: w, height: h, type } = dimensoes
+  if (type === 'svg' || !Number.isSafeInteger(w) || !Number.isSafeInteger(h) || w < 1 || h < 1) throw erro('GUN_IMAGEM')
+  if (w > LIMITES.lado || h > LIMITES.lado || w * h > LIMITES.pixels) throw erro('GUN_DIMENSOES')
+}
+
+async function executarExclusivo(trabalho) {
+  if (ocupado) throw erro('GUN_OCUPADO')
+  ocupado = true
+  let valida = true, renderizando = false
+  const reserva = {
+    verificarMemoria() {
+      if (!valida) throw erro('GUN_OCUPADO')
+      verificarMemoria()
+    },
+    async renderizarPng(efeito, bufferImagem) {
+      if (!valida || renderizando) throw erro('GUN_OCUPADO')
+      renderizando = true
+      let pasta
+      try {
+        verificarMemoria()
+        validarImagem(bufferImagem)
+        if (efeito !== 'gun') throw erro('GUN_IMAGEM')
+        pasta = await fs.mkdtemp(path.join(os.tmpdir(), 'hipnos-render-'))
+        const entrada = path.join(pasta, 'entrada'), saida = path.join(pasta, 'saida.png')
+        await fs.writeFile(entrada, bufferImagem, { mode: 0o600 })
+        bufferImagem = null
+        await new Promise((resolve, reject) => {
+          execFile(process.execPath, ['--max-old-space-size=64', path.join(__dirname, 'renderizador-canvas-worker.js'), efeito, entrada, saida],
+            { timeout: LIMITES.timeout, killSignal: 'SIGKILL', maxBuffer: 4096, windowsHide: true,
+              env: { PATH: process.env.PATH || '', SystemRoot: process.env.SystemRoot || '',
+                HOME: os.tmpdir(), TMPDIR: os.tmpdir(), TEMP: os.tmpdir(), TMP: os.tmpdir() } },
+            falha => falha ? reject(erro('GUN_RENDERIZACAO')) : resolve())
+        })
+        return await fs.readFile(saida)
+      } catch (falha) {
+        if (String(falha?.code || '').startsWith('GUN_')) throw falha
+        throw erro('GUN_RENDERIZACAO')
+      } finally {
+        bufferImagem = null
+        if (pasta) {
+          try { await fs.rm(pasta, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }) }
+          catch (_) { console.error('[renderizador]', { evento: 'limpeza_falhou' }) }
+        }
+        renderizando = false
+      }
+    }
+  }
+  try {
+    verificarMemoria()
+    return await trabalho(reserva)
+  } finally { valida = false; ocupado = false }
+}
+
+function renderizarPng(efeito, buffer) {
+  return executarExclusivo(reserva => reserva.renderizarPng(efeito, buffer))
+}
+
+module.exports = { executarExclusivo, renderizarPng, LIMITES }
