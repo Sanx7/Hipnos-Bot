@@ -134,6 +134,7 @@ jobs:
           trap relatar EXIT
           node -e 'if (process.platform !== "linux" || process.versions.node.split(".")[0] !== "24") process.exit(1); console.log(process.version, process.platform, process.arch)'
           if [ "$fase" = install ]; then
+            test -w /app
             # Rede só nesta fase para os pacotes públicos. Sem tokens/.npmrc.
             # Canvas antigo é necessário para a referência visual e o modo normal.
             node - <<'JS'
@@ -176,10 +177,14 @@ jobs:
             if [ "$fase" = test ]; then rede=none; fi
             nome="hipnos-gun-$fase"
             resultado=0
+            # O bind mount pertence ao runner. Usar seu UID/GID permite escrita
+            # sem restaurar capabilities nem ampliar permissões do diretório.
             docker run --name "$nome" --init --memory=512m --memory-swap=512m \
+              --user="$(id -u):$(id -g)" \
               --cpus=2 --pids-limit=128 --cgroupns=private --network="$rede" \
               --cap-drop=ALL --security-opt=no-new-privileges \
               --env CI=true --env MONGODB_URI= --env MONGO_URI_RPG= \
+              --env HOME=/tmp --env npm_config_cache=/tmp/npm-cache \
               --env DISABLE_CANVAS=true --env npm_config_userconfig=/dev/null \
               --mount "type=bind,src=$RUNNER_TEMP/gun-ci/source,dst=/app" \
               --mount "type=bind,src=$RUNNER_TEMP/gun-ci/offline.cjs,dst=/ci/offline.cjs,readonly" \
