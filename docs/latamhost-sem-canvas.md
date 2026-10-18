@@ -1,5 +1,9 @@
 # Execução temporária na LatamHost sem Canvas nativo
 
+Atualização: a primeira etapa da migração libera somente `/gun` por
+`@napi-rs/canvas`, inclusive com `DISABLE_CANVAS=true`. São agora 23 comandos
+bloqueados. Implementação, testes e limites: [gun-napi.md](gun-napi.md).
+
 O modo é opt-in: configure `DISABLE_CANVAS=true` nas variáveis do painel ou
 no `.env` e reinicie. Sem esse valor, os imports nativos e as implementações
 originais continuam ativos; erros de Canvas ausente/quebrado não são ocultados.
@@ -55,9 +59,9 @@ Nenhuma renderização, resolução ou qualidade foi alterada.
 | `comandos/menu-fig/attp.js` | `createCanvas`: frames PNG para figurinha animada | `attp` |
 | `comandos/menu-fig/brat.js` | `createCanvas`: capa e frames | `brat`, `bratvid` |
 | `comandos/menu-efeitos/efeitos-imagem.js` | `createCanvas`/`loadImage`: cards de par, recorte e composição de memes | `kiss`, `kissme`, `ship`, `shipme`, `clown`, `slap`, `spank`, `batslap`, `beautiful`, `bobross`, `ad`, `rip`, `apagar` |
-| `comandos/menu-efeitos/efeitos-visuais.js` | `createCanvas`/`loadImage`: frames animados, astronauta e mira | `glitchgif`, `rotacao3d`, `fogogif`, `derreter`, `naoolhe`, `falha`, `impostor`, `gun` |
+| `comandos/menu-efeitos/efeitos-visuais.js` | `createCanvas`/`loadImage`: frames animados e astronauta; `/gun` usa o novo adaptador | `glitchgif`, `rotacao3d`, `fogogif`, `derreter`, `naoolhe`, `falha`, `impostor` |
 
-São 24 comandos; seus nomes e aliases continuam registrados e respondem com
+São 23 comandos bloqueados; seus nomes e aliases continuam registrados e respondem com
 aviso de indisponibilidade, sem baixar mídia, reagir ou iniciar renderização.
 Inclui os aliases `deletar`, `delete-foto`, `lápide`, `lapide` e `nao-olhe`.
 
@@ -90,12 +94,12 @@ node scripts/teste-npm-shell-sem-canvas.js
 
 O primeiro executa o código de `bot.js` em VM com as fronteiras de Express,
 MongoDB/sessão/lease e criação de socket mockadas, bloqueando conexões de rede.
-Executa o loader real e verifica 594 entradas e listeners de inicialização.
+Executa o loader real e verifica o registro completo e listeners de inicialização.
 Cobre Canvas ausente, binding quebrado, modo normal com falhas explícitas e
-modo normal com Canvas nativo instalado. Verifica os 24 avisos e aliases,
+modo normal com Canvas nativo instalado. Verifica os 23 avisos e aliases,
 Jimp real e o carregamento indireto por jsdom.
 Compara também todas as entradas entre os modos, garantindo metadados idênticos
-e mudança de executor exclusivamente nos 24 comandos, além de oito casos de
+e mudança de executor exclusivamente nos 23 comandos bloqueados, além de oito casos de
 interpretação da variável de ambiente.
 
 O segundo executa o shell com ambientes de lifecycle simulados e confirma que

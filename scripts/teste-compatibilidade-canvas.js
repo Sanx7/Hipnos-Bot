@@ -10,7 +10,7 @@ const raiz = path.resolve(__dirname, '..')
 const dependentes = [
   'attp', 'brat', 'bratvid', 'kiss', 'kissme', 'ship', 'shipme', 'clown',
   'slap', 'spank', 'batslap', 'beautiful', 'bobross', 'ad', 'rip', 'apagar',
-  'glitchgif', 'rotacao3d', 'fogogif', 'derreter', 'naoolhe', 'falha', 'impostor', 'gun'
+  'glitchgif', 'rotacao3d', 'fogogif', 'derreter', 'naoolhe', 'falha', 'impostor'
 ]
 
 async function cenario(modo) {
@@ -108,7 +108,8 @@ async function cenario(modo) {
   assert.ok(envios.some(c => Buffer.isBuffer(c.image)), 'filtro Jimp continua gerando imagem')
   const visuais = require('../comandos/menu-efeitos/efeitos-visuais')
   assert.ok(Buffer.isBuffer(await visuais.compor.cerebro(foto)), 'composição Jimp continua ativa')
-  for (const nome of ['textopulsar', 'ondasanim', 'vhs', 'entidade', 'conquista', 'cerebro', 'tiktok', 'play', 'perfil']) {
+  assert.ok(Buffer.isBuffer(await visuais.compor.gun(foto)), '/gun renderiza com node-canvas ausente ou quebrado')
+  for (const nome of ['gun', 'textopulsar', 'ondasanim', 'vhs', 'entidade', 'conquista', 'cerebro', 'tiktok', 'play', 'perfil']) {
     assert.equal(typeof registro.get(nome)?.executar, 'function', nome)
     assert.doesNotMatch(registro.get(nome).executar.toString(), /DISABLE_CANVAS=true/, nome)
   }
@@ -116,7 +117,7 @@ async function cenario(modo) {
   const jsdom = require('jsdom')
   assert.equal(new jsdom.JSDOM('<p>ok</p>').window.document.querySelector('p').textContent, 'ok')
   assert.equal(tentativasCanvas, 1, 'somente jsdom tenta carregar Canvas; comandos não tentam')
-  console.log(`OK: ${modo}; ${registro.size} entradas, 24 recursos protegidos; startup offline até socket.`)
+  console.log(`OK: ${modo}; ${registro.size} entradas, 23 recursos protegidos e gun ativo; startup offline até socket.`)
 }
 
 if (process.argv[2]) {
@@ -150,9 +151,9 @@ if (process.argv[2]) {
       assert.deepEqual(metaCompativel, metaNormal, 'nomes, aliases e descrições preservados')
       if (fnNormal !== fnCompativel) alterados.add(metaNormal.nome)
     }
-    assert.deepEqual([...alterados].sort(), [...dependentes].sort(), 'exatamente os 24 comandos mudam de executor')
+    assert.deepEqual([...alterados].sort(), [...dependentes].sort(), 'exatamente os 23 comandos mudam de executor')
   }
-  console.log('OK: comparação integral do registro; exatamente 24 comandos alterados, demais executores e metadados idênticos.')
+  console.log('OK: comparação integral do registro; exatamente 23 comandos bloqueados, demais executores e metadados idênticos.')
   process.env.MONGODB_URI = ''
   process.env.MONGO_URI_RPG = ''
   process.env.DISABLE_CANVAS = 'false'
