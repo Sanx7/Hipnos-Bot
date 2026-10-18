@@ -1,0 +1,200 @@
+name: Gun - Linux Node 24 / 512 MB (manual)
+
+# Sem push, pull_request, schedule ou workflow_call.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gun-linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Obter somente o código, sem persistir credenciais Git
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /*
+            !.env*
+            !.npmrc
+            !auth/
+
+      - name: Preparar cópia descartável sem ambiente, sessões ou dados reais
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/gun-ci/source" "$RUNNER_TEMP/gun-ci/image"
+          python3 - <<'PY'
+          import os
+          import pathlib
+          import shutil
+          import subprocess
+
+          root = pathlib.Path(os.environ['GITHUB_WORKSPACE'])
+          target = pathlib.Path(os.environ['RUNNER_TEMP']) / 'gun-ci/source'
+          files = subprocess.check_output(['git', 'ls-files', '-z'], cwd=root).decode().split('\0')
+          private_dirs = {'auth', 'sessions', 'session', 'sessoes', '.git', 'node_modules'}
+          private_json = {'comandos/dados/antias.json', 'comandos/dados/blacklist.json', 'comandos/dados/mutados.json'}
+          for name in filter(None, files):
+              path = pathlib.PurePosixPath(name)
+              if any(p in private_dirs or p.startswith('.env') or p == '.npmrc' for p in path.parts):
+                  continue
+              if name in private_json or path.suffix not in {'.js', '.json', '.ttf', '.otf', '.png'}:
+                  continue
+              source = root / name
+              if source.is_symlink():
+                  raise SystemExit('Links simbólicos não são aceitos na cópia de CI.')
+              if not source.is_file():
+                  raise SystemExit('Arquivo de código ausente no checkout filtrado.')
+              dest = target / name
+              dest.parent.mkdir(parents=True, exist_ok=True)
+              shutil.copyfile(source, dest)
+          # Apenas fixtures vazias; não ler os JSON persistidos do repositório.
+          for name, content in [('antias.json', '{}'), ('blacklist.json', '[]'), ('mutados.json', '[]')]:
+              dest = target / 'comandos/dados' / name
+              dest.parent.mkdir(parents=True, exist_ok=True)
+              dest.write_text(content)
+          for name in ['package.json', 'package-lock.json', 'scripts/teste-gun-napi.js',
+                       'scripts/teste-compatibilidade-canvas.js', 'func/renderizador-canvas.js']:
+              if not (target / name).is_file():
+                  raise SystemExit('A revisão selecionada não contém a migração completa do gun.')
+          PY
+          cat > "$RUNNER_TEMP/gun-ci/image/Dockerfile" <<'DOCKER'
+          FROM node:24-bookworm AS node_runtime
+          FROM ubuntu:24.04
+          ENV DEBIAN_FRONTEND=noninteractive
+          RUN apt-get update && apt-get install -y --no-install-recommends \
+              ca-certificates git python3 build-essential pkg-config \
+              libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev \
+              && rm -rf /var/lib/apt/lists/*
+          COPY --from=node_runtime /usr/local/bin/node /usr/local/bin/node
+          COPY --from=node_runtime /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
+          RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm
+          WORKDIR /app
+          DOCKER
+          # O contexto contém apenas o Dockerfile, sem código/credenciais do runner.
+          docker build --pull --tag hipnos-gun-ci "$RUNNER_TEMP/gun-ci/image"
+
+      - name: Preparar guardas e executor com memória total limitada
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/gun-ci/offline.cjs" <<'JS'
+          const fs = require('node:fs')
+          const path = require('node:path')
+          const Module = require('node:module')
+          const proibido = p => {
+            const partes = p.split(/[\\/]/)
+            const relativo = path.relative(process.cwd(), path.resolve(p)).split(path.sep)
+            return partes.some(x => x.startsWith('.env') || x === '.npmrc') ||
+              ['auth', 'sessions', 'session', 'sessoes'].includes(relativo[0])
+          }
+          const existe = fs.existsSync
+          fs.existsSync = function (p) { return proibido(String(p)) ? false : existe.call(this, p) }
+          for (const nome of ['readFileSync', 'readFile', 'openSync', 'open', 'createReadStream']) {
+            const original = fs[nome]
+            fs[nome] = function (p, ...args) {
+              if (proibido(String(p))) throw new Error('Leitura de ambiente/credenciais proibida no CI.')
+              return original.call(this, p, ...args)
+            }
+          }
+          require('node:net').Socket.prototype.connect = function () { throw new Error('Rede proibida no CI offline.') }
+          require('node:net').Server.prototype.listen = function () { throw new Error('Servidor real proibido no CI offline.') }
+          const carregar = Module._load
+          Module._load = function (nome, parent, ...args) {
+            if (typeof nome === 'string' && /(^|[\\/])bot(?:\.js)?$/.test(nome)) throw new Error('Import do bot real proibido no CI.')
+            return carregar.call(this, nome, parent, ...args)
+          }
+          if (process.argv[1] && path.resolve(process.argv[1]) === '/app/bot.js') throw new Error('Entrada do bot proibida no CI.')
+          JS
+          cat > "$RUNNER_TEMP/gun-ci/limited.sh" <<'SH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          fase="$1"
+          # cgroup v2 é obrigatório: não aceitar um teste sem limite efetivo.
+          test "$(cat /sys/fs/cgroup/memory.max)" = 536870912
+          test "$(cat /sys/fs/cgroup/memory.swap.max)" = 0
+          relatar() {
+            resultado=$?
+            trap - EXIT
+            printf '\nMemória TOTAL do cgroup (%s), bytes: ' "$fase"
+            cat /sys/fs/cgroup/memory.peak
+            cat /sys/fs/cgroup/memory.events
+            if awk '$1 == "oom" || $1 == "oom_kill" { if ($2 > 0) falhou=1 } END { exit !falhou }' /sys/fs/cgroup/memory.events; then
+              echo 'Falha: o conjunto dos processos atingiu OOM.'
+              resultado=1
+            fi
+            exit "$resultado"
+          }
+          trap relatar EXIT
+          node -e 'if (process.platform !== "linux" || process.versions.node.split(".")[0] !== "24") process.exit(1); console.log(process.version, process.platform, process.arch)'
+          if [ "$fase" = install ]; then
+            # Rede só nesta fase para os pacotes públicos. Sem tokens/.npmrc.
+            # Canvas antigo é necessário para a referência visual e o modo normal.
+            node - <<'JS'
+          const assert = require('node:assert/strict')
+          const { scripts = {} } = require('./package.json')
+          for (const hook of ['preinstall', 'install', 'postinstall', 'prepare', 'prepublish', 'preprepare', 'postprepare']) {
+            assert.equal(scripts[hook], undefined, 'Hook inesperado na raiz: ' + hook)
+          }
+          JS
+            sha256sum package.json package-lock.json > /tmp/manifestos.sha256
+            DISABLE_CANVAS=false npm ci --include=optional --ignore-scripts=false --no-audit --no-fund
+            sha256sum --check /tmp/manifestos.sha256
+          else
+            export NODE_OPTIONS='--require=/ci/offline.cjs'
+            # Esta guarda é herdada por todos os processos Node filhos dos testes.
+            node - <<'JS'
+          const assert = require('node:assert/strict')
+          const { createCanvas, loadImage } = require('@napi-rs/canvas')
+          const png = createCanvas(480, 480).toBuffer('image/png')
+          loadImage(png).then(img => {
+            assert.equal(img.width, 480)
+            assert.equal(img.height, 480)
+            console.log('OK: binding Linux do @napi-rs/canvas carregado; PNG codificado/decodificado.')
+          }).catch(err => { console.error(err); process.exitCode = 1 })
+          JS
+            node scripts/teste-gun-napi.js
+            # Executa o startup somente em VM, com socket/Mongo/Express mockados.
+            # Nunca executar node bot.js, npm start ou serviços reais.
+            node scripts/teste-compatibilidade-canvas.js
+          fi
+          SH
+
+      - name: Instalar dependências e executar testes offline dentro de 512 MiB
+        run: |
+          set -euo pipefail
+          # Um cgroup por fase inclui npm/Node, processos filhos, FFmpeg e cache
+          # de arquivos. Não é apenas --max-old-space-size ou RSS do pai.
+          for fase in install test; do
+            rede=bridge
+            if [ "$fase" = test ]; then rede=none; fi
+            nome="hipnos-gun-$fase"
+            resultado=0
+            docker run --name "$nome" --init --memory=512m --memory-swap=512m \
+              --cpus=2 --pids-limit=128 --cgroupns=private --network="$rede" \
+              --cap-drop=ALL --security-opt=no-new-privileges \
+              --env CI=true --env MONGODB_URI= --env MONGO_URI_RPG= \
+              --env DISABLE_CANVAS=true --env npm_config_userconfig=/dev/null \
+              --mount "type=bind,src=$RUNNER_TEMP/gun-ci/source,dst=/app" \
+              --mount "type=bind,src=$RUNNER_TEMP/gun-ci/offline.cjs,dst=/ci/offline.cjs,readonly" \
+              --mount "type=bind,src=$RUNNER_TEMP/gun-ci/limited.sh,dst=/ci/limited.sh,readonly" \
+              hipnos-gun-ci bash /ci/limited.sh "$fase" || resultado=$?
+            oom=$(docker inspect --format '{{.State.OOMKilled}}' "$nome")
+            codigo=$(docker inspect --format '{{.State.ExitCode}}' "$nome")
+            docker rm "$nome" > /dev/null
+            if [ "$resultado" -ne 0 ] || [ "$codigo" -ne 0 ] || [ "$oom" = true ]; then
+              echo "Falha na fase $fase: docker=$resultado processo=$codigo OOMKilled=$oom"
+              exit 1
+            fi
+          done
+
+      - name: Limpar contêineres remanescentes
+        if: always()
+        run: |
+          docker rm -f hipnos-gun-install hipnos-gun-test > /dev/null 2>&1 || true
