@@ -16,6 +16,7 @@ const os = require('os')
 const path = require('path')
 const { createCanvas } = require('canvas')
 const efv = require('../comandos/menu-efeitos/efeitos-visuais')
+require('./fixtures/gun-download-buffer-mock')(efv)
 
 const JID = 'teste-efv@g.us'
 const NOMES_VIDEO_FRAMES = ['glitchgif', 'rotacao3d', 'fogogif', 'derreter', 'naoolhe', 'falha']

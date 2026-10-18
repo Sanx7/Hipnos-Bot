@@ -5,7 +5,7 @@ const path = require('node:path')
 const { execFile } = require('node:child_process')
 const { createRequire } = require('node:module')
 const LIMITES = Object.freeze({ bytes: 20 * 1024 * 1024, pixels: 8 * 1024 * 1024,
-  lado: 8192, rssBot: 320 * 1024 * 1024, livre: 160 * 1024 * 1024, timeout: 15000 })
+  lado: 8192, rssBot: 320 * 1024 * 1024, livre: 160 * 1024 * 1024, timeout: 15000, downloadTimeout: 30000 })
 let ocupado = false
 
 function erro(codigo) { return Object.assign(new Error('Renderização indisponível.'), { code: codigo }) }
@@ -35,6 +35,27 @@ async function executarExclusivo(trabalho) {
       if (!valida) throw erro('GUN_OCUPADO')
       verificarMemoria()
     },
+    async renderizarDownload(efeito, imagem, { signal } = {}) {
+      if (!valida || renderizando) throw erro('GUN_OCUPADO')
+      renderizando = true
+      let pasta
+      try {
+        verificarMemoria()
+        if (efeito !== 'gun') throw erro('GUN_IMAGEM')
+        pasta = await fs.mkdtemp(path.join(os.tmpdir(), 'hipnos-render-'))
+        const entrada = path.join(pasta, 'entrada'), saida = path.join(pasta, 'saida.png')
+        // Somente metadados indispensáveis via stdin, nunca argumentos/env/logs.
+        const dados = { url: imagem.url, directPath: imagem.directPath,
+          mediaKey: typeof imagem.mediaKey === 'string' ? imagem.mediaKey : Buffer.from(imagem.mediaKey || []).toString('base64') }
+        await executarFilho('gun-download-worker.js', [entrada], LIMITES.downloadTimeout, JSON.stringify(dados), signal)
+        verificarMemoria()
+        await executarFilho('renderizador-canvas-worker.js', [efeito, entrada, saida], LIMITES.timeout, undefined, signal)
+        return await fs.readFile(saida)
+      } finally {
+        if (pasta) await limpar(pasta)
+        renderizando = false
+      }
+    },
     async renderizarPng(efeito, bufferImagem) {
       if (!valida || renderizando) throw erro('GUN_OCUPADO')
       renderizando = true
@@ -47,13 +68,7 @@ async function executarExclusivo(trabalho) {
         const entrada = path.join(pasta, 'entrada'), saida = path.join(pasta, 'saida.png')
         await fs.writeFile(entrada, bufferImagem, { mode: 0o600 })
         bufferImagem = null
-        await new Promise((resolve, reject) => {
-          execFile(process.execPath, ['--max-old-space-size=64', path.join(__dirname, 'renderizador-canvas-worker.js'), efeito, entrada, saida],
-            { timeout: LIMITES.timeout, killSignal: 'SIGKILL', maxBuffer: 4096, windowsHide: true,
-              env: { PATH: process.env.PATH || '', SystemRoot: process.env.SystemRoot || '',
-                HOME: os.tmpdir(), TMPDIR: os.tmpdir(), TEMP: os.tmpdir(), TMP: os.tmpdir() } },
-            falha => falha ? reject(erro('GUN_RENDERIZACAO')) : resolve())
-        })
+        await executarFilho('renderizador-canvas-worker.js', [efeito, entrada, saida], LIMITES.timeout)
         return await fs.readFile(saida)
       } catch (falha) {
         if (String(falha?.code || '').startsWith('GUN_')) throw falha
@@ -61,8 +76,7 @@ async function executarExclusivo(trabalho) {
       } finally {
         bufferImagem = null
         if (pasta) {
-          try { await fs.rm(pasta, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }) }
-          catch (_) { console.error('[renderizador]', { evento: 'limpeza_falhou' }) }
+          await limpar(pasta)
         }
         renderizando = false
       }
@@ -74,8 +88,36 @@ async function executarExclusivo(trabalho) {
   } finally { valida = false; ocupado = false }
 }
 
+async function limpar(pasta) {
+  try { await fs.rm(pasta, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }) }
+  catch (_) { console.error('[renderizador]', { evento: 'limpeza_falhou' }) }
+}
+
+function executarFilho(script, args, timeout, entrada, signal) {
+  return new Promise((resolve, reject) => {
+    let falhou, resultado
+    const filho = execFile(process.execPath, ['--max-old-space-size=64', path.join(__dirname, script), ...args],
+      { timeout, signal, killSignal: 'SIGKILL', maxBuffer: 4096, windowsHide: true,
+        env: { PATH: process.env.PATH || '', SystemRoot: process.env.SystemRoot || '',
+          HOME: os.tmpdir(), TMPDIR: os.tmpdir(), TEMP: os.tmpdir(), TMP: os.tmpdir() } },
+      (falha, stdout) => {
+        falhou = falha
+        try { resultado = JSON.parse(stdout) } catch (_) {}
+      })
+    // AbortSignal emite error antes de close: só liberar a reserva/apagar o
+    // temporário quando o SO confirmar o término e todos os pipes fecharem.
+    filho.once('close', () => {
+      if (!falhou) return resolve(resultado)
+      const code = ['GUN_DIMENSOES', 'GUN_IMAGEM'].includes(resultado?.code) ? resultado.code : 'GUN_RENDERIZACAO'
+      reject(erro(code))
+    })
+    filho.stdin.on('error', () => {}) // EPIPE se houver cancelamento antes da leitura.
+    filho.stdin.end(entrada)
+  })
+}
+
 function renderizarPng(efeito, buffer) {
   return executarExclusivo(reserva => reserva.renderizarPng(efeito, buffer))
 }
 
-module.exports = { executarExclusivo, renderizarPng, LIMITES }
+module.exports = { executarExclusivo, renderizarPng, LIMITES, validarImagem }

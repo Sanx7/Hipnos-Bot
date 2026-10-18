@@ -5,8 +5,11 @@ require('node:net').Socket.prototype.connect = function () { throw new Error('Re
 async function main() {
   const [efeito, entrada, saida] = process.argv.slice(2)
   if (efeito !== 'gun') throw new Error('Efeito inválido.')
-  const { createCanvas, loadImage } = require('@napi-rs/canvas')
   let buffer = fs.readFileSync(entrada)
+  // Inspeção completa somente no filho, antes de importar/usar o decoder nativo.
+  // Não limitar o header a 512 KiB: JPEG com metadados longos continua aceito.
+  require('./renderizador-canvas').validarImagem(buffer)
+  const { createCanvas, loadImage } = require('@napi-rs/canvas')
   const tamanhoOriginal = buffer.length
   let img = await loadImage(buffer)
   buffer = null
@@ -41,4 +44,8 @@ async function main() {
   console.log(JSON.stringify({ picoRssBytes: process.resourceUsage().maxRSS * 1024 }))
 }
 
-main().catch(() => { process.exitCode = 1 })
+main().catch(falha => {
+  const code = ['GUN_DIMENSOES', 'GUN_IMAGEM'].includes(falha?.code) ? falha.code : 'GUN_RENDERIZACAO'
+  console.log(JSON.stringify({ code }))
+  process.exitCode = 1
+})

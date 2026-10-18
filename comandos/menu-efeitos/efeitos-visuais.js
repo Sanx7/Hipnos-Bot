@@ -78,7 +78,7 @@ let rodarFfmpeg = (args) => new Promise((resolve, reject) => {
 
 
 // --- Foto citada: reply OU legenda direta ---
-async function obterFotoCitada(msg) {
+function selecionarFotoCitada(msg) {
   const conteudoMsg = normalizeMessageContent(msg.message) || {}
   const contexto = conteudoMsg.extendedTextMessage?.contextInfo
     || conteudoMsg.imageMessage?.contextInfo
@@ -94,7 +94,11 @@ async function obterFotoCitada(msg) {
   if (tipo !== 'imageMessage' || !imagem || typeof imagem !== 'object') {
     throw new ErroEfeitoVisual('nao e imagem', 'midia_errada')
   }
-  const buffer = await baixarMidia(imagem)
+  return imagem
+}
+
+async function obterFotoCitada(msg) {
+  const buffer = await baixarMidia(selecionarFotoCitada(msg))
   if (!buffer || !buffer.length) throw new ErroEfeitoVisual('foto vazia', 'midia_errada')
   if (buffer.length > LIMITE_BYTES_IMAGEM) throw new ErroEfeitoVisual('foto grande', 'grande')
   return { buffer }
@@ -674,10 +678,7 @@ function comandoGun() {
     try {
       await renderizador.executarExclusivo(async reserva => {
         // Reserva ANTES de baixar; nenhuma chamada extra mantém buffers em fila.
-        const entrada = await obterFotoCitada(msg)
-        const tarefa = comporGun(entrada.buffer, reserva)
-        entrada.buffer = null
-        let saida = await tarefa
+        let saida = await reserva.renderizarDownload('gun', selecionarFotoCitada(msg))
         try {
           reserva.verificarMemoria()
           await enviarImagem(sock, jid, msg, saida, '🎯 Na mira do limbo', true)

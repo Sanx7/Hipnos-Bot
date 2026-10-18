@@ -14,6 +14,12 @@ usa o novo backend nos dois modos. Não é necessário alterar a flag.
 - O worker encerra antes de começar o FFmpeg. O sistema recupera suas alocações
   nativas ao encerrar. Buffers de entrada/saída não são guardados pelo adaptador;
   arquivos temporários são apagados em `finally`, inclusive após falha/timeout.
+- O `/gun` baixa para arquivo por streaming com backpressure, limite aplicado
+  durante o recebimento de 20 MiB e permissão 0600. Usa um filho de download
+  descartável (Baileys original), encerrado antes do worker de renderização.
+  Isso permite cancelar o transporte HTTP mesmo nesta versão do Baileys, cujo
+  `getHttpStream` ignora AbortSignal. Timeout de download: 30 s incluindo abertura.
+  O pai não concatena nem lê a foto original; recebe apenas o PNG final 480×480.
 - `/gun`: preserva saída PNG 480×480, escala cover centralizada, posição da mira
   baseada no tamanho do buffer ORIGINAL, vermelho, espessura 5, raios 70/40/6 e
   segmentos de 95 pixels. Mantém reply ou legenda de foto, caption, quoted,
@@ -37,6 +43,10 @@ A operação é recusada se o RSS do bot superar 320 MiB ou se
 antes do download, antes do worker e antes do FFmpeg. Isso é admissão conservadora,
 não uma reserva de RAM do sistema. O heap JS do worker tem teto de 64 MiB, que
 **não** limita a memória nativa; o teste Linux continua limitado por cgroup.
+
+O tamanho/pixels/SVG são verificados no filho antes de carregar Skia; a inspeção
+completa não limita headers a 512 KiB. O adaptador espera o evento `close` de
+cada filho antes da próxima fase, da limpeza e da liberação da reserva.
 
 Plano de implantação e reversão: [gun-latamhost.md](gun-latamhost.md).
 
@@ -62,6 +72,7 @@ Na raiz do checkout de desenvolvimento, com as dependências já preparadas:
 
 ```sh
 node scripts/teste-gun-napi.js
+node scripts/teste-gun-capacidade.js
 node scripts/teste-compatibilidade-canvas.js
 node scripts/teste-on-off.js
 ```
@@ -90,6 +101,9 @@ de arquivos e picos não capturados pela amostragem.
 Também estima o total com base conservadora de 287 MiB para o bot, aumento do RSS
 do pai e maior pico entre worker/FFmpeg (não coexistem no `/gun`), mais 32 MiB de
 margem. Reserva 64 MiB estimados para FFmpeg se a medição não estiver disponível.
+Na suíte de capacidade, a fórmula inclui também o pico do downloader no máximo
+entre fases sequenciais. Os resultados atuais com streaming e imagens detalhadas,
+incluindo os riscos restantes, estão em [gun-latamhost.md](gun-latamhost.md).
 Resultado local Windows/Node.js 24.17.0: pico do worker 94,75 MiB; estimativa total
 414,71 MiB. FFmpeg não teve RSS medido no Windows. As comparações visuais tiveram
 diferença média máxima inferior a 0,20/255. Esses números não são garantia de

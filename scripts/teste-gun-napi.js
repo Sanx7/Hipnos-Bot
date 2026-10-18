@@ -13,7 +13,7 @@ require('node:net').Socket.prototype.connect = function () { throw new Error('Re
 
 const modo = process.argv[2]
 if (!modo) {
-  for (const caso of ['visual', 'comando', 'falha-backend', 'memoria']) {
+  for (const caso of ['visual', 'comando', 'falha-backend', 'stream', 'memoria']) {
     const r = spawnSync(process.execPath, ['--expose-gc', __filename, caso], {
       encoding: 'utf8', timeout: 90000, env: process.env
     })
@@ -25,6 +25,7 @@ if (!modo) {
 }
 
 async function main() {
+  if (modo === 'stream') return require('./fixtures/gun-stream-testes')()
   const carregar = Module._load
   let falharBackend = modo === 'falha-backend'
   let falhaProcesso = ''
@@ -81,6 +82,7 @@ async function main() {
   }
   // Importar o comando não deve carregar nem exigir o novo binding.
   const efv = require('../comandos/menu-efeitos/efeitos-visuais')
+  require('./fixtures/gun-download-buffer-mock')(efv)
   assert.equal(require.cache[require.resolve('@napi-rs/canvas')], undefined)
   const { Jimp, JimpMime } = require('jimp')
   const { executarExclusivo, LIMITES } = require('../func/renderizador-canvas')

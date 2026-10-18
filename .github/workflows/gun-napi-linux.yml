@@ -61,6 +61,10 @@ jobs:
               dest.parent.mkdir(parents=True, exist_ok=True)
               dest.write_text(content)
           for name in ['package.json', 'package-lock.json', 'scripts/teste-gun-napi.js',
+                       'scripts/teste-gun-capacidade.js', 'scripts/fixtures/gun-capacidade-helper.js',
+                       'scripts/fixtures/gun-download-offline.js', 'scripts/fixtures/gun-download-buffer-mock.js',
+                       'scripts/fixtures/gun-stream-testes.js', 'func/gun-download-worker.js',
+                       'func/receber-imagem-gun.js', 'func/renderizador-canvas-worker.js',
                        'scripts/teste-compatibilidade-canvas.js', 'func/renderizador-canvas.js']:
               if not (target / name).is_file():
                   raise SystemExit('A revisão selecionada não contém a migração completa do gun.')
@@ -119,6 +123,7 @@ jobs:
           # cgroup v2 é obrigatório: não aceitar um teste sem limite efetivo.
           test "$(cat /sys/fs/cgroup/memory.max)" = 536870912
           test "$(cat /sys/fs/cgroup/memory.swap.max)" = 0
+          test "$(cat /sys/fs/cgroup/memory.swap.current)" = 0
           relatar() {
             resultado=$?
             trap - EXIT
@@ -152,15 +157,26 @@ jobs:
             # Esta guarda é herdada por todos os processos Node filhos dos testes.
             node - <<'JS'
           const assert = require('node:assert/strict')
+          const path = require('node:path')
+          assert.equal(process.platform, 'linux')
+          assert.equal(process.arch, 'x64')
           const { createCanvas, loadImage } = require('@napi-rs/canvas')
           const png = createCanvas(480, 480).toBuffer('image/png')
           loadImage(png).then(img => {
             assert.equal(img.width, 480)
             assert.equal(img.height, 480)
+            const binding = Object.keys(require.cache).find(p => p.endsWith('.node') && p.includes('@napi-rs'))
+            assert.ok(binding && binding.endsWith('skia.linux-x64-gnu.node'), 'binding GNU x64 esperado no Ubuntu')
+            console.log('AMBIENTE=' + JSON.stringify({ node: process.version, nodeApi: process.versions.napi,
+              arch: process.arch, glibc: process.report.getReport().header.glibcVersionRuntime,
+              canvas: require('@napi-rs/canvas/package.json').version, binding: path.basename(binding) }))
             console.log('OK: binding Linux do @napi-rs/canvas carregado; PNG codificado/decodificado.')
           }).catch(err => { console.error(err); process.exitCode = 1 })
           JS
             node scripts/teste-gun-napi.js
+            # Geração, PNG/JPEG detalhados, bytes-limite, mídias concorrentes e
+            # pressão controlada: todos descendentes DESTE cgroup, sem swap.
+            node scripts/teste-gun-capacidade.js
             # Executa o startup somente em VM, com socket/Mongo/Express mockados.
             # Nunca executar node bot.js, npm start ou serviços reais.
             node scripts/teste-compatibilidade-canvas.js
@@ -184,6 +200,7 @@ jobs:
               --cpus=2 --pids-limit=128 --cgroupns=private --network="$rede" \
               --cap-drop=ALL --security-opt=no-new-privileges \
               --env CI=true --env MONGODB_URI= --env MONGO_URI_RPG= \
+              --env GUN_CI_CGROUP=1 \
               --env HOME=/tmp --env npm_config_cache=/tmp/npm-cache \
               --env DISABLE_CANVAS=true --env npm_config_userconfig=/dev/null \
               --mount "type=bind,src=$RUNNER_TEMP/gun-ci/source,dst=/app" \
