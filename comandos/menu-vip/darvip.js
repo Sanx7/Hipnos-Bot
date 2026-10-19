@@ -13,9 +13,10 @@
 //     se o VIP dele já expirou, vira um novo período a partir de agora.
 // ============================================
 
-const { limparNumero, ehDonoDoBot } = require('../../config')
+const { limparNumero } = require('../../config')
+const estadoBot = require('../../estado-bot')
 // 🪪 Resolução LID→número real (menção/reply pode chegar como "@lid")
-const { resolverNumeroAlvo } = require('../../lid')
+const { identificar } = require('../../dados/identidade-participante')
 const vip = require('../../vip')
 
 module.exports = {
@@ -26,23 +27,23 @@ module.exports = {
     try {
       const sender = msg.key.participant || msg.key.remoteJid
 
-      // 1) 🔒 Apenas donos do bot podem conceder VIP.
-      //    Checagem PROOF-LID: em grupo buscamos os metadados para resolver
-      //    o sender mesmo quando ele vem como "@lid"; no privado (sem
-      //    metadados) a própria função cai na comparação direta.
+      // 1) Mesma identidade comprovada do /diagnostico, inclusive LID no PV
+      //    e fallback pelo mapeamento da sessão. Falha nunca autoriza.
+      if (!(await estadoBot.remetenteEhDono(sock, jid, sender))) {
+        return await sock.sendMessage(jid, {
+          text: '🌑 *Hipnos só obedece aos donos do bot.*\n\nA outorga do selo 💠 *VIP* é privilégio exclusivo dos soberanos.'
+        }, { quoted: msg })
+      }
+
+      // Metadados para resolver o destinatário por menção ou resposta.
       let participantes = null
       if (jid.endsWith('@g.us')) {
         try {
           const metadados = await sock.groupMetadata(jid)
           participantes = metadados.participants
         } catch (err) {
-          console.error('[darvip] Sem metadados do grupo:', err?.message || err)
+          console.error('[darvip] Metadados indisponíveis; tentando mapeamento da sessão.')
         }
-      }
-      if (!ehDonoDoBot(participantes, sender)) {
-        return await sock.sendMessage(jid, {
-          text: '🌑 *Hipnos só obedece aos donos do bot.*\n\nA outorga do selo 💠 *VIP* é privilégio exclusivo dos soberanos.'
-        }, { quoted: msg })
       }
 
       // 2) Argumentos: tudo que vem depois de "/darvip"
@@ -61,19 +62,14 @@ module.exports = {
       // (metadados do grupo → mapeamento da sessão) ANTES de gravar.
       let alvo = ''
       if (alvoBruto) {
-        const resolucao = await resolverNumeroAlvo(participantes, alvoBruto)
-        if (!resolucao.numero || resolucao.via === null) {
-          console.warn(
-            `[darvip] 🪪 LID ${resolucao.numero || limparNumero(alvoBruto)} não resolvível p/ número real — recusando para NÃO gravar LID no banco`
-          )
+        const resolucao = await identificar(participantes || [], alvoBruto)
+        if (!resolucao.numero) {
+          console.warn('[darvip] Identidade do destinatário não comprovada; outorga recusada.')
           return await sock.sendMessage(jid, {
             text: '🪪 *Não consegui identificar o número real dessa menção* (o WhatsApp entregou só o LID).\n\nOutorgue direto pelo número: */darvip 5511999999999 30*.'
           }, { quoted: msg })
         }
         alvo = resolucao.numero
-        if (resolucao.via !== 'direto') {
-          console.log(`[darvip] 🪪 alvo resolvido de @lid p/ número real via ${resolucao.via}: ${alvo}`)
-        }
       } else {
         // Número digitado no texto: já é o número real (sem domínio)
         alvo = numericos.find((n) => n.length >= 10) || ''
