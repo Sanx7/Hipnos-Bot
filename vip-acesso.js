@@ -26,8 +26,8 @@
 // compartilhado por dois comandos e é lógica de NÚCLEO do sistema de VIP.
 // ============================================
 
-const { resolverNumeroAlvo, resolverLidParaTelefone, ehLid } = require('./lid')
-const { limparNumero: normalizarNumero, acharParticipante } = require('./config')
+const { resolverNumeroAlvo, ehLid } = require('./lid')
+const { identificar } = require('./dados/identidade-participante')
 const vip = require('./vip')
 
 // 💠 Checagem real de VIP.
@@ -76,59 +76,52 @@ function alvoDoRemetente({ sender, numeroReal }) {
 }
 
 // ============================================================
-// 🪪 resolverAutorVip(sock, jid, msg, rotulo): o número REAL de quem chamou
-// (ou os próprios dígitos do remetente quando não dá para resolver).
+// 🪪 resolverAutorVip: telefone comprovado pelos metadados ou pela sessão.
 // ============================================================
 // "Autor" aqui = remetente da mensagem (`msg.key.participant`, ou o próprio
-// `remoteJid` no privado). É O QUE /s, /figurinha, /kiss e /ship precisam
+// `remoteJid` no privado). Usado por /s, /figurinha e efeitos de imagem
 // para consultar o documento de VIP (que o /darvip grava pelo NÚMERO REAL):
 //
-//   1) grupo com LID e phoneNumber nos metadados → resolve pelos metadados
+//   1) grupo com id=LID + phoneNumber=PN ou id=PN + lid separado → metadados
 //      (a consulta de metadados é feita AQUI, uma vez por comando — é a
 //      mesma que os comandos de privilégio já pagam no checarAcessoVip);
 //   2) fora de grupo / sem metadados / participante sem phoneNumber → só um
 //      JID "@lid" ainda tem o que resolver: tenta o lid-mapping da sessão
 //      (mesma fonte do resolverNumeroAlvo). Um número real já é o alvo;
-//   3) sem resposta → devolve os DÍGITOS do próprio sender (`via: null`) — o
-//      chamador segue com eles e o documento simplesmente não é achado
-//      (comportamento de hoje, sem inventar número).
+//   3) sem resposta ou identidade ambígua → número vazio (`via: null`).
+//      Dígitos de um LID desconhecido nunca são tratados como telefone.
 //
-// NUNCA lança: falha de infra (Mongo fora, metadados fora) devolve o cru e
+// NUNCA lança: falha de infra (Mongo fora, metadados fora) devolve vazio e
 // continua — os comandos que consultam estilo (assinatura/tema) NUNCA podem
 // quebrar por causa de uma leitura de banco.
 // ============================================================
 async function resolverAutorVip(sock, jid, msg, rotulo = 'vip') {
   const sender = msg?.key?.participant || msg?.key?.remoteJid || ''
-  const digitos = normalizarNumero(sender)
-
-  // 1) 🪪 Metadados do grupo: o participante (achado pelo LID ou pelo número)
-  //    carrega o NÚMERO REAL no `phoneNumber`. É o caminho mais barato e o
-  //    mais confiável — não depende do lid-mapping da sessão.
+  let participantes = []
   if (String(jid || '').endsWith('@g.us')) {
-    let participantes = []
     try {
       const metadados = await sock.groupMetadata(jid)
       participantes = metadados?.participants || []
     } catch (errMeta) {
-      console.error(`[${rotulo}] ⚠️ sem metadados do grupo:`, errMeta?.message || errMeta)
-    }
-    const real = normalizarNumero(acharParticipante(participantes, sender)?.phoneNumber)
-    if (real) return { numero: real, via: 'metadados' }
-  }
-
-  // 2) 🗄️ Sem `phoneNumber` utilizável (ou fora de grupo): só um "@lid" tem o
-  //    que resolver — um JID de número real já é o alvo da consulta.
-  if (ehLid(sender)) {
-    try {
-      const viaSessao = await resolverLidParaTelefone(digitos)
-      if (viaSessao) return { numero: viaSessao, via: 'mapeamento' }
-    } catch (errLid) {
-      console.error(`[${rotulo}] ⚠️ falha ao resolver o autor:`, errLid?.message || errLid)
+      console.error(`[${rotulo}] Metadados indisponíveis; tentando mapeamento da sessão.`)
     }
   }
 
-  // 3) Sem correspondência: segue com os dígitos do sender (VIP não é achado).
-  return { numero: digitos, via: null }
+  try {
+    // Aceita id=LID + phoneNumber=PN e id=PN + lid separado; rejeita
+    // pares ambíguos e mantém os namespaces PN/LID separados.
+    const autor = await identificar(participantes, sender)
+    if (autor.numero) {
+      return {
+        numero: autor.numero,
+        via: autor.participante ? 'metadados' : ehLid(sender) ? 'mapeamento' : 'direto'
+      }
+    }
+  } catch (_) {
+    console.error(`[${rotulo}] Identidade do autor indisponível; seguindo sem benefício VIP.`)
+  }
+
+  return { numero: '', via: null }
 }
 
 // -------------------------------------------------------------------
