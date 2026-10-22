@@ -37,7 +37,9 @@ const socketSeguro = require('./dados/socket-seguro')
 const { criarLease } = require('./dados/sessao-exclusiva')
 
 const P = require('pino')
-const qrcode = require('qrcode-terminal')
+const QRCodeLocal = require('qrcode-terminal/vendor/QRCode')
+const nivelQrLocal = require('qrcode-terminal/vendor/QRCode/QRErrorCorrectLevel')
+const { createHash, timingSafeEqual } = require('crypto')
 const fs = require('fs')
 const path = require('path')
 
@@ -126,15 +128,66 @@ const express = require('express');
 const app = express();
 const port = process.env.PORT || 3000;
 
-let linkDoQrCode = '';
+let qrWeb = null
+function limparQrWeb() { qrWeb = null }
+function atualizarQrWeb(conteudo, sock) {
+  limparQrWeb()
+  try {
+    if (typeof conteudo !== 'string' || !conteudo || conteudo.length > 4096) return
+    const matriz = new QRCodeLocal(-1, nivelQrLocal.M)
+    matriz.addData(conteudo)
+    matriz.make()
+    const tamanho = matriz.getModuleCount(), margem = 4, lado = tamanho + margem * 2
+    const pixels = []
+    for (let y = 0; y < tamanho; y++) for (let x = 0; x < tamanho; x++) {
+      if (matriz.isDark(y, x)) pixels.push(`M${x + margem} ${y + margem}h1v1h-1z`)
+    }
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${lado} ${lado}" shape-rendering="crispEdges"><path fill="white" d="M0 0h${lado}v${lado}H0z"/><path fill="black" d="${pixels.join('')}"/></svg>`
+    qrWeb = { svg, sock, expiraEm: Date.now() + 20000 }
+  } catch {
+    console.warn('[auth-web]', { evento: 'qr_local_indisponivel' })
+  }
+}
+function obterQrWeb() {
+  if (!qrWeb) return null
+  if (Date.now() >= qrWeb.expiraEm || qrWeb.sock !== sockAtual || !leaseSessao.valida() || qrWeb.sock.ws?.isOpen !== true) {
+    limparQrWeb()
+    return null
+  }
+  return qrWeb.svg
+}
+function protegerPaginaAuth(req, res, next) {
+  res.set({
+    'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer',
+    'X-Content-Type-Options': 'nosniff', 'X-Frame-Options': 'DENY',
+    'Content-Security-Policy': "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
+  })
+  const usuario = process.env.AUTH_WEB_USER, senha = process.env.AUTH_WEB_PASSWORD
+  if (!usuario || !senha) return res.status(503).send('Página de autenticação desabilitada.')
+  const cabecalho = req.get('authorization') || ''
+  let autorizado = false
+  if (cabecalho.length <= 2048 && /^Basic [A-Za-z0-9+/]+={0,2}$/i.test(cabecalho)) {
+    const recebido = Buffer.from(cabecalho.slice(6), 'base64')
+    const esperado = Buffer.from(`${usuario}:${senha}`, 'utf8')
+    autorizado = timingSafeEqual(createHash('sha256').update(recebido).digest(), createHash('sha256').update(esperado).digest())
+  }
+  if (!autorizado) return res.status(401).set('WWW-Authenticate', 'Basic realm="Hipnos", charset="UTF-8"').send('Acesso restrito.')
+  next()
+}
+
+app.get('/auth/qr.svg', protegerPaginaAuth, (req, res) => {
+  const svg = obterQrWeb()
+  if (!svg) return res.status(404).send('QR indisponível ou expirado.')
+  res.type('image/svg+xml').send(svg)
+})
 
 // Rota web onde você vai abrir no navegador para ler o QR Code
-app.get('/', (req, res) => {
-  if (linkDoQrCode) {
+app.get('/', protegerPaginaAuth, (req, res) => {
+  if (obterQrWeb()) {
     res.send(`
       <div style="text-align: center; font-family: sans-serif; margin-top: 50px;">
         <h1>🌌 Hipnos Bot - Escaneie o QR Code</h1>
-        <img src="${linkDoQrCode}" style="border: 4px solid #000; padding: 10px; background: white;" />
+        <img src="/auth/qr.svg" width="300" height="300" alt="QR para vincular o WhatsApp" style="border: 4px solid #000; padding: 10px; background: white;" />
         <p style="color: #555;">Atualize a página se o código expirar no seu celular.</p>
       </div>
     `);
@@ -293,6 +346,7 @@ const inicializadorSocket = socketSeguro.criarInicializador()
 const idProcessoConexao = require('crypto').randomUUID().slice(0, 8)
 let geracaoConexao = 0
 const leaseSessao = criarLease({ perdida: () => {
+  limparQrWeb()
   console.warn('[conexao]', { evento: 'lease_perdida', reconectar: false })
   inicializadorSocket.bloquear()
   clearTimeout(timerReconexao)
@@ -314,6 +368,8 @@ async function montarBot() {
     console.log('⏳ Reconexão já agendada, ignorando chamada duplicada...')
     return
   }
+
+  limparQrWeb()
 
   // Encerra o socket anterior (se ainda existir) antes de abrir outro
   if (sockAtual) {
@@ -942,12 +998,7 @@ async function montarBot() {
     if (sockAtual !== sock) return
 
     if (qr) {
-      // Mantém no terminal caso precise
-      qrcode.generate(qr, { small: true })
-      console.log('📱 Scan the QR Code above')
-      
-      // GERA A URL DA IMAGEM PARA O SEU NAVEGADOR
-      linkDoQrCode = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(qr)}`;
+      atualizarQrWeb(qr, sock)
     }
 
     if (connection === 'open') {
@@ -962,7 +1013,7 @@ async function montarBot() {
       tentativas = 0
       reconexaoAgendada = false
       console.log('🌙 Hipnos Bot connected successfully!')
-      linkDoQrCode = ''; // Limpa o QR Code quando conectar
+      limparQrWeb()
 
       // ⏰ LEMBRETES: o socket pode ter sido recriado — registra o novo para
       // o agendador disparar por ele (idempotente, não duplica o timer).
@@ -972,6 +1023,7 @@ async function montarBot() {
     }
 
     if (connection === 'close') {
+      limparQrWeb()
       socketSeguro.atualizar(sock, false)
       agendadorAnuncios.fechar(sock)
       rodadasVouc.fechar(sock)
@@ -1036,6 +1088,7 @@ function tratarFalhaInicializacao(err) {
 }
 
 async function encerrarBot() {
+  limparQrWeb()
   inicializadorSocket.bloquear()
   clearTimeout(timerReconexao)
   const antigo = sockAtual
