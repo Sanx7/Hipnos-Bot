@@ -4,6 +4,7 @@ const { ehProprioBot, respostaAutoexpulsao } = require('./protecao-bot')
 const seguro = require('./socket-seguro')
 const { removerDoGrupoConfirmado } = require('../comandos/admin/ban')
 const { criarRepositorio } = require('./arcontes-olimpo-mongo')
+const { criarApresentacaoHistorico, textoSeguro, AJUDA } = require('./arcontes-historico-ui')
 // Compartilhado por todos os serviços deste processo: não revisar uma chamada ainda em voo.
 const instancia = randomUUID(), ativas = new Set()
 function negar(texto) { throw Object.assign(new Error('ARCONTES_BLOQUEADO'), { resposta: texto }) }
@@ -11,6 +12,7 @@ const INCOMPLETA = 'Operação não concluída ou não confirmada. Não houve no
 
 function criarServico(repo = criarRepositorio(), { disponivel = seguro.exclusivoDisponivel, agora = Date.now } = {}) {
   const cooldown = new Map()
+  const apresentacao = criarApresentacaoHistorico({ agora })
   function exigir(sock) {
     if (!disponivel(sock)) negar('Conexão ou exclusividade da sessão indisponível. Nenhuma nova remoção autorizada.')
   }
@@ -177,14 +179,11 @@ function criarServico(repo = criarRepositorio(), { disponivel = seguro.exclusivo
     }
     return responder(acao === 'arconte' ? 'Arconte nomeado somente neste grupo.' : 'Patente removida. O histórico foi preservado.')
   }
-  function resumoOperacao(op) {
-    return `Operação: ${op._id}\nEstado original: ${op.estado}\nResponsável (${op.responsavelTipo}): ${op.responsavel}\nAlvo: ${op.alvo}\nMotivo: ${op.motivo || 'Não informado'}`
-  }
   async function resolver(sock, grupo, sender, msg, args, privado) {
     const [operacao, confirmacao, ...partes] = args
     const motivo = partes.join(' ').trim()
     if (!/^[a-f0-9]{64}$/.test(operacao || '') || confirmacao !== 'CONFIRMO' || motivo.length < 10 || motivo.length > 500 ||
-        /[\u0000-\u001f\u007f]/.test(motivo)) negar('Use resolver ID CONFIRMO motivo de revisão (10 a 500 caracteres).')
+        /[\u0000-\u001f\u007f]/.test(motivo)) negar('Use resolver referência CONFIRMO motivo de revisão (10 a 500 caracteres).')
     exigir(sock)
     const autor = await gestorHistorico(sock, grupo, sender)
     const controle = await repo.controle(grupo), op = await repo.operacao(grupo, operacao)
@@ -212,65 +211,75 @@ function criarServico(repo = criarRepositorio(), { disponivel = seguro.exclusivo
       exigir(sock)
       await repo.liberarRevisada(grupo, controle.token, operacao, id)
       await repo.registrarRevisao(id, 'liberada')
-      return `Trava liberada após revisão explícita. Auditoria: ${id}\nO estado original (${op.estado}) foi preservado. Nenhuma expulsão foi repetida ou confirmada pela revisão.`
+      return `Trava liberada após revisão explícita. Revisão registrada na auditoria.\nO estado original (${textoSeguro(op.estado)}) foi preservado. Nenhuma expulsão foi repetida ou confirmada pela revisão.`
     } finally { ativas.delete(controle.token) }
   }
   async function consultarHistorico(sock, origem, msg, texto, responder) {
-    const args = texto.trim().split(/\s+/).slice(1)
+    const entrada = String(texto).trim().replace(/^\S+\s*/, '')
     const privado = !origem.endsWith('@g.us')
-    let grupo = origem, sender = msg?.key?.participant
-    if (privado) {
-      if (!/^\d+(?::\d+)?@(?:lid|s\.whatsapp\.net)$/.test(origem) || args.shift() !== 'grupo' ||
-          !/^\d+(?:-\d+)?@g\.us$/.test(args[0] || '')) {
-        negar('No privado, use /historicoarconte grupo ID_DO_GRUPO [página|pendentes|revisoes|operacao ID|resolver ID CONFIRMO motivo].')
-      }
-      grupo = args.shift(); sender = origem
-    }
+    const sender = privado ? origem : msg?.key?.participant
     if (msg?.key?.remoteJid !== origem || msg.key.fromMe) negar('Origem da consulta não comprovada.')
-    const solicitante = await gestorHistorico(sock, grupo, sender)
-    const comandoPrivado = `/historicoarconte grupo ${grupo}`
+    if (privado && !/^\d+(?::\d+)?@(?:lid|s\.whatsapp\.net)$/.test(origem)) negar('Origem da consulta não comprovada.')
+    const selecionarGrupo = /^grupo(?:\s|$)/i.test(entrada)
+    if (privado && !selecionarGrupo) negar(`No privado, use o nome do grupo. ${AJUDA}`)
+    const selecionado = selecionarGrupo ? await apresentacao.selecionar(sock, entrada.replace(/^grupo\s*/i, ''),
+      grupo => gestorHistorico(sock, grupo, sender)) : { grupo: origem, args: entrada.split(/\s+/).filter(Boolean) }
+    if (selecionado.escolhas) {
+      const opcoes = []
+      let destinatario
+      for (const [indice, escolha] of selecionado.escolhas.entries()) {
+        const recente = await gestorHistorico(sock, escolha.grupo, sender)
+        if (recente.autor.numero !== escolha.c.autor.numero || (destinatario && destinatario !== recente.autor.numero)) negar('Identidade do solicitante mudou durante a consulta.')
+        destinatario = recente.autor.numero
+        const v = apresentacao.vista(sock, escolha.grupo, recente)
+        opcoes.push(`${indice + 1}. ${v.nomeGrupo} — ${recente.meta.participants.length} participantes\nConsultar: /historicoarconte grupo ${v.grupoRef}`)
+      }
+      await sock.sendMessage(`${destinatario}@s.whatsapp.net`, { text: `Há grupos autorizados com o mesmo nome. Escolha uma opção (referências válidas por 15 minutos):\n${opcoes.join('\n\n')}` })
+      if (!privado) return responder('Opções dos grupos enviadas no privado.')
+      return
+    }
+    const { grupo, args } = selecionado
+    const solicitante = selecionado.c || await gestorHistorico(sock, grupo, sender)
+    const vista = apresentacao.vista(sock, grupo, solicitante)
+    const comandoPrivado = `/historicoarconte grupo ${vista.grupoRef}`
     let resultado
     if (args[0] === 'resolver') {
+      args[1] = vista.operacao(args[1])
       resultado = await resolver(sock, grupo, sender, msg, args.slice(1), privado)
     } else if (args[0] === 'pendentes' && args.length === 1) {
       const controle = await repo.controle(grupo)
       const op = controle?.ocupado && controle.operacao ? await repo.operacao(grupo, controle.operacao) : null
       resultado = !controle?.ocupado ? 'Grupo sem trava ativa.' : op ?
-        `${resumoOperacao(op)}\n${ativas.has(controle.token) ? 'Chamada ainda em execução; liberação recusada.' : 'Trava aguardando revisão autorizada.'}\n` +
-        `Consulte ${comandoPrivado} operacao ${op._id}\nApós revisar: ${comandoPrivado} resolver ${op._id} CONFIRMO motivo_da_revisão\n` +
+        `${await vista.resumo(op)}\n${ativas.has(controle.token) ? 'Chamada ainda em execução; liberação recusada.' : 'Trava aguardando revisão autorizada.'}\n` +
+        `Consulte ${comandoPrivado} operacao ${vista.refOperacao(op._id)}\nApós revisar: ${comandoPrivado} resolver ${vista.refOperacao(op._id)} CONFIRMO motivo_da_revisão\n` +
         'A ausência do participante não comprova expulsão. A liberação preserva o resultado original.' :
         'Trava sem vínculo seguro com uma expulsão (ou referente a patente). Liberação recusada; exige análise específica, sem apagar registros.'
-    } else if (args[0] === 'operacao' && args.length === 2 && /^[a-f0-9]{64}$/.test(args[1])) {
-      const op = await repo.operacao(grupo, args[1])
+    } else if (args[0] === 'operacao' && args.length === 2) {
+      const op = await repo.operacao(grupo, vista.operacao(args[1]))
       if (!op) negar('Expulsão não encontrada neste grupo.')
       const revisoes = await repo.revisoes(grupo, op._id)
-      resultado = `${resumoOperacao(op)}\nRevisões permanentes (até 20 mais recentes):\n${revisoes.map(r =>
-        `${r._id} | ${r.estado} | revisor (${r.responsavelTipo}): ${r.responsavel} | ${new Date(r.criadoEm).toISOString()} | ${r.motivo}`
-      ).join('\n') || 'Nenhuma revisão.'}`
+      resultado = `${await vista.resumo(op)}\nRevisões permanentes (até 20 mais recentes):\n${(await Promise.all(revisoes.map(r => vista.revisao(r)))).join('\n') || 'Nenhuma revisão.'}`
     } else if (args[0] === 'revisoes' && args.length <= 2 && (!args[1] || /^[1-9]\d{0,3}$/.test(args[1]))) {
       const pagina = Number(args[1] || 1), revisoes = await repo.listarRevisoes(grupo, pagina)
-      resultado = `Auditoria de revisões — página ${pagina}:\n${revisoes.map(r =>
-        `${r._id} | operação: ${r.operacao} | ${r.estado} | revisor (${r.responsavelTipo}): ${r.responsavel} | ${new Date(r.criadoEm).toISOString()} | ${r.motivo}`
-      ).join('\n') || 'Nenhuma revisão.'}\nPróxima página: ${comandoPrivado} revisoes ${pagina + 1}`
+      resultado = `Auditoria de revisões — página ${pagina}:\n${(await Promise.all(revisoes.map(r => vista.revisao(r, true)))).join('\n') || 'Nenhuma revisão.'}\nPróxima página: ${comandoPrivado} revisoes ${pagina + 1}`
     } else {
       if (args.length > 1 || (args[0] && !/^[1-9]\d{0,3}$/.test(args[0]))) {
-        negar('Use /historicoarconte [página|pendentes|revisoes|operacao ID|resolver ID CONFIRMO motivo].')
+        negar(AJUDA)
       }
       const pagina = Number(args[0] || 1), lista = await repo.historico(grupo, pagina)
-      resultado = lista.length ? `Expulsões confirmadas — página ${pagina}:\n${lista.map(p =>
-        `${new Date(p.confirmadoEm).toISOString()} | ${p.responsavelTipo}: ${p.responsavel} | alvo: ${p.alvo} | motivo: ${p.motivo || 'Não informado'}`
-      ).join('\n')}` : 'Nenhuma expulsão confirmada nesta página.'
+      resultado = lista.length ? `Expulsões confirmadas — página ${pagina}:\n${(await Promise.all(lista.map(p => vista.expulsao(p)))).join('\n')}` : 'Nenhuma expulsão confirmada nesta página.'
       resultado += `\nPróxima página: ${comandoPrivado} ${pagina + 1}\nOperações bloqueadas: ${comandoPrivado} pendentes`
       resultado += `\nAuditoria permanente: ${comandoPrivado} revisoes`
     }
     const recente = await gestorHistorico(sock, grupo, sender)
     if (recente.autor.numero !== solicitante.autor.numero) negar('Identidade do solicitante mudou durante a consulta.')
     // A origem pode ser o grupo ou o privado. Dados nunca são enviados ao grupo.
-    await sock.sendMessage(`${recente.autor.numero}@s.whatsapp.net`, { text: `Grupo: ${grupo}\n${resultado}` })
+    await sock.sendMessage(`${recente.autor.numero}@s.whatsapp.net`, { text: `Grupo: ${vista.nomeGrupo}\n${resultado}\nReferências válidas por 15 minutos; se expirarem, consulte novamente pelo nome do grupo.` })
     if (!privado) return responder('Consulta do histórico enviada no privado.')
   }
   async function executar(acao, sock, grupo, msg, texto = '') {
-    const responder = text => sock.sendMessage(grupo, { text }, { quoted: msg })
+    // Não citar comandos de histórico: o texto original pode conter IDs internos.
+    const responder = text => acao === 'historicoarconte' ? sock.sendMessage(grupo, { text: textoSeguro(text, INCOMPLETA, 2000) }) : sock.sendMessage(grupo, { text }, { quoted: msg })
     try {
       if (acao === 'historicoarconte') return await consultarHistorico(sock, grupo, msg, texto, responder)
       if (!String(grupo).endsWith('@g.us')) negar('Este comando funciona somente em grupos.')

@@ -345,7 +345,7 @@ async function main() {
     for (const autor of [A, D]) {
       await c.run('historicoarconte', autor, null, G, null, '/historicoarconte')
       const privado = c.respostas.at(-2)
-      assert.equal(privado.grupo, pn(autor)); assert.match(privado.text, /arconte:/); assert.match(privado.text, new RegExp(T))
+      assert.equal(privado.grupo, pn(autor)); assert.match(privado.text, /arconte:/); assert.doesNotMatch(privado.text, new RegExp(T))
       assert.doesNotMatch(c.ultima(), new RegExp(T))
       await c.run('historicoarconte', autor, null, H, null, '/historicoarconte'); assert.match(c.respostas.at(-2).text, /Nenhuma expulsão/)
     }
@@ -405,7 +405,7 @@ async function main() {
     const c = await incerta(), token = c.cols.controles.docs[0].token
     await c.consultar('pendentes')
     const privado = c.respostas.at(-2)
-    assert.equal(privado.grupo, pn(A)); assert.ok(privado.text.includes(c.op._id))
+    assert.equal(privado.grupo, pn(A)); assert.match(privado.text, /Operação: op-[A-Za-z0-9_-]{16}/); assert.ok(!privado.text.includes(c.op._id))
     assert.match(privado.text, /ausência.*não comprova/)
     assert.ok(!privado.text.includes(token)); assert.ok(!c.ultima().includes(c.op._id))
     assert.equal(c.remocoes.length, 1)
@@ -460,7 +460,7 @@ async function main() {
     const c = await incerta()
     c.membros.find(p => p.id === pn(A)).lid = '90002@lid'
     await c.consultar('pendentes', '90002@lid', { privado: true })
-    assert.equal(c.respostas.at(-1).grupo, pn(A)); assert.ok(c.ultima().includes(c.op._id))
+    assert.equal(c.respostas.at(-1).grupo, pn(A)); assert.match(c.ultima(), /Operação: op-[A-Za-z0-9_-]{16}/)
     const msg = c.msg(A, null, pn(R)); msg.key.participant = pn(A)
     await c.run('historicoarconte', R, null, pn(R), msg, `/historicoarconte grupo ${G} pendentes`)
     assert.match(c.ultima(), /Apenas administradores reais/)
@@ -469,14 +469,14 @@ async function main() {
   })
   await teste('dono comprovado consulta/revisa no privado sem estar no grupo, sem ganhar /kick', async () => {
     const c = await incerta(); c.membros = c.membros.filter(p => p.id !== pn(D))
-    await c.consultar('pendentes', D, { privado: true }); assert.ok(c.ultima().includes(c.op._id))
+    await c.consultar('pendentes', D, { privado: true }); assert.match(c.ultima(), /Operação: op-[A-Za-z0-9_-]{16}/)
     await c.consultar(revisar(c), D, { privado: true }); assert.equal(c.cols.controles.docs[0].ocupado, false)
     await c.run('kick', D, U); assert.equal(c.remocoes.length, 1)
   })
   await teste('paginação privada entrega apenas o grupo autorizado e fornece continuação', async () => {
     const c = await contexto(); await c.run('kick', A)
     await c.consultar('', A)
-    assert.ok(c.respostas.at(-2).text.includes(`/historicoarconte grupo ${G} 2`))
+    assert.match(c.respostas.at(-2).text, /\/historicoarconte grupo g-[A-Za-z0-9_-]{16} 2/)
     await c.consultar('2', A, { privado: true })
     assert.match(c.ultima(), /Nenhuma expulsão confirmada/); assert.equal(c.respostas.at(-1).grupo, pn(A))
     await c.consultar('', R, { privado: true }); assert.match(c.ultima(), /Apenas administradores reais/)
@@ -546,7 +546,7 @@ async function main() {
     assert.ok(!c.ultima().includes('Trava liberada')); assert.equal(c.remocoes.length, 1)
     c.cols.controles[etapa] = null
     await c.consultar('revisoes', A, { privado: true })
-    assert.match(c.ultima(), /autorizada/); assert.ok(c.ultima().includes(c.op._id))
+    assert.match(c.ultima(), /autorizada/); assert.match(c.ultima(), /op-[A-Za-z0-9_-]{16}/); assert.ok(!c.ultima().includes(c.op._id))
   })
   await teste('falha após liberar conserva auditoria prévia, sem inventar confirmação da expulsão', async () => {
     const c = await incerta()
@@ -592,7 +592,7 @@ async function main() {
     c.servico = sistema.criarServico(c.repo)
     await c.consultar(`operacao ${c.op._id}`, D, { privado: true })
     assert.match(c.ultima(), /Estado original: incerta/); assert.match(c.ultima(), /liberada/)
-    await c.consultar('revisoes', D, { privado: true }); assert.ok(c.ultima().includes(c.op._id))
+    await c.consultar('revisoes', D, { privado: true }); assert.match(c.ultima(), /op-[A-Za-z0-9_-]{16}/); assert.ok(!c.ultima().includes(c.op._id))
     assert.equal(c.remocoes.length, 1)
   })
   console.log(`\n${total} cenários de Arcontes passaram (offline).`)

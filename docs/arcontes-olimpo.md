@@ -11,7 +11,7 @@ do WhatsApp nem altera os verificadores gerais de permissão do Hipnos.
 - `/listaarcontes`: lista até 100 patentes ativas do grupo.
 - `/historicoarconte [página]`: dez expulsões confirmadas por página, enviadas
   **no privado do solicitante**; o grupo recebe somente uma confirmação de envio.
-  No privado, informe o grupo: `/historicoarconte grupo ID_DO_GRUPO [página]`.
+  No privado, informe o nome: `/historicoarconte grupo "Nome completo" [página]`.
   Cada resposta identifica o grupo e fornece o comando da próxima página.
 - `/kick @pessoa [motivo]`: remove um membro comum. Por resposta, use
   `/kick [motivo]`. Motivo opcional, limitado a 500 caracteres.
@@ -76,7 +76,8 @@ Não repetir o comando para tentar resolver uma operação incerta.
 Somente administradores reais do grupo e donos identificados do Hipnos podem
 consultar ou liberar a reserva. A patente de Arconte não concede esses direitos.
 Os comandos podem partir do grupo (a resposta detalhada vai no privado) ou do
-privado, sempre com `grupo ID_DO_GRUPO`. O bot verifica as permissões atuais no
+privado, sempre com `grupo "Nome completo"` ou a referência temporária fornecida.
+O bot verifica as permissões atuais no
 grupo selecionado a cada consulta/página e novamente antes de liberar a reserva.
 No privado, o dono comprovado do Hipnos pode consultar/revisar mesmo sem ser
 membro do grupo; administradores precisam continuar presentes e autorizados.
@@ -84,16 +85,16 @@ Essa exceção pertence somente ao histórico/revisão e não concede `/kick` ao
 
 1. No grupo, execute `/historicoarconte pendentes`. A resposta privada mostra a
    operação que mantém a trava, o estado original e os comandos para continuar.
-2. No privado, consulte `/historicoarconte grupo ID_DO_GRUPO operacao ID_OPERACAO`.
+2. No privado, consulte `/historicoarconte grupo REFERENCIA_GRUPO operacao REFERENCIA_OPERACAO`.
    Confira responsável, alvo, motivo, resultado registrado e revisões anteriores.
    Presença ou ausência do membro não é evidência de expulsão pelo bot.
 3. Depois de revisar explicitamente e decidir encerrar o bloqueio, envie uma
-   **nova mensagem**: `/historicoarconte grupo ID_DO_GRUPO resolver ID_OPERACAO CONFIRMO motivo`.
+   **nova mensagem**: `/historicoarconte grupo REFERENCIA_GRUPO resolver REFERENCIA_OPERACAO CONFIRMO motivo`.
    `CONFIRMO` é literal; o motivo precisa ter de 10 a 500 caracteres. O operador
    autoriza somente a liberação administrativa, aceitando a incerteza original.
 4. Consulte novamente `pendentes` para verificar a situação atual do grupo e
-   `operacao ID_OPERACAO` para ver a auditoria. `revisoes [página]` permite recuperar
-   os IDs e motivos de revisões antigas, mesmo após revogar uma patente.
+   `operacao REFERENCIA_OPERACAO` para ver a auditoria. `revisoes [página]` permite
+   recuperar referências e motivos de revisões antigas, mesmo após revogar uma patente.
 
 A revisão grava recibo próprio permanente com revisor, função, grupo, operação,
 estado original, motivo e datas. A autorização é persistida **antes** de liberar
@@ -126,6 +127,49 @@ chamada: as travas serializam este sistema, não outros administradores humanos
 ou outros sistemas de moderação. Os registros cobrem `/kick`, não `/ban`, nuke
 ou expulsões automáticas. Não existe preenchimento retroativo de históricos.
 
+## Nomes de grupos e privacidade do histórico
+
+Exemplos no privado:
+
+```text
+/historicoarconte grupo #Swag
+/historicoarconte grupo "Amigos do Olimpo #São Paulo" 2
+/historicoarconte grupo "Amigos do Olimpo #São Paulo" pendentes
+/historicoarconte grupo "Amigos do Olimpo #São Paulo" revisoes 2
+```
+
+Busca por igualdade do nome completo entre grupos dos quais o bot participa,
+normalizando Unicode, acentos, caixa e espaços apenas para comparação.
+O nome original não é alterado. Sem aspas, o nome completo tem precedência;
+se não existir, reconhece os sufixos de página e opções. Aspas duplas usam
+escapes JSON (`\"` e `\\`) e evitam ambiguidades com nomes terminados em opções.
+Também aceita `grupo Nome completo -- pendentes`.
+
+Nomes duplicados mostram somente opções autorizadas, com quantidade de membros
+e identificadores temporários distintos, sem divulgar os JIDs. Os comandos
+fornecidos usam referências `g-...` para grupos e `op-...` para operações.
+Copie o comando apresentado pelo bot e acrescente a opção desejada.
+
+Referências são aleatórias, válidas por 15 minutos e vinculadas ao solicitante,
+grupo e socket. Não concedem permissão: todas as consultas e revisões revalidam
+a autorização. Expiram também ao reiniciar/reconectar; consulte novamente pelo
+nome. São limitadas em memória e não alteram as coleções ou índices do MongoDB.
+O caminho antigo por JID e por ID de operação continua aceito como entrada,
+inclusive depois de reiniciar, mas nunca é reproduzido nas respostas.
+
+O histórico usa nomes disponíveis nos metadados/contatos locais. Sem nome,
+mostra uma identificação genérica; não usa telefone como substituto. Não gera
+menções numéricas nem notifica participantes expulsos em uma consulta privada.
+Motivos e nomes com telefones, JIDs ou referências internas são ocultados somente
+na apresentação; os registros originais permanecem intactos. As respostas não
+citam a mensagem do comando, para não reproduzir IDs fornecidos como entrada.
+
+No grupo, o conteúdo detalhado e as opções de desambiguação continuam enviados
+apenas ao privado autorizado. Falha de envio privado não transfere o histórico
+ao grupo. Grupo inexistente e grupo sem autorização recebem a mesma resposta.
+Uma consulta não altera registros. `resolver` mantém as gravações de auditoria
+e a liberação explícita já existentes, sem editar a expulsão original.
+
 ## Validação offline
 
 `node scripts/teste-arcontes-olimpo.js` usa coleções em memória, socket falso e
@@ -134,3 +178,6 @@ paginação privada e liberação auditada, além do trecho real de `/soadm`.
 `scripts/teste-on-off.js` cobre o listener completo e
 `scripts/teste-protecao-bot.js` mantém a regressão da conta protegida com novo
 repositório falso por cenário. Não validam MongoDB real nem remoções reais.
+`node scripts/teste-historicoarconte.js` cobre nomes completos, duplicatas,
+Unicode, autorização, referências, paginação, auditoria e ausência de IDs e
+telefones nas respostas públicas/privadas, incluindo motivos armazenados.
