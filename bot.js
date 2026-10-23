@@ -370,6 +370,8 @@ async function montarBot() {
   require('./dados/protecao-bot').protegerRemocoes(sock)
   // Histórico de chaves para /limpar-chat, incluindo os envios automáticos.
   mensagensEnviadas.acompanharSocket(sock)
+  // Nomes transitórios para o histórico; não consulta rede nem persiste mensagens.
+  require('./dados/arcontes-nomes').acompanharSocket(sock)
   rodadasVouc.obter(sock)
   // Permite que boas-vindas pendentes reenviem pelo socket recriado.
   registrarSocketBoasVindas(sock)

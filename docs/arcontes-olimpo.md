@@ -147,8 +147,22 @@ Também aceita `grupo Nome completo -- pendentes`.
 
 Nomes duplicados mostram somente opções autorizadas, com quantidade de membros
 e identificadores temporários distintos, sem divulgar os JIDs. Os comandos
-fornecidos usam referências `g-...` para grupos e `op-...` para operações.
-Copie o comando apresentado pelo bot e acrescente a opção desejada.
+fornecidos priorizam o nome completo entre aspas quando ele é único entre todos
+os grupos do bot (incluindo homônimos sem autorização, que nunca são listados).
+Os atalhos de `#Swag`, por exemplo, são:
+
+```text
+/historicoarconte grupo "#Swag" 2
+/historicoarconte grupo "#Swag" pendentes
+/historicoarconte grupo "#Swag" revisoes
+```
+
+Se o inventário estiver incompleto/indisponível, o nome contiver identificadores
+que precisam ser ocultados ou houver homônimos, mantém `g-...`. Não faz consultas
+de metadados em cascata apenas para simplificar instruções. Uma busca por nome
+reutiliza seu inventário na mesma resposta. Aspas e barras são escapadas com JSON;
+o prefixo da invocação é mantido nos comandos gerados. Operações continuam usando
+`op-...`. Copie o comando apresentado pelo bot e acrescente a opção desejada.
 
 Referências são aleatórias, válidas por 15 minutos e vinculadas ao solicitante,
 grupo e socket. Não concedem permissão: todas as consultas e revisões revalidam
@@ -157,8 +171,9 @@ nome. São limitadas em memória e não alteram as coleções ou índices do Mon
 O caminho antigo por JID e por ID de operação continua aceito como entrada,
 inclusive depois de reiniciar, mas nunca é reproduzido nas respostas.
 
-O histórico usa nomes disponíveis nos metadados/contatos locais. Sem nome,
-mostra uma identificação genérica; não usa telefone como substituto. Não gera
+O histórico usa nomes disponíveis nos metadados/contatos locais e pushName.
+Sem nome confiável, mostra exatamente `Participante não identificado`; não usa
+telefone como substituto. Não gera
 menções numéricas nem notifica participantes expulsos em uma consulta privada.
 Motivos e nomes com telefones, JIDs ou referências internas são ocultados somente
 na apresentação; os registros originais permanecem intactos. As respostas não
@@ -169,6 +184,37 @@ apenas ao privado autorizado. Falha de envio privado não transfere o histórico
 ao grupo. Grupo inexistente e grupo sem autorização recebem a mesma resposta.
 Uma consulta não altera registros. `resolver` mantém as gravações de auditoria
 e a liberação explícita já existentes, sem editar a expulsão original.
+
+## Arquivos do Olimpo e nomes transitórios
+
+Respostas privadas usam o título `🏛️ ARQUIVOS DO OLIMPO`, seções para expulsões,
+pendências, operações e revisões, com um cartão por registro. O responsável é
+rotulado conforme a função registrada (Arconte, administrador ou dono do bot).
+Datas usam `pt-BR` e `America/Sao_Paulo`, com o deslocamento UTC correspondente
+ao instante, inclusive para registros antigos no horário de verão.
+
+Mensagens extensas são divididas entre cartões, com cabeçalho e indicação da
+parte; a autorização é verificada antes de cada envio. A continuação aparece
+na última parte. A paginação do repositório e os documentos não mudam.
+
+`dados/arcontes-nomes.js` observa passivamente os eventos já recebidos do Baileys:
+contatos, sincronização, mensagens e vínculos explícitos `lid-mapping.update`.
+`bot.js` registra esse observador uma única vez por socket. Ele guarda somente
+nomes e identidades em até 2.000 entradas por socket, por no máximo seis horas,
+sem corpos de mensagens, consultas de rede, timers ou persistência no MongoDB.
+O catálogo é limpo ao encerrar o socket; eventos futuros podem repopulá-lo após
+reconectar. O nome salvo tem prioridade, seguido do nome de exibição/pushName.
+
+O índice de nomes é construído uma vez por consulta. Campos LID só são ligados
+ao PN se houver um par explícito e sem contradição nos metadados, contatos ou
+eventos do Baileys. Dígitos iguais em namespaces distintos nunca são prova de
+identidade. Uma informação ambígua permanece genérica. Os nomes não concedem
+autorizações. Não são feitas buscas de perfil/getName nem leituras de outras
+coleções para tentar preencher nomes ausentes. Após reinício ou se a pessoa
+nunca apareceu nas fontes disponíveis, o nome pode permanecer desconhecido.
+
+Para disponibilizar a captura de nomes, o novo módulo e a pequena integração em
+`bot.js` precisam acompanhar a atualização dos módulos de apresentação.
 
 ## Validação offline
 
@@ -181,3 +227,6 @@ repositório falso por cenário. Não validam MongoDB real nem remoções reais.
 `node scripts/teste-historicoarconte.js` cobre nomes completos, duplicatas,
 Unicode, autorização, referências, paginação, auditoria e ausência de IDs e
 telefones nas respostas públicas/privadas, incluindo motivos armazenados.
+Também cobre pushName, contatos em Map, vínculos PN/LID e conflitos, datas de
+Brasília, comandos copiáveis por nome, prefixo, mensagens longas e perda de
+permissão entre partes. Não valida eventos recebidos de uma conta real.

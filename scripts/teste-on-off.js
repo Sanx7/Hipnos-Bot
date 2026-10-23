@@ -436,15 +436,15 @@ async function main() {
       assert.equal(remocoes.length, 1)
       entregas.length = 0
       await local.enviar(`/historicoarconte grupo ${grupo}`, admin, undefined, false, admin)
-      assert.ok(entregas.some(e => e.jid === admin && e.text?.includes('Expulsões confirmadas')))
-      assert.ok(!entregas.some(e => e.jid === grupo && e.text?.includes('Expulsões confirmadas')))
+      assert.ok(entregas.some(e => e.jid === admin && e.text?.includes('EXPULSÕES CONFIRMADAS')))
+      assert.ok(!entregas.some(e => e.jid === grupo && e.text?.includes('EXPULSÕES CONFIRMADAS')))
       entregas.length = 0
       await local.enviar(`/historicoarconte grupo ${grupo}`, `${comum}@s.whatsapp.net`, undefined, false, `${comum}@s.whatsapp.net`)
-      assert.ok(!entregas.some(e => e.text?.includes('Expulsões confirmadas')))
+      assert.ok(!entregas.some(e => e.text?.includes('EXPULSÕES CONFIRMADAS')))
       assert.ok(entregas.some(e => e.text?.includes('Apenas administradores reais')))
       entregas.length = 0
       await local.enviar('/historicoarconte', admin)
-      assert.ok(entregas.some(e => e.jid === admin && e.text?.includes('Expulsões confirmadas')))
+      assert.ok(entregas.some(e => e.jid === admin && e.text?.includes('EXPULSÕES CONFIRMADAS')))
       assert.ok(entregas.some(e => e.jid === grupo && e.text === 'Consulta do histórico enviada no privado.'))
     } finally {
       sistema.__definirServicoTeste()

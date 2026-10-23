@@ -220,61 +220,79 @@ function criarServico(repo = criarRepositorio(), { disponivel = seguro.exclusivo
     const sender = privado ? origem : msg?.key?.participant
     if (msg?.key?.remoteJid !== origem || msg.key.fromMe) negar('Origem da consulta não comprovada.')
     if (privado && !/^\d+(?::\d+)?@(?:lid|s\.whatsapp\.net)$/.test(origem)) negar('Origem da consulta não comprovada.')
+    const invocacao = String(texto).trim().split(/\s+/)[0]
+    const base = /^[^\s]{1,8}historicoarconte$/i.test(invocacao) && textoSeguro(invocacao) === invocacao ? invocacao : '/historicoarconte'
     const selecionarGrupo = /^grupo(?:\s|$)/i.test(entrada)
     if (privado && !selecionarGrupo) negar(`No privado, use o nome do grupo. ${AJUDA}`)
     const selecionado = selecionarGrupo ? await apresentacao.selecionar(sock, entrada.replace(/^grupo\s*/i, ''),
       grupo => gestorHistorico(sock, grupo, sender)) : { grupo: origem, args: entrada.split(/\s+/).filter(Boolean) }
     if (selecionado.escolhas) {
       const opcoes = []
-      let destinatario
+      let destinatario, vistaOpcoes
       for (const [indice, escolha] of selecionado.escolhas.entries()) {
         const recente = await gestorHistorico(sock, escolha.grupo, sender)
         if (recente.autor.numero !== escolha.c.autor.numero || (destinatario && destinatario !== recente.autor.numero)) negar('Identidade do solicitante mudou durante a consulta.')
         destinatario = recente.autor.numero
         const v = apresentacao.vista(sock, escolha.grupo, recente)
-        opcoes.push(`${indice + 1}. ${v.nomeGrupo} — ${recente.meta.participants.length} participantes\nConsultar: /historicoarconte grupo ${v.grupoRef}`)
+        vistaOpcoes ||= v
+        opcoes.push(`${indice + 1}. ${v.nomeGrupo} — ${recente.meta.participants.length} participantes\nConsultar: ${base} grupo ${v.grupoRef}`)
       }
-      await sock.sendMessage(`${destinatario}@s.whatsapp.net`, { text: `Há grupos autorizados com o mesmo nome. Escolha uma opção (referências válidas por 15 minutos):\n${opcoes.join('\n\n')}` })
+      for (const parte of vistaOpcoes.montar('🔎 *GRUPOS HOMÔNIMOS*', null, ['Escolha um dos grupos autorizados com o mesmo nome:', ...opcoes])) {
+        for (const escolha of selecionado.escolhas) {
+          const atual = await gestorHistorico(sock, escolha.grupo, sender)
+          if (atual.autor.numero !== destinatario) negar('Identidade do solicitante mudou durante a consulta.')
+        }
+        await sock.sendMessage(`${destinatario}@s.whatsapp.net`, { text: parte })
+      }
       if (!privado) return responder('Opções dos grupos enviadas no privado.')
       return
     }
     const { grupo, args } = selecionado
     const solicitante = selecionado.c || await gestorHistorico(sock, grupo, sender)
     const vista = apresentacao.vista(sock, grupo, solicitante)
-    const comandoPrivado = `/historicoarconte grupo ${vista.grupoRef}`
-    let resultado
+    const comandoPrivado = await vista.comando(base, selecionado)
+    const atalhos = `⚖️ *Operações pendentes:* ${comandoPrivado} pendentes\n📚 *Auditoria:* ${comandoPrivado} revisoes`
+    let titulo, paginaAtual, blocos, rodape = atalhos
     if (args[0] === 'resolver') {
       args[1] = vista.operacao(args[1])
-      resultado = await resolver(sock, grupo, sender, msg, args.slice(1), privado)
+      titulo = '⚖️ *REVISÃO DA OPERAÇÃO*'
+      blocos = [await resolver(sock, grupo, sender, msg, args.slice(1), privado)]
     } else if (args[0] === 'pendentes' && args.length === 1) {
       const controle = await repo.controle(grupo)
       const op = controle?.ocupado && controle.operacao ? await repo.operacao(grupo, controle.operacao) : null
-      resultado = !controle?.ocupado ? 'Grupo sem trava ativa.' : op ?
-        `${await vista.resumo(op)}\n${ativas.has(controle.token) ? 'Chamada ainda em execução; liberação recusada.' : 'Trava aguardando revisão autorizada.'}\n` +
+      titulo = '⚖️ *OPERAÇÕES PENDENTES*'
+      blocos = [!controle?.ocupado ? 'Grupo sem trava ativa.' : op ?
+        `${await vista.resumo(op)}\n\n${ativas.has(controle.token) ? 'Chamada ainda em execução; liberação recusada.' : 'Trava aguardando revisão autorizada.'}\n` +
         `Consulte ${comandoPrivado} operacao ${vista.refOperacao(op._id)}\nApós revisar: ${comandoPrivado} resolver ${vista.refOperacao(op._id)} CONFIRMO motivo_da_revisão\n` +
         'A ausência do participante não comprova expulsão. A liberação preserva o resultado original.' :
-        'Trava sem vínculo seguro com uma expulsão (ou referente a patente). Liberação recusada; exige análise específica, sem apagar registros.'
+        'Trava sem vínculo seguro com uma expulsão (ou referente a patente). Liberação recusada; exige análise específica, sem apagar registros.']
     } else if (args[0] === 'operacao' && args.length === 2) {
       const op = await repo.operacao(grupo, vista.operacao(args[1]))
       if (!op) negar('Expulsão não encontrada neste grupo.')
       const revisoes = await repo.revisoes(grupo, op._id)
-      resultado = `${await vista.resumo(op)}\nRevisões permanentes (até 20 mais recentes):\n${(await Promise.all(revisoes.map(r => vista.revisao(r)))).join('\n') || 'Nenhuma revisão.'}`
+      titulo = '🔎 *DETALHES DA OPERAÇÃO*'
+      blocos = [await vista.resumo(op), '📚 *Revisões permanentes* (até 20 mais recentes):',
+        ...(revisoes.length ? await Promise.all(revisoes.map(r => vista.revisao(r))) : ['Nenhuma revisão.'])]
     } else if (args[0] === 'revisoes' && args.length <= 2 && (!args[1] || /^[1-9]\d{0,3}$/.test(args[1]))) {
       const pagina = Number(args[1] || 1), revisoes = await repo.listarRevisoes(grupo, pagina)
-      resultado = `Auditoria de revisões — página ${pagina}:\n${(await Promise.all(revisoes.map(r => vista.revisao(r, true)))).join('\n') || 'Nenhuma revisão.'}\nPróxima página: ${comandoPrivado} revisoes ${pagina + 1}`
+      titulo = '📚 *AUDITORIA DE REVISÕES*'; paginaAtual = pagina
+      blocos = revisoes.length ? await Promise.all(revisoes.map(r => vista.revisao(r, true))) : ['Nenhuma revisão.']
+      rodape = `🔮 *Próxima página:* ${comandoPrivado} revisoes ${pagina + 1}\n${atalhos}`
     } else {
       if (args.length > 1 || (args[0] && !/^[1-9]\d{0,3}$/.test(args[0]))) {
         negar(AJUDA)
       }
       const pagina = Number(args[0] || 1), lista = await repo.historico(grupo, pagina)
-      resultado = lista.length ? `Expulsões confirmadas — página ${pagina}:\n${(await Promise.all(lista.map(p => vista.expulsao(p)))).join('\n')}` : 'Nenhuma expulsão confirmada nesta página.'
-      resultado += `\nPróxima página: ${comandoPrivado} ${pagina + 1}\nOperações bloqueadas: ${comandoPrivado} pendentes`
-      resultado += `\nAuditoria permanente: ${comandoPrivado} revisoes`
+      titulo = '⚔️ *EXPULSÕES CONFIRMADAS*'; paginaAtual = pagina
+      blocos = lista.length ? await Promise.all(lista.map(p => vista.expulsao(p))) : ['Nenhuma expulsão confirmada nesta página.']
+      rodape = `🔮 *Próxima página:* ${comandoPrivado} ${pagina + 1}\n${atalhos}`
     }
-    const recente = await gestorHistorico(sock, grupo, sender)
-    if (recente.autor.numero !== solicitante.autor.numero) negar('Identidade do solicitante mudou durante a consulta.')
-    // A origem pode ser o grupo ou o privado. Dados nunca são enviados ao grupo.
-    await sock.sendMessage(`${recente.autor.numero}@s.whatsapp.net`, { text: `Grupo: ${vista.nomeGrupo}\n${resultado}\nReferências válidas por 15 minutos; se expirarem, consulte novamente pelo nome do grupo.` })
+    for (const parte of vista.montar(titulo, paginaAtual, blocos, rodape)) {
+      // Também revalida cada parte de uma resposta longa. Nunca enviar ao grupo.
+      const recente = await gestorHistorico(sock, grupo, sender)
+      if (recente.autor.numero !== solicitante.autor.numero) negar('Identidade do solicitante mudou durante a consulta.')
+      await sock.sendMessage(`${recente.autor.numero}@s.whatsapp.net`, { text: parte })
+    }
     if (!privado) return responder('Consulta do histórico enviada no privado.')
   }
   async function executar(acao, sock, grupo, msg, texto = '') {

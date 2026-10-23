@@ -1,15 +1,25 @@
 const { randomBytes } = require('node:crypto')
-const { identificar } = require('./identidade-participante')
+const { criarResolvedorNomes } = require('./arcontes-nomes')
 const GRUPO = /^\d+(?:-\d+)?@g\.us$/
 const REFERENCIA = /^(g|op|rv)-[A-Za-z0-9_-]{16}$/
 const AJUDA = 'Use /historicoarconte grupo "Nome completo" [página|pendentes|revisoes|operacao referência|resolver referência CONFIRMO motivo].'
+const LINHA = '━━━━━━━━━━━━━━'
+const datas = new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Sao_Paulo',
+  day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZoneName: 'longOffset' })
+function formatarData(valor) {
+  if (valor == null) return 'Data não disponível'
+  const data = new Date(valor)
+  if (!Number.isFinite(data.getTime())) return 'Data não disponível'
+  const partes = Object.fromEntries(datas.formatToParts(data).map(p => [p.type, p.value]))
+  return `${partes.day}/${partes.month}/${partes.year} às ${partes.hour}:${partes.minute} (${partes.timeZoneName.replace('GMT', 'UTC')})`
+}
 function negar(resposta) { throw Object.assign(new Error('HISTORICO_BLOQUEADO'), { resposta }) }
 function normalizar(texto) {
   return String(texto || '').normalize('NFKC').normalize('NFD').replace(/\p{M}/gu, '')
     .replace(/[\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g, '').trim().replace(/\s+/g, ' ').toLocaleLowerCase('pt-BR')
 }
 function textoSeguro(valor, padrao = 'Não informado', limite = 500) {
-  const texto = String(valor || '').replace(/[\u0000-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g, ' ')
+  const texto = String(valor || '').replace(/[\u0000-\u001f\u007f\u200b-\u200f\u2028-\u202e\u2066-\u2069]/g, ' ')
     .replace(/[\w:.-]+@(?:g\.us|s\.whatsapp\.net|lid)\b/gi, '[identificador oculto]')
     .replace(/\b[a-f0-9]{64}\b/gi, '[referência interna]')
     .replace(/\b[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}\b/gi, '[referência interna]')
@@ -68,13 +78,15 @@ function criarApresentacaoHistorico({ agora = Date.now } = {}) {
     const todos = await sock.groupFetchAllParticipating()
     if (!todos || typeof todos !== 'object' || Array.isArray(todos)) negar('Não foi possível consultar os grupos agora.')
     const nomes = []
+    let completo = true
     for (const [grupo, meta] of Object.entries(todos)) {
       if (!GRUPO.test(grupo)) continue
       let subject = meta?.subject
       if (typeof subject !== 'string') {
-        try { subject = (await sock.groupMetadata(grupo))?.subject } catch (_) { continue }
+        try { subject = (await sock.groupMetadata(grupo))?.subject } catch (_) { completo = false; continue }
       }
       if (typeof subject === 'string') nomes.push({ grupo, nome: normalizar(subject) })
+      else completo = false
     }
     const opcoes = []
     if (nomeExato !== undefined) opcoes.push({ nome: normalizar(nomeExato), args: argsExatos })
@@ -101,7 +113,7 @@ function criarApresentacaoHistorico({ agora = Date.now } = {}) {
         } catch (_) { /* Não revelar a existência de grupos sem autorização. */ }
       }
       if (!autorizados.length) negar('Grupo não encontrado ou acesso não autorizado.')
-      if (autorizados.length === 1) return autorizados[0]
+      if (autorizados.length === 1) return { ...autorizados[0], inventario: nomes, completo }
       return { escolhas: autorizados.slice(0, 20) }
     }
     negar('Grupo não encontrado ou acesso não autorizado.')
@@ -111,27 +123,57 @@ function criarApresentacaoHistorico({ agora = Date.now } = {}) {
     const ref = (tipo, valor) => referencia(sock, autor, grupo, tipo, valor)
     const grupoRef = ref('g', grupo)
     const nomeGrupo = nomeSeguro(c.meta.subject, 'Grupo sem nome disponível')
-    async function pessoa(numero) {
-      // Identidade comprovada; nunca associar PN e LID pelos dígitos.
-      const dado = await identificar(c.meta.participants, `${numero}@s.whatsapp.net`)
-      const p = dado.numero === numero ? dado.participante : null
-      // Um contato PN exato pode continuar disponível após a saída do grupo.
-      // Contatos LID só são utilizados quando o vínculo veio dos metadados.
-      const contatos = sock.contacts || sock.store?.contacts
-      const contato = (p && contatos?.[p.id]) || contatos?.[`${numero}@s.whatsapp.net`]
-      return [p?.name, p?.notify, p?.verifiedName, contato?.name, contato?.notify]
-        .map(nome => nomeSeguro(nome, '')).find(Boolean) || 'Participante sem nome disponível'
+    let resolverNomes
+    const pessoa = numero => {
+      resolverNomes ||= criarResolvedorNomes(sock, grupo, c.meta.participants, nomeSeguro)
+      return resolverNomes(numero)
+    }
+    const papel = op => op.responsavelTipo === 'arconte' ? '👑 *Arconte:*' : op.responsavelTipo === 'administrador' ? '🛡️ *Administrador:*' : op.responsavelTipo === 'dono' ? '👑 *Dono do bot:*' : '👤 *Responsável:*'
+    async function comando(base, selecionado = {}) {
+      const fallback = `${base} grupo ${grupoRef}`
+      const original = c.meta.subject
+      // Nunca inserir no comando um nome truncado, ocultado ou modificado.
+      if (typeof original !== 'string' || !original || nomeGrupo !== original || original.length > 120) return fallback
+      try {
+        let inventario = selecionado.inventario
+        if (!inventario) {
+          const todos = await sock.groupFetchAllParticipating()
+          if (!todos || typeof todos !== 'object' || Array.isArray(todos)) return fallback
+          inventario = []
+          for (const [id, meta] of Object.entries(todos)) {
+            if (!GRUPO.test(id)) continue
+            // Não fazer uma consulta por grupo só para simplificar o texto.
+            if (typeof meta?.subject !== 'string') return fallback
+            inventario.push({ grupo: id, nome: normalizar(meta.subject) })
+          }
+        } else if (!selecionado.completo) return fallback
+        const iguais = inventario.filter(g => g.nome === normalizar(original))
+        return iguais.length === 1 && iguais[0].grupo === grupo ? `${base} grupo ${JSON.stringify(original)}` : fallback
+      } catch (_) { return fallback }
+    }
+    function montar(titulo, pagina, blocos, rodape = '') {
+      const cabecalho = `🏛️ *ARQUIVOS DO OLIMPO* 🏛️\n\n📜 *Grupo:* ${nomeGrupo}\n\n${titulo}${pagina ? `\n📖 *Página:* ${pagina}` : ''}\n🕰️ *Fuso:* Brasília (America/Sao_Paulo)\n\n`
+      const fim = `${rodape ? `\n\n${rodape}` : ''}\n\n⏳ Referências válidas por 15 minutos.`
+      const partes = [], margem = cabecalho.length + fim.length + 80
+      let atual = ''
+      for (const bloco of blocos) {
+        const trecho = `${atual ? `\n\n${LINHA}\n\n` : ''}${bloco}`
+        if (atual && atual.length + trecho.length + margem > 3800) { partes.push(atual); atual = bloco }
+        else atual += trecho
+      }
+      partes.push(atual)
+      return partes.map((parte, i) => `${cabecalho}${partes.length > 1 ? `📦 *Parte:* ${i + 1}/${partes.length}\n\n` : ''}${LINHA}\n\n${parte}\n\n${LINHA}${i === partes.length - 1 ? fim : '\n\nContinua na próxima mensagem.'}`)
     }
     async function resumo(op) {
-      return `Operação: ${ref('op', op._id)}\nEstado original: ${textoSeguro(op.estado)}\nResponsável (${textoSeguro(op.responsavelTipo)}): ${await pessoa(op.responsavel)}\nAlvo: ${await pessoa(op.alvo)}\nMotivo: ${textoSeguro(op.motivo)}`
+      return `🔖 *Operação:* ${ref('op', op._id)}\n⚖️ *Estado original:* ${textoSeguro(op.estado)}\n${papel(op)} ${pessoa(op.responsavel)}\n🎯 *Alvo:* ${pessoa(op.alvo)}\n📅 *Data:* ${formatarData(op.criadoEm)}\n📝 *Motivo:* ${textoSeguro(op.motivo)}`
     }
     async function revisao(r, incluirOperacao = false) {
-      return `${ref('rv', r._id)}${incluirOperacao ? ` | operação: ${ref('op', r.operacao)}` : ''} | ${textoSeguro(r.estado)} | revisor (${textoSeguro(r.responsavelTipo)}): ${await pessoa(r.responsavel)} | ${new Date(r.criadoEm).toISOString()} | ${textoSeguro(r.motivo)}`
+      return `📚 *Revisão:* ${ref('rv', r._id)}${incluirOperacao ? `\n🔖 *Operação:* ${ref('op', r.operacao)}` : ''}\n⚖️ *Estado:* ${textoSeguro(r.estado)}\n🧑‍⚖️ *Revisor (${textoSeguro(r.responsavelTipo)}):* ${pessoa(r.responsavel)}\n📅 *Data:* ${formatarData(r.criadoEm)}\n📝 *Motivo:* ${textoSeguro(r.motivo)}`
     }
     async function expulsao(p) {
-      return `${new Date(p.confirmadoEm).toISOString()} | ${textoSeguro(p.responsavelTipo)}: ${await pessoa(p.responsavel)} | alvo: ${await pessoa(p.alvo)} | motivo: ${textoSeguro(p.motivo)}`
+      return `${papel(p)} ${pessoa(p.responsavel)}\n🎯 *Alvo:* ${pessoa(p.alvo)}\n📅 *Data:* ${formatarData(p.confirmadoEm)}\n📝 *Motivo:* ${textoSeguro(p.motivo)}`
     }
-    return { grupoRef, nomeGrupo, resumo, revisao, expulsao, refOperacao: id => ref('op', id),
+    return { grupoRef, nomeGrupo, resumo, revisao, expulsao, comando, montar, refOperacao: id => ref('op', id),
       operacao(valor) {
         if (/^[a-f0-9]{64}$/.test(valor || '')) return valor
         return consultar(sock, valor, 'op', autor, grupo).valor
@@ -139,4 +181,4 @@ function criarApresentacaoHistorico({ agora = Date.now } = {}) {
   }
   return { selecionar, vista }
 }
-module.exports = { criarApresentacaoHistorico, normalizar, textoSeguro, AJUDA }
+module.exports = { criarApresentacaoHistorico, normalizar, textoSeguro, formatarData, AJUDA }
