@@ -10,25 +10,27 @@ const { limparNumero, OWNER_NUMBERS } = require('../config')
 const protecao = require('../dados/protecao-bot')
 const sair = require('../comandos/menu-dono/sairgrupo')
 const ban = require('../comandos/admin/ban')
+const arcontes = require('../dados/arcontes-olimpo')
+const socketSeguro = require('../dados/socket-seguro')
 require('../prefixo').__definirPrefixoTeste('/')
 const GRUPO = '1@g.us', OUTRO = '2@g.us'
 const BOT = '5511000000000@s.whatsapp.net', BOT_LID = '90000@lid'
 const ADMIN = '5511000000001@s.whatsapp.net', COMUM = '5511000000002@s.whatsapp.net'
 const DONO = `${OWNER_NUMBERS[0]}@s.whatsapp.net`, DONO2 = `${OWNER_NUMBERS[1]}@s.whatsapp.net`
 const DONO_LID = '90099@lid'
-let pares = new Map(), blacklist = [], clock = Date.now
+let pares = new Map(), blacklist = [], clock = Date.now, mensagemSeq = 0
 // Usa os helpers reais para normalizar/metadados; sessão offline controlada.
 lid.__definirConsultaSessaoTeste(async id => pares.get(id) || null)
 lid.resolverLidsEmLote = async ids => new Map(ids.map(limparNumero).filter(id => pares.has(id)).map(id => [id, pares.get(id)]))
 ban.__definirGravacaoBlacklistTeste(numero => blacklist.push(numero))
 function mensagem(sender = ADMIN, alvo, reply = false, grupo = GRUPO) {
-  return { key: { remoteJid: grupo, participant: sender, fromMe: false }, message: {
+  return { key: { remoteJid: grupo, participant: sender, fromMe: false, id: `protecao-${++mensagemSeq}` }, message: {
     extendedTextMessage: { contextInfo: alvo ? (reply ? { participant: alvo } : { mentionedJid: [alvo] }) : {} }
   } }
 }
 function criarSock() {
   const envios = [], remocoes = [], saidas = [], eventos = []
-  return {
+  const sock = {
     user: { id: '5511000000000:12@s.whatsapp.net', lid: BOT_LID },
     membros: [ { id: BOT_LID, phoneNumber: BOT, admin: 'admin' }, { id: ADMIN, admin: 'admin' },
       { id: COMUM }, { id: DONO2 }, { id: DONO_LID, phoneNumber: DONO } ],
@@ -39,12 +41,19 @@ function criarSock() {
     async groupSettingUpdate() {},
     async groupLeave(jid) { saidas.push(jid); eventos.push('saida') }
   }
+  socketSeguro.preparar(sock)
+  socketSeguro.atualizar(sock, true)
+  return sock
 }
 let passou = 0
 async function teste(nome, fn) {
   sair.__limparConfirmacoesTeste(); pares.clear(); blacklist = []
   lid.__definirConsultaSessaoTeste(async id => pares.get(id) || null)
   Date.now = clock
+  const colecoes = require('./helpers/colecoes-arcontes-fake')()
+  await require('../dados/arcontes-olimpo-mongo').preparar(colecoes)
+  arcontes.__definirServicoTeste(arcontes.criarServico(require('../dados/arcontes-olimpo-mongo')
+    .criarRepositorio(async () => colecoes)))
   await fn()
   passou++
   console.log(`PASSOU: ${nome}`)

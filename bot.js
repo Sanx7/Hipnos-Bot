@@ -900,7 +900,9 @@ async function montarBot() {
 
               const ehAdmin = ehAdminDoGrupo(metadados?.participants, sender)
 
-              if (!ehAdmin) {
+              const arconteKick = !ehAdmin && nomeComando === 'kick' && comando === require('./comandos/admin/kick') &&
+                await require('./dados/arcontes-olimpo').podeKickRestrito(sock, jid, sender)
+              if (!ehAdmin && !arconteKick) {
                 if (AVISAR_BLOQUEIO) {
                   await sock.sendMessage(jid, {
                     text: '🛡️ *MODO RESTRITO ATIVO*\n\nApenas *administradores do grupo* podem invocar os comandos de Hipnos enquanto o /soadm estiver ativo neste recinto. 💤'

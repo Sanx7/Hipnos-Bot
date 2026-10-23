@@ -291,6 +291,7 @@ async function main() {
       } })
     }
     const contexto = {
+      require: require('node:module').createRequire(require.resolve('../bot')),
       sock: { ...sock, ev: { on(evento, fn) {
         if (!ouvintes.has(evento)) ouvintes.set(evento, [])
         ouvintes.get(evento).push(fn)
@@ -383,6 +384,73 @@ async function main() {
     } }
   }
   const fluxo = criarHandler()
+  await teste('Arcontes: handler real preserva OFF, /soadm e histórico privado autorizado', async () => {
+    const local = criarHandler()
+    const sistema = require('../dados/arcontes-olimpo')
+    const colecoes = require('./helpers/colecoes-arcontes-fake')()
+    const mongo = require('../dados/arcontes-olimpo-mongo')
+    await mongo.preparar(colecoes)
+    const repo = mongo.criarRepositorio(async () => colecoes)
+    const alvo = '00010000044@s.whatsapp.net', admin = '00010000045@s.whatsapp.net'
+    const remocoes = []
+    const entregas = [], enviarOriginal = local.sock.sendMessage
+    local.sock.sendMessage = async (jid, conteudo, ...args) => {
+      entregas.push({ jid, ...conteudo })
+      return enviarOriginal.call(local.sock, jid, conteudo, ...args)
+    }
+    local.sock.groupMetadata = async () => ({ owner: admin, participants: [
+      { id: admin, admin: 'admin' }, { id: `${comum}@s.whatsapp.net` }, { id: alvo },
+      { id: local.sock.user.id, admin: 'admin' }
+    ] })
+    local.sock.groupParticipantsUpdate = async (jid, alvos) => {
+      remocoes.push({ jid, alvos }); return alvos.map(jid => ({ jid, status: 200 }))
+    }
+    const seguro = require('../dados/socket-seguro')
+    seguro.preparar(local.sock); seguro.atualizar(local.sock, true)
+    sistema.__definirServicoTeste(sistema.criarServico(repo))
+    await repo.definir(grupo, comum, true, '00010000045', 'fixture')
+    const kick = require('../comandos/admin/kick')
+    local.registro.set('kick', kick)
+    local.registro.set('alias-kick-teste', kick)
+    for (const nome of ['ban', 'arconte', 'removerarconte', 'historicoarconte']) {
+      local.registro.set(nome, require(`../comandos/admin/${nome}`))
+    }
+    const conteudo = texto => ({ extendedTextMessage: { text: texto, contextInfo: { mentionedJid: [alvo] } } })
+    try {
+      require('../prefixo').__definirPrefixoTeste('/')
+      local.protecoes.onlyAdmin = [grupo]
+      await estado.definirLigado(false)
+      await local.enviar('/kick @alvo', `${comum}@s.whatsapp.net`, conteudo('/kick @alvo'))
+      assert.equal(remocoes.length, 0)
+      await estado.definirLigado(true)
+      for (const nome of ['alias-kick-teste', 'ban', 'arconte', 'removerarconte', 'historicoarconte']) {
+        await local.enviar(`/${nome} @alvo`, `${comum}@s.whatsapp.net`, conteudo(`/${nome} @alvo`))
+        assert.equal(remocoes.length, 0)
+        assert.equal(colecoes.eventos.docs.length, 0)
+      }
+      await local.enviar('/kick @alvo', `${comum}@s.whatsapp.net`, conteudo('/kick @alvo'))
+      assert.equal(remocoes.length, 1)
+      assert.equal(colecoes.eventos.docs[0].estado, 'confirmada')
+      delete local.protecoes.onlyAdmin
+      await local.enviar('/ban @alvo', `${comum}@s.whatsapp.net`, conteudo('/ban @alvo'))
+      assert.equal(remocoes.length, 1)
+      entregas.length = 0
+      await local.enviar(`/historicoarconte grupo ${grupo}`, admin, undefined, false, admin)
+      assert.ok(entregas.some(e => e.jid === admin && e.text?.includes('Expulsões confirmadas')))
+      assert.ok(!entregas.some(e => e.jid === grupo && e.text?.includes('Expulsões confirmadas')))
+      entregas.length = 0
+      await local.enviar(`/historicoarconte grupo ${grupo}`, `${comum}@s.whatsapp.net`, undefined, false, `${comum}@s.whatsapp.net`)
+      assert.ok(!entregas.some(e => e.text?.includes('Expulsões confirmadas')))
+      assert.ok(entregas.some(e => e.text?.includes('Apenas administradores reais')))
+      entregas.length = 0
+      await local.enviar('/historicoarconte', admin)
+      assert.ok(entregas.some(e => e.jid === admin && e.text?.includes('Expulsões confirmadas')))
+      assert.ok(entregas.some(e => e.jid === grupo && e.text === 'Consulta do histórico enviada no privado.'))
+    } finally {
+      sistema.__definirServicoTeste()
+      await estado.definirLigado(false)
+    }
+  })
   await teste('fallback VOUC no handler real nao intercepta comando existente', async () => {
     const prefixo = require('../prefixo'), rodadas = require('../dados/vouc-rodadas')
     const local = criarHandler()
