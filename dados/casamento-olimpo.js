@@ -3,6 +3,11 @@ const { normalizeMessageContent } = require('@whiskeysockets/baileys')
 const { criarResolvedor } = require('./casamento-identidade')
 const { criarRepositorio } = require('./casamento-olimpo-mongo')
 const prefixo = require('../prefixo')
+const animacoes = require('./animacoes-relacionamentos')
+const envioAnimacoes = require('../func/animacoes-locais')
+// Marcador transitório de apresentação, sem campos extras nos documentos/respostas.
+const respostasAnimadas = new WeakSet()
+function animada(resposta) { respostasAnimadas.add(resposta); return resposta }
 
 function erro(codigo) { return Object.assign(new Error(codigo), { codigo }) }
 function chave(tipo, jid, numero, msg) {
@@ -90,8 +95,8 @@ function criarServico(repo = criarRepositorio()) {
         casadoEm: null, encerradoEm: null, encerradoPor: null })
       if (!doc) throw erro('ocupado')
       if (doc.estado !== 'pendente') return { text: '🌙 Este pedido já teve seu destino escrito pelas Moiras.' }
-      return { text: `${namoro ? '💞 *NAMORO DO OLIMPO*' : '💍 *CASAMENTO DO OLIMPO*'}\n\n@${c.sender.split('@')[0]} ${namoro ? 'oferece seu coração' : 'oferece sua mão'} a @${alvoJid.split('@')[0]}.\nSob o olhar de ${namoro ? 'Afrodite' : 'Hera'}, o destinatário tem *5 minutos* para usar *${prefixo.prefixoSincrono()}${namoro ? 'aceitarnamoro' : 'aceitar'}* ou *${prefixo.prefixoSincrono()}${namoro ? 'recusarnamoro' : 'recusar'}* neste grupo.`,
-        mentions: [c.sender, alvoJid] }
+      return animada({ text: `${namoro ? '💞 *NAMORO DO OLIMPO*' : '💍 *CASAMENTO DO OLIMPO*'}\n\n@${c.sender.split('@')[0]} ${namoro ? 'oferece seu coração' : 'oferece sua mão'} a @${alvoJid.split('@')[0]}.\nSob o olhar de ${namoro ? 'Afrodite' : 'Hera'}, o destinatário tem *5 minutos* para usar *${prefixo.prefixoSincrono()}${namoro ? 'aceitarnamoro' : 'aceitar'}* ou *${prefixo.prefixoSincrono()}${namoro ? 'recusarnamoro' : 'recusar'}* neste grupo.`,
+        mentions: [c.sender, alvoJid] })
     }
     if (acao === 'casamento' || acao === 'namoro') {
       const doc = await repo.consultar(c.numero, modalidade)
@@ -164,11 +169,11 @@ function criarServico(repo = criarRepositorio()) {
     if (!resultado) throw erro('mudou')
     if (aceitar) {
       const mentions = resultado.mencoesAceite
-      return { text: `${namoro ? '💞 *AFRODITE ABENÇOOU VOSSO NAMORO!*' : '💍 *HERA ABENÇOOU VOSSA UNIÃO!*'}\n\n${mentions.map(j => '@' + j.split('@')[0]).join(' e ')} agora compartilham um laço no Olimpo.\nHipnos guardará vossos sonhos desde *${formatarData(namoro ? resultado.namoradoEm : resultado.casadoEm)}*.`, mentions }
+      return animada({ text: `${namoro ? '💞 *AFRODITE ABENÇOOU VOSSO NAMORO!*' : '💍 *HERA ABENÇOOU VOSSA UNIÃO!*'}\n\n${mentions.map(j => '@' + j.split('@')[0]).join(' e ')} agora compartilham um laço no Olimpo.\nHipnos guardará vossos sonhos desde *${formatarData(namoro ? resultado.namoradoEm : resultado.casadoEm)}*.`, mentions })
     }
-    return { text: encerrar
+    return animada({ text: encerrar
       ? `🌙 As Moiras desfizeram vosso laço. O ${namoro ? 'namoro' : 'casamento'} foi encerrado; Hipnos preserva a memória dos sonhos vividos.`
-      : '🌙 O pedido foi recusado. Afrodite respeita tua vontade; que Hipnos te conceda sonhos serenos.' }
+      : '🌙 O pedido foi recusado. Afrodite respeita tua vontade; que Hipnos te conceda sonhos serenos.' })
   }
   return { executar }
 }
@@ -198,7 +203,12 @@ function comando(nome) {
     }
     // Não propagar ao roteador, que anunciaria erro genérico após um rito salvo.
     // Sem retry automático: o WhatsApp pode ter recebido a primeira resposta.
-    try { return await sock.sendMessage(jid, resposta, { quoted: msg }) }
+    try {
+      if (respostasAnimadas.has(resposta) && animacoes[nome]) {
+        return await envioAnimacoes.enviarAnimacao(sock, jid, animacoes[nome], resposta, { quoted: msg })
+      }
+      return await sock.sendMessage(jid, resposta, { quoted: msg })
+    }
     catch { console.error('[casamento-olimpo] confirmacao_nao_entregue') }
   } }
 }

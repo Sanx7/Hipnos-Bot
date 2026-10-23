@@ -21,8 +21,10 @@ Os aliases existentes e a barra legada permanecem aceitos. A consulta aos menus
 ## Inventário verificado
 
 O loader local passou de 613 para 616 entradas, contando aliases, pela inclusão
-de três novos submenus. Há 330 comandos de execução classificados uma única vez,
+de três novos submenus. Há 330 nomes canônicos de execução classificados,
 além dos 13 menus (central + 12 portais) e do atalho `brincadeira`.
+O catálogo tem 332 entradas: também representa as versões adultas de soco/tapa,
+acessíveis por seus aliases reais, sem contá-los como comandos adicionais.
 Comandos novos exigem atualização editorial do catálogo; o teste acusa omissões.
 Nenhum comando carregado ficou sem categoria. Helpers sem `nome`/`executar`
 (`webp-animado.js` e `audio-extrator.js`) não são comandos.
@@ -43,7 +45,7 @@ Packs de figurinhas ficam no ateliê. A posição dos arquivos de execução é 
 | `menu-download` | 12 | 1 |
 | `menu-modificador` | 8 | 1 |
 | `menu-rpg` | 17 | 2 |
-| `menu-adulto` | 40 | 4 |
+| `menu-adulto` | 42 | 4 |
 | `menu-vip` | 8 | 1 |
 | `menu-dono` | 15 | 2 |
 
@@ -125,7 +127,7 @@ nos textos, sem tratar menções a outros menus como cobertura de seus comandos.
 ### 🔞 Véus de Dionísio
 
 - **🔞 Interações íntimas:** `arrancarcalcinha`, `blow1`, `blow2`, `caranopeito`, `chuparpeito1`, `chuparpeito2`, `comer1`, `comer2`, `comer3`, `comer4`, `comer5`, `mamar`, `mostrapeito`, `pgpeito`, `sentada1`, `sentada2`, `sentada3`, `sentar1`, `sentar2`, `tapabunda1`, `tapabunda2`, `tesourar`.
-- **🎭 Ações e reações:** `atirar1`, `atirar2`, `cartasecreta`, `chutar1`, `chutar2`, `matar1`, `matar2`, `morder`, `risada`.
+- **🎭 Ações e reações:** `atirar1`, `atirar2`, `cartasecreta`, `chutar1`, `chutar2`, `matar1`, `matar2`, `morder`, `risada`, `soco` (acesso `murro`), `tapa` (acesso `bater`).
 - **🌙 Beijos e carícias:** `beijogostoso`, `beijolesbico`, `esfregar`, `lambida1`, `lambida2`, `lambidarosto1`, `lambidarosto2`, `rebolar1`, `rebolar2`.
 
 ### 💎 Dádivas do Olimpo
@@ -166,6 +168,20 @@ O menu anterior também anunciava `enquete-admin-ban`, mas o loader não registr
 esse nome nem `banir`. A nova apresentação não anuncia essas rotas inexistentes.
 O código interno de votação de banimento foi preservado; sua exposição exige
 uma correção própria, fora do escopo dos menus.
+
+## Cobertura do menu adulto
+
+Os 42 comandos definidos em `comandos/menu-adulto/comandos-adulto.js` aparecem
+uma vez cada no portal adulto, em quatro páginas com 12, 12, 12 e 6 entradas.
+Os nomes simples `soco` e `tapa` continuam direcionados às brincadeiras. Por isso,
+as versões adultas são exibidas como `murro (soco adulto)` e `bater (tapa adulto)`,
+com o prefixo configurado. São acessos à mesma entrada, não novos comandos.
+
+O campo editorial `acesso` só é usado quando necessário. O renderer confere o
+nome e a categoria da implementação no registro, omitindo uma entrada adulta
+se seu acesso estiver ausente ou apontar para outra categoria. Não carrega nem
+executa comandos para montar o menu. A consulta permanece pública e não altera
+o modo adulto; os 42 acessos continuam bloqueados quando ele está desligado.
 
 ## Estrutura e validação
 

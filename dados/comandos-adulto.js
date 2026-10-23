@@ -168,6 +168,10 @@ legenda: 'voce se esfregou',
 frase: '{autor} esfregou a xereca molhadinha',
 gifs: [
 'assets/gifs/esfregar/seesfregar.gif',
+'assets/gifs/esfregar/seesfregar1.gif',
+'assets/gifs/esfregar/seesfregar2.gif',
+'assets/gifs/esfregar/seesfregar3.gif',
+'assets/gifs/esfregar/seesfregar4.gif',
 ]
 },
 {
@@ -258,6 +262,8 @@ legenda: 'voce pegou em um peito',
 frase: '{autor} pegou no peito da (o) {alvo}',
 gifs: [
 'assets/gifs/pgpeito/pegarnopeito.mp4',
+'assets/gifs/pgpeito/pegarnopeito2.gif',
+'assets/gifs/pgpeito/pegarnopeito3.gif',
 ]
 },
 {
@@ -357,6 +363,7 @@ legenda: 'voce deu um tapa na🖐️​ bunda de alguem',
 frase: '{autor} deu um tapa🖐️​ na bunda da (o) {alvo} e ele(a) se contorceu de prazer e gemeu alto😈​',
 gifs: [
 'assets/gifs/tapabunda/tapanabunda.mp4',
+'assets/gifs/baternabunda/baternabunda.gif',
 ]
 },
 {
@@ -366,6 +373,7 @@ legenda: 'Voce da um tapa na🖐️​ bunda de alguem',
 frase: '{autor} deu um tapa🖐️​ na bunda da (o) {alvo} e ele(a) se contorceu de prazer e pediu mais😈​',
 gifs: [
 'assets/gifs/tapabunda/tapanabunda2.mp4',
+'assets/gifs/baternabunda/baternabunda.gif',
 ]
 },
 {

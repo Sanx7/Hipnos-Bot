@@ -5,8 +5,12 @@ const { portais, catalogo } = require('./menus-catalogo')
 
 const POR_PAGINA = 12
 function entradas(categoria) {
-  return catalogo.filter(item => item.categoria === categoria &&
-    comandos.get(item.nome)?.nome === item.nome && typeof comandos.get(item.nome)?.executar === 'function')
+  return catalogo.filter(item => {
+    if (item.categoria !== categoria) return false
+    const comando = comandos.get(item.acesso || item.nome)
+    return comando?.nome === item.nome && typeof comando.executar === 'function' &&
+      (categoria !== 'adulto' || comando.categoria === 'adulto')
+  })
 }
 function principal(prefixo) {
   return ['🌙 *HIPNOS BOT*', '🏛️ *PORTAIS DO OLIMPO*', '',
@@ -27,7 +31,8 @@ function submenu(categoria, pagina, prefixo) {
   let secao
   for (const item of lista.slice((pagina - 1) * POR_PAGINA, pagina * POR_PAGINA)) {
     if (item.secao !== secao) { partes.push(`*${item.secao}*`); secao = item.secao }
-    partes.push(`*${prefixo}${item.nome}*${item.uso ? ` ${item.uso}` : ''}\n↳ ${item.descricao}`)
+    const nome = item.acesso ? ` (${item.nome} adulto)` : ''
+    partes.push(`*${prefixo}${item.acesso || item.nome}*${nome}${item.uso ? ` ${item.uso}` : ''}\n↳ ${item.descricao}`)
   }
   if (!lista.length) partes.push('Nenhum comando desta categoria está carregado agora.')
   partes.push('━━━━━━━━━━━━━━')

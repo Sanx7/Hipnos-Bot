@@ -313,6 +313,8 @@ const catalogo = [
   {"categoria":"adulto","secao":"🎭 Ações e reações","nome":"matar2","descricao":"Envia outra animação de ataque."},
   {"categoria":"adulto","secao":"🎭 Ações e reações","nome":"morder","descricao":"Envia uma animação de mordida."},
   {"categoria":"adulto","secao":"🎭 Ações e reações","nome":"risada","descricao":"Envia uma animação de risada."},
+  {"categoria":"adulto","secao":"🎭 Ações e reações","nome":"soco","acesso":"murro","descricao":"Envia uma animação de soco na versão adulta."},
+  {"categoria":"adulto","secao":"🎭 Ações e reações","nome":"tapa","acesso":"bater","descricao":"Envia uma animação de tapa na versão adulta."},
   {"categoria":"adulto","secao":"🌙 Beijos e carícias","nome":"beijogostoso","descricao":"Envia uma animação de beijo íntimo."},
   {"categoria":"adulto","secao":"🌙 Beijos e carícias","nome":"beijolesbico","descricao":"Envia uma animação de beijo entre mulheres."},
   {"categoria":"adulto","secao":"🌙 Beijos e carícias","nome":"esfregar","descricao":"Envia uma interação adulta de carícias."},

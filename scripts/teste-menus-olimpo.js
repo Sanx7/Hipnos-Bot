@@ -57,8 +57,8 @@ async function main() {
     const navegacao = new Set(['menu', 'brincadeira', ...portais.map(p => p.nome)])
     const reais = [...new Set([...comandos.values()].map(c => c.nome))].filter(n => !navegacao.has(n)).sort()
     const ativos = catalogo.filter(c => comandos.get(c.nome)?.nome === c.nome)
-    assert.deepEqual(ativos.map(c => c.nome).sort(), reais)
-    assert.equal(new Set(catalogo.map(c => c.nome)).size, catalogo.length)
+    assert.deepEqual([...new Set(ativos.map(c => c.nome))].sort(), reais)
+    assert.equal(new Set(catalogo.map(c => `${c.categoria}:${c.nome}`)).size, catalogo.length)
     for (const c of catalogo) {
       assert.ok(portais.some(p => p.categoria === c.categoria))
       assert.ok(c.descricao.length >= 12 && c.descricao.length <= 120)
@@ -92,11 +92,47 @@ async function main() {
           if (pagina < paginas) assert.ok(text.includes(`Próxima: ${sinal}${p.nome} ${pagina + 1}`))
           if (pagina > 1) assert.ok(text.includes(`Anterior: ${sinal}${p.nome} ${pagina - 1}`))
         }
-        assert.deepEqual(vistos, entradas(p.categoria).map(c => c.nome))
+        assert.deepEqual(vistos, entradas(p.categoria).map(c => c.acesso || c.nome))
       })
     }
   }
   prefixo.__definirPrefixoTeste('!')
+  await teste('menu adulto cobre os 42 comandos reais, uma única entrada por implementação', () => {
+    const reais = require('../comandos/menu-adulto/comandos-adulto')
+    const lista = entradas('adulto')
+    assert.equal(reais.length, 42)
+    assert.equal(lista.length, reais.length)
+    assert.deepEqual(lista.map(c => c.nome).sort(), reais.map(c => c.nome).sort())
+    for (const cmd of reais) {
+      const item = lista.find(c => c.nome === cmd.nome)
+      assert.equal(comandos.get(item.acesso || item.nome), cmd)
+    }
+  })
+  await teste('adulto tem quatro páginas 12/12/12/6, com aliases somente como acesso da mesma entrada', async () => {
+    const rotas = [], quantidades = []
+    let texto = ''
+    for (let p = 1; p <= 4; p++) {
+      const pagina = (await executar('menu-adulto', `!menu-adulto ${p}`)).conteudo.text
+      texto += pagina
+      const nomes = [...pagina.matchAll(/\*!([\p{L}\d-]+)\*/gu)].map(m => m[1])
+      rotas.push(...nomes); quantidades.push(nomes.length)
+    }
+    assert.deepEqual(quantidades, [12, 12, 12, 6])
+    assert.equal(new Set(rotas).size, 42)
+    assert.match(texto, /\*!murro\* \(soco adulto\)/)
+    assert.match(texto, /\*!bater\* \(tapa adulto\)/)
+    assert.doesNotMatch(texto, /\*!(?:soco|tapa|boquete|tirarcalcinha)\*/)
+    for (const rota of rotas) assert.equal(comandos.get(rota).categoria, 'adulto')
+  })
+  await teste('alias ausente ou desviado para brincadeiras não anuncia acesso adulto incorreto', () => {
+    const murro = comandos.get('murro'), bater = comandos.get('bater')
+    try {
+      comandos.delete('murro')
+      comandos.set('bater', comandos.get('tapa'))
+      assert.equal(entradas('adulto').length, 40)
+      assert.ok(!entradas('adulto').some(c => ['soco', 'tapa'].includes(c.nome)))
+    } finally { comandos.set('murro', murro); comandos.set('bater', bater) }
+  })
   await teste('aliases dos menus e barra legada preservados', async () => {
     for (const { cmd } of fontes.filter(f => portais.some(p => p.nome === f.cmd.nome))) {
       for (const alias of cmd.aliases || []) {
@@ -157,6 +193,15 @@ async function main() {
     assert.ok(!resposta.conteudo.video && !resposta.conteudo.image)
     assert.equal(await adulto.modoAdultoAtivo('120000000000@g.us'), false)
   })
+  await teste('todos os 42 acessos exibidos continuam bloqueados com modo adulto desligado', async () => {
+    await executar('menu-adulto', '!menu-adulto')
+    for (const item of entradas('adulto')) {
+      const acesso = item.acesso || item.nome
+      const resposta = await executar(acesso, `!${acesso}`, '120000000000@g.us')
+      assert.match(resposta.conteudo.text, /modo adulto/i)
+      assert.ok(!resposta.conteudo.video && !resposta.conteudo.image)
+    }
+  })
   await teste('colisões preexistentes mantêm os vencedores e descrições reais', () => {
     assert.equal(comandos.get('gay'), require('../comandos/menu-efeitos/efeitos-imagem').find(c => c.nome === 'gay'))
     assert.match(catalogo.find(c => c.nome === 'gay').descricao, /arco-íris/)
@@ -164,6 +209,6 @@ async function main() {
     assert.equal(comandos.get('encerrar-enquete'), require('../comandos/menu-brincadeiras/enquete')[1])
     assert.equal(comandos.get('meuslembretes'), require('../comandos/meuslembretes'))
   })
-  console.log(`${total} testes de menus passaram (offline); ${catalogo.length} comandos em ${portais.length} portais.`)
+  console.log(`${total} testes de menus passaram (offline); ${catalogo.length} entradas em ${portais.length} portais.`)
 }
 main().catch(erro => { console.error(erro); process.exitCode = 1 })
