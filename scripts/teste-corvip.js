@@ -22,6 +22,7 @@
 // Uso: node scripts/teste-corvip.js
 // ============================================================
 
+const { verificarMenu } = require('./helpers/menu-catalogo-teste')
 process.env.MONGODB_URI = ''
 process.env.MONGO_URI_RPG = ''
 
@@ -187,10 +188,7 @@ async function main() {
   })
 
   await testar('menu-vip e changelog anunciam o /corvip', async () => {
-    const caminhoMenu = path.join(__dirname, '..', 'comandos', 'menu-vip', 'menu-vip.js')
-    const menu = fs.readFileSync(caminhoMenu, 'utf8')
-    if (!/\/corvip/.test(menu)) throw new Error('o /menu-vip não cita o /corvip')
-    if (!/\/corcustom/.test(menu)) throw new Error('o /menu-vip não cita o alias /corcustom')
+    await verificarMenu('vip', ['corvip'], { corcustom: 'corvip' })
 
     const changelog = require('../dados/changelog')
     // A entrada precisa EXISTIR; o topo é de outro lançamento mais novo

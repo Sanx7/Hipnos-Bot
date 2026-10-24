@@ -21,6 +21,7 @@
 // Uso: node scripts/teste-nomecustom.js
 // ============================================================
 
+const { verificarMenu } = require('./helpers/menu-catalogo-teste')
 process.env.MONGODB_URI = ''
 process.env.MONGO_URI_RPG = ''
 
@@ -193,10 +194,7 @@ async function main() {
   })
 
   await testar('menu-vip e changelog anunciam o /nomecustom', async () => {
-    const caminhoMenu = path.join(__dirname, '..', 'comandos', 'menu-vip', 'menu-vip.js')
-    const menu = fs.readFileSync(caminhoMenu, 'utf8')
-    if (!/\/nomecustom/.test(menu)) throw new Error('o /menu-vip não cita o /nomecustom')
-    if (!/\/nomevip/.test(menu)) throw new Error('o /menu-vip não cita o alias /nomevip')
+    await verificarMenu('vip', ['nomecustom'], { nomevip: 'nomecustom' })
 
     const changelog = require('../dados/changelog')
     if (!Array.isArray(changelog) || !changelog.length) throw new Error('changelog vazio')

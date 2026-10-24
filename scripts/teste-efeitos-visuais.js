@@ -13,6 +13,7 @@ process.env.MONGO_URI_RPG = ''
 
 const fs = require('fs')
 const os = require('os')
+const { verificarMenu } = require('./helpers/menu-catalogo-teste')
 const path = require('path')
 const { createCanvas } = require('canvas')
 const efv = require('../comandos/menu-efeitos/efeitos-visuais')
@@ -259,9 +260,7 @@ async function main() {
     const src = fs.readFileSync(path.join(__dirname, '..', 'comandos', 'menu-efeitos', 'efeitos-visuais.js'), 'utf8')
     exigir(src.indexOf('execFile') !== -1, 'sem execFile')
     exigir(src.indexOf("require('sharp')") === -1 && src.indexOf('require("sharp")') === -1, 'usa sharp')
-    const menu = fs.readFileSync(path.join(__dirname, '..', 'comandos', 'menu-efeitos', 'menu-efeitos.js'), 'utf8')
-    exigir(menu.indexOf('EFEITOS ESPECIAIS') !== -1, 'sem secao')
-    for (const n of [...TODOS_FOTO, 'textopulsar']) exigir(menu.indexOf('/' + n) !== -1, 'menu sem /' + n)
+    await verificarMenu('efeitos', [...TODOS_FOTO, 'textopulsar'])
     const log = fs.readFileSync(path.join(__dirname, '..', 'dados', 'changelog.js'), 'utf8')
     for (const n of ['glitchgif', 'textopulsar', 'conquista', 'naoolhe']) exigir(log.indexOf('/' + n) !== -1, 'log sem /' + n)
   })

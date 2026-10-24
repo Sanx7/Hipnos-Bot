@@ -1,3 +1,4 @@
+const { carregarComandosReais } = require('./helpers/menu-catalogo-teste')
 // Teste offline: carrega os comandos reais, sem iniciar o bot ou ler o .env.
 process.env.MONGODB_URI = ''
 process.env.MONGO_URI_RPG = ''
@@ -17,24 +18,7 @@ const estadoBot = require('../estado-bot')
 adulto.modoAdultoAtivo = async () => false
 estadoBot.remetenteEhDono = async () => false
 
-const fontes = []
-function carregar(pasta) {
-  for (const arquivo of fs.readdirSync(pasta)) {
-    const caminho = path.join(pasta, arquivo)
-    if (fs.statSync(caminho).isDirectory()) { carregar(caminho); continue }
-    if (!arquivo.endsWith('.js')) continue
-    const modulo = require(caminho)
-    for (const cmd of Array.isArray(modulo) ? modulo : [modulo]) {
-      if (!cmd?.nome || typeof cmd.executar !== 'function') continue
-      fontes.push({ caminho, cmd })
-      comandos.set(cmd.nome, cmd)
-      for (const alias of cmd.aliases || []) {
-        if (typeof alias === 'string' && alias && !comandos.has(alias)) comandos.set(alias, cmd)
-      }
-    }
-  }
-}
-carregar(path.resolve(__dirname, '../comandos'))
+const { fontes } = carregarComandosReais()
 const { portais, catalogo } = require('../dados/menus-catalogo')
 const { POR_PAGINA, entradas } = require('../dados/menus-olimpo')
 let total = 0
@@ -229,7 +213,7 @@ async function main() {
   })
   await teste('colisões preexistentes mantêm os vencedores e descrições reais', () => {
     assert.equal(comandos.get('gay'), require('../comandos/menu-efeitos/efeitos-imagem').find(c => c.nome === 'gay'))
-    assert.match(catalogo.find(c => c.nome === 'gay').descricao, /arco-íris/)
+    assert.match(catalogo.find(c => c.nome === 'gay' && c.categoria === 'efeitos').descricao, /arco-íris/)
     for (const nome of ['tapa', 'soco']) assert.equal(comandos.get(nome), require('../comandos/menu-brincadeiras/acoes').find(c => c.nome === nome))
     assert.equal(comandos.get('encerrar-enquete'), require('../comandos/menu-brincadeiras/enquete')[1])
     assert.equal(comandos.get('meuslembretes'), require('../comandos/meuslembretes'))

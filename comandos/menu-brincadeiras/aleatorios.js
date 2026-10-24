@@ -439,6 +439,9 @@ const comandoGay = criarComandoPorcentagem({
   montarFrase: ({ nomeExibicao, valor, frases }) =>
     frasePorValor(frases, valor).replace('{nome}', nomeExibicao).replace('{valor}', valor)
 })
+// /gay continua reservado ao efeito de imagem; este acesso preserva a
+// brincadeira e sua chave diária existente, sem depender da ordem do loader.
+comandoGay.aliases = ['gayporcentagem']
 
 // 🧠 /qi — sem menção, mede quem mandou; trava diária POR PAR (autor+alvo)
 const comandoQi = criarComandoPorcentagem({

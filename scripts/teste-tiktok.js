@@ -12,6 +12,7 @@
 // Uso: node scripts/teste-tiktok.js
 // ============================================
 
+const { verificarMenu } = require('./helpers/menu-catalogo-teste')
 const path = require('path')
 // ⚠️ O comando mora em comandos/menu-download/ (o /tiktok foi movido para lá
 // junto com o /play e o /pinterest); este require é o caminho ATUAL.
@@ -59,7 +60,7 @@ async function main () {
 
   await testar('exports do comando', async () => {
     if (tiktok.nome !== 'tiktok') throw new Error(`nome: ${tiktok.nome}`)
-    for (const a of ['tt', 'tk', 'tik-tok', 'tiktokdl']) {
+    for (const a of ['tt', 'ttk', 'tik-tok', 'tiktokdl']) {
       if (!tiktok.aliases.includes(a)) throw new Error(`alias faltando: ${a}`)
     }
     if (typeof tiktok.executar !== 'function') throw new Error('executar não é função')
@@ -237,10 +238,8 @@ async function main () {
     if (audio.avisoParaErro({ timeout: true }) !== audio.ERRO_TIMEOUT) throw new Error('timeout: aviso errado')
   })
 
-  await testar('menu-utilitario anuncia o /tiktok-audio', async () => {
-    const fs = require('fs')
-    const menu = fs.readFileSync(path.resolve(__dirname, '..', 'comandos', 'menu-utilitario', 'menu-utilitario.js'), 'utf8')
-    if (!/\/tiktok-audio/.test(menu)) throw new Error('o /menu-utilitario não cita o /tiktok-audio')
+  await testar('portal download anuncia o /tiktok-audio', async () => {
+    await verificarMenu('download', ['tiktok-audio', 'tiktok'], { tt: 'tiktok', ttk: 'tiktok', 'tik-tok': 'tiktok', tiktokdl: 'tiktok' })
   })
 
   console.log(reprovadas === 0 ? '\n🎉 Todos os testes passaram.' : `\n💥 ${reprovadas} teste(s) reprovado(s).`)

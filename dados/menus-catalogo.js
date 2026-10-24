@@ -77,6 +77,7 @@ const catalogo = [
   {"categoria":"brincadeiras","secao":"🎲 Sorte e destino","nome":"dado","descricao":"Rola um dado de 6 lados ou com a quantidade de lados informada.","uso":"[lados]"},
   {"categoria":"brincadeiras","secao":"🎲 Sorte e destino","nome":"escolha","descricao":"Sorteia uma opção entre as que você enviar separadas por vírgula.","uso":"opção 1, opção 2"},
   {"categoria":"brincadeiras","secao":"🎲 Sorte e destino","nome":"flip","descricao":"Sorteia cara ou coroa."},
+  {"categoria":"brincadeiras","secao":"🎲 Sorte e destino","nome":"gay","acesso":"gayporcentagem","descricao":"Sorteia uma porcentagem fictícia para a brincadeira do dia."},
   {"categoria":"brincadeiras","secao":"🎲 Sorte e destino","nome":"moeda","descricao":"Sorteia cara ou coroa."},
   {"categoria":"brincadeiras","secao":"🎲 Sorte e destino","nome":"numero","descricao":"Sorteia um número inteiro aleatório dentro do intervalo informado.","uso":"[mínimo máximo]"},
   {"categoria":"brincadeiras","secao":"🎲 Sorte e destino","nome":"roleta","descricao":"Sorteia e marca um membro aleatório do grupo."},

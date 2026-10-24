@@ -31,7 +31,7 @@ function submenu(categoria, pagina, prefixo) {
   let secao
   for (const item of lista.slice((pagina - 1) * POR_PAGINA, pagina * POR_PAGINA)) {
     if (item.secao !== secao) { partes.push(`*${item.secao}*`); secao = item.secao }
-    const nome = item.acesso ? ` (${item.nome} adulto)` : ''
+    const nome = item.acesso && categoria === 'adulto' ? ` (${item.nome} adulto)` : ''
     partes.push(`*${prefixo}${item.acesso || item.nome}*${nome}${item.uso ? ` ${item.uso}` : ''}\n↳ ${item.descricao}`)
   }
   if (!lista.length) partes.push('Nenhum comando desta categoria está carregado agora.')

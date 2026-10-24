@@ -21,6 +21,7 @@
 // Uso: node scripts/teste-perfil.js
 // ============================================================
 
+const { verificarMenu } = require('./helpers/menu-catalogo-teste')
 process.env.MONGODB_URI = ''
 process.env.MONGO_URI_RPG = ''
 
@@ -277,13 +278,8 @@ async function main() {
   })
 
   await testar('/menu-vip cita o selo automático e o changelog tem a entrada do pacote', async () => {
-    const menu = fs.readFileSync(path.join(__dirname, '..', 'comandos', 'menu-vip', 'menu-vip.js'), 'utf8')
-    if (!/\/badge/.test(menu)) throw new Error('o /menu-vip não cita o /badge')
-    if (!/\/selovip/.test(menu)) throw new Error('o /menu-vip não cita o alias /selovip')
-    if (!/AUTOMÁTICO/i.test(menu)) throw new Error('o /menu-vip não anuncia o selo como automático')
-    if (!/selo 💠 VIP aparece sozinho ao lado do seu nome no \/perfil/i.test(menu)) {
-      throw new Error('o /menu-vip não descreve o selo no /perfil')
-    }
+    await verificarMenu('vip', ['badge'], { selovip: 'badge' })
+    // A apresentação automática do selo é exercitada pelos cenários de /perfil.
 
     const changelog = require('../dados/changelog')
     if (!Array.isArray(changelog) || !changelog.length) throw new Error('changelog vazio')

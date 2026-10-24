@@ -16,6 +16,7 @@
 // Uso: node scripts/teste-efeitos.js
 // ============================================================
 
+const { verificarMenu } = require('./helpers/menu-catalogo-teste')
 process.env.MONGODB_URI = ''
 process.env.MONGO_URI_RPG = ''
 
@@ -297,42 +298,7 @@ async function main() {
   })
 
   await testar('menu-efeitos lista TODOS os comandos de efeito (sem nenhum faltando)', async () => {
-    const fs = require('fs')
-    const menu = fs.readFileSync(path.join(__dirname, '..', 'comandos', 'menu-efeitos', 'menu-efeitos.js'), 'utf8')
-
-    // Só contam as LINHAS DE COMANDO do menu (emoji + "/comando"), não
-    // imports de código (ex.: require('../../config')) nem comentários.
-    const linhasDeComando = menu
-      .split('\n')
-      .filter((l) => !/^\s*\/\//.test(l))           // não é comentário
-      .filter((l) => !/require\(/.test(l))           // não é import de código
-      .filter((l) => /^\s*[^\s/][^\n]*\/(?![/*])/.test(l)) // tem emoji + /algo
-      .join('\n')
-    const citados = [...linhasDeComando.matchAll(/\/([a-z][a-z0-9-]{2,})/g)].map((m) => m[1])
-
-    // Nenhum comando do módulo pode faltar no menu.
-    // (/sfundo e /bolsonaro respondem "indisponível", mas ficam listados
-    //  na seção de indisponíveis — então TODO comando deve aparecer.)
-    const faltando = efeitos
-      .filter((c) => c.nome)
-      .map((c) => c.nome)
-      .filter((nome) => !new RegExp(`\\/${nome}\\b`).test(linhasDeComando))
-    if (faltando.length) throw new Error('faltando no menu: ' + faltando.join(', '))
-
-    // 2) O menu não pode inventar comando de efeito que não existe.
-    //    Aliases legítimos (dos próprios comandos e dos submenus) valem.
-    const submenus = new Set(['menuefeitos', 'menu-efeito', 'efeitos', 'menu-fig', 'fulano', 'pessoa', 'esquilo', 'gigante', 'robo', 'demonio', 'rapido', 'lento', 'reverso', 'estourar'])
-    const visuais = require('../comandos/menu-efeitos/efeitos-visuais')
-    const todos = [...efeitos, ...visuais]
-    const nomesReais = new Set(todos.filter((c) => c.nome).map((c) => c.nome))
-    for (const c of todos) {
-      if (c.nome && Array.isArray(c.aliases)) for (const a of c.aliases) nomesReais.add(a)
-    }
-    for (const citado of new Set(citados)) {
-      if (!nomesReais.has(citado) && !submenus.has(citado)) {
-        throw new Error(`o menu cita /${citado}, que não existe no módulo`)
-      }
-    }
+    await verificarMenu('efeitos', efeitos.filter(c => c.nome).map(c => c.nome))
   })
 
   await testar('/menuefeitos é alias do menu e o /menu principal aponta pra ele', async () => {
@@ -342,15 +308,9 @@ async function main() {
     for (const apelido of ['menuefeitos', 'menu-efeito', 'efeitos']) {
       if (!menuCmd.aliases.includes(apelido)) throw new Error('falta alias: ' + apelido)
     }
-    // Simula o registro do loader: nome + todos os aliases
-    const registro = new Map()
-    registro.set(menuCmd.nome, menuCmd)
-    for (const apelido of menuCmd.aliases) registro.set(apelido, menuCmd)
-    if (registro.get('menuefeitos') !== menuCmd) throw new Error('/menuefeitos não aponta para o menu')
-
-    // E o /menu principal deve citá-lo
-    const menuPrincipal = fs.readFileSync(path.join(__dirname, '..', 'comandos', 'menu.js'), 'utf8')
-    if (!/menuefeitos/.test(menuPrincipal)) throw new Error('o /menu não cita o /menuefeitos')
+    await verificarMenu('efeitos', [], { menuefeitos: 'menu-efeitos', 'menu-efeito': 'menu-efeitos', efeitos: 'menu-efeitos' })
+    const menuPrincipal = require('../dados/menus-olimpo').principal('!')
+    if (!menuPrincipal.includes('!menu-efeitos')) throw new Error('portal de efeitos ausente')
   })
 
   console.log(reprovadas === 0 ? '\n🎉 Todos os testes passaram.' : `\n💥 ${reprovadas} teste(s) reprovado(s).`)

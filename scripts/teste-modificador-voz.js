@@ -1,3 +1,4 @@
+const { verificarMenu } = require('./helpers/menu-catalogo-teste');
 // TESTE-MODIFICADOR-VOZ parte 1: base + mocks
 const fs = require('fs');
 const os = require('os');
@@ -178,12 +179,8 @@ async function main() {
     if (sobrou.length) throw new Error('sobrou temp no erro: ' + sobrou.join(','));
   });
 
-  await testar('menu-efeitos lista os 8 comandos de voz', async () => {
-    const menu = fs.readFileSync(path.join(__dirname, '..', 'comandos', 'menu-efeitos', 'menu-efeitos.js'), 'utf8');
-    if (menu.indexOf('MODIFICADOR DE VOZ') === -1) throw new Error('sem secao de voz');
-    for (const nome of NOMES) {
-      if (menu.indexOf('/' + nome) === -1) throw new Error('menu sem /' + nome);
-    }
+  await testar('portal modificador lista os 8 comandos de voz com paginação e prefixos', async () => {
+    await verificarMenu('modificador', NOMES);
   });
 
   await testar('changelog cita a nova categoria', async () => {

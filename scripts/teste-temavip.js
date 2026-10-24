@@ -17,6 +17,7 @@
 // Uso: node scripts/teste-temavip.js
 // ============================================================
 
+const { verificarMenu } = require('./helpers/menu-catalogo-teste')
 process.env.MONGODB_URI = ''
 process.env.MONGO_URI_RPG = ''
 
@@ -194,9 +195,7 @@ async function main() {
   })
 
   await testar('menu-vip e changelog anunciam o /temavip', async () => {
-    const menu = fs.readFileSync(path.join(__dirname, '..', 'comandos', 'menu-vip', 'menu-vip.js'), 'utf8')
-    if (!/\/temavip/.test(menu)) throw new Error('o /menu-vip não cita o /temavip')
-    if (!/\/temacustom/.test(menu)) throw new Error('o /menu-vip não cita o alias /temacustom')
+    await verificarMenu('vip', ['temavip'], { temacustom: 'temavip' })
 
     const changelog = require('../dados/changelog')
     // A entrada precisa EXISTIR (mesma regra do /assinatura, do /corvip e do

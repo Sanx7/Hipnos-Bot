@@ -326,8 +326,8 @@ async function main () {
 
   // ── Presença no loader/registro ──
   checar('nome do comando é "figurinha"', figurinha.nome === 'figurinha')
-  checar('aliases do /figurinha são exatamente ["fig"]',
-    JSON.stringify(figurinha.aliases) === JSON.stringify(['fig']),
+    checar('aliases do /figurinha preservam fig, f e figu',
+      JSON.stringify(figurinha.aliases) === JSON.stringify(['fig', 'f', 'figu']),
     JSON.stringify(figurinha.aliases))
   checar('alias /fig registrado', (figurinha.aliases || []).includes('fig'))
   checar('o /figurinha NÃO anuncia mais figcompleta/figurinha como apelido',

@@ -18,6 +18,7 @@
 // Uso: node scripts/teste-prefixo.js
 // ============================================================
 
+const { verificarMenu } = require('./helpers/menu-catalogo-teste')
 process.env.MONGODB_URI = ''
 process.env.MONGO_URI_RPG = ''
 
@@ -425,8 +426,7 @@ async function main() {
   })
 
   await testar('menu-dono e changelog anunciam o /set-prefix', async () => {
-    const menu = fs.readFileSync(path.join(__dirname, '..', 'comandos', 'menu-dono', 'menu-dono.js'), 'utf8')
-    if (!/\/set-prefix/.test(menu)) throw new Error('o /menu-dono não cita o /set-prefix')
+    await verificarMenu('dono', ['set-prefix'])
 
     const changelog = require('../dados/changelog')
     if (!Array.isArray(changelog) || !changelog.length) throw new Error('changelog vazio')

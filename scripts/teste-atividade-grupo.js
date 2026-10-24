@@ -1,4 +1,5 @@
 // Offline: não carregar credenciais nem abrir conexões reais.
+const { verificarMenu } = require('./helpers/menu-catalogo-teste')
 process.env.MONGODB_URI = ''
 process.env.MONGO_URI_RPG = ''
 const assert = require('node:assert/strict')
@@ -229,10 +230,8 @@ async function main() {
     assert.deepEqual(primeiro, segundo); assert.equal(consultasAuth, 1)
   })
   await teste('Menus sem duplicação, nenhuma gravação ou contador paralelo', async () => {
-    for (const [arquivo, nome] of [['../comandos/admin/menu-admin', 'inativos'], ['../comandos/menu-utilitario/menu-utilitario', 'rankativo']]) {
-      const fonte = fs.readFileSync(require.resolve(arquivo), 'utf8')
-      assert.equal(fonte.split(`/${nome}`).length - 1, 1)
-    }
+    await verificarMenu('admin', ['inativos'])
+    await verificarMenu('utilitario', ['rankativo'])
     for (const arquivo of ['../dados/atividade-grupo', '../comandos/admin/inativos', '../comandos/menu-utilitario/rankativo']) {
       assert.doesNotMatch(fs.readFileSync(require.resolve(arquivo), 'utf8'), /registrarMensagem|\$inc|updateOne|process\.exit\(/)
     }

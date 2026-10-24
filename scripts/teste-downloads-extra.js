@@ -22,6 +22,7 @@
 // Uso: node scripts/teste-downloads-extra.js
 // =============================================================
 
+const { verificarMenu } = require('./helpers/menu-catalogo-teste')
 const path = require('path')
 const fs = require('fs')
 const os = require('os')
@@ -168,13 +169,7 @@ async function main () {
       if (!menu.aliases.includes(a)) throw new Error(`alias faltando: ${a}`)
     }
     if (typeof menu.executar !== 'function') throw new Error('executar não é função')
-    const { sock, enviadas } = criarSock()
-    await menu.executar(sock, 'G@g.us', criarMsg('/menu-download'))
-    const texto = ultimoTexto(enviadas)
-    if (!texto || !texto.includes("𝐌𝐄𝐍𝐔 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃")) throw new Error('menu sem título')
-    for (const esperado of ['/insta', '/igmp3', '/twitter', '/facebook', '/robloxstalk', '/videorapido', '/videolento', '/videocontrario', '/tiktok', '/pinterest', '/play']) {
-      if (!texto.includes(esperado)) throw new Error(`menu sem ${esperado}`)
-    }
+    await verificarMenu('download', ['insta', 'igmp3', 'twitter', 'facebook', 'robloxstalk', 'videorapido', 'videolento', 'videocontrario', 'tiktok', 'pinterest', 'play'])
   })
 
   await testar('regex: link válido, domínio errado e malformado', async () => {
