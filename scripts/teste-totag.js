@@ -2,10 +2,28 @@
 // Uso: node scripts/teste-totag.js
 process.env.OWNER_NUMBERS = '5511999990009';
 process.env.MONGODB_URI = '';
+process.env.MONGO_URI_RPG = '';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs'), path = require('node:path');
+const existe = fs.existsSync, envLocal = path.resolve(__dirname, '../.env');
+fs.existsSync = arquivo => path.resolve(String(arquivo)) === envLocal ? false : existe(arquivo);
+require('node:net').Socket.prototype.connect = function () { throw new Error('REDE_PROIBIDA'); };
+require('mongodb').MongoClient.prototype.connect = async function () { throw new Error('MONGO_REAL_PROIBIDO'); };
+// O Baileys usa fetch para baixar a mídia criptografada. Simular somente as
+// rotas registradas, sem abrir servidor, porta, DNS ou conexão HTTP de verdade.
+const ORIGEM_HTTP_TESTE = 'http://127.0.0.1:19001';
+const rotasHttp = new Map();
+globalThis.fetch = async (endereco, opcoes = {}) => {
+  const url = new URL(String(endereco));
+  const resposta = rotasHttp.get(url.href);
+  if (url.origin !== ORIGEM_HTTP_TESTE || !resposta) throw new Error('HTTP_NAO_SIMULADO_PROIBIDO');
+  assert.equal(opcoes.method || 'GET', 'GET');
+  return resposta(opcoes);
+};
 const baileys = require('@whiskeysockets/baileys');
 const lid = require('../lid');
+const arcontes = require('../dados/arcontes-olimpo');
 const GRUPO = '120363000000000000@g.us';
 const ADMIN = '5511777766665@s.whatsapp.net';
 const DONO = '5511999990009@s.whatsapp.net';
@@ -97,11 +115,11 @@ async function executar(message, opcoes = {}) {
   return enviadas;
 }
 
-function reenvio(enviadas) {
+function reenvio(enviadas, participantes = PARTICIPANTES) {
   assert.equal(enviadas.length, 1, 'sem mensagens extras');
   assert.equal(enviadas[0].extra, undefined, 'reenvio sem quote do comando');
   const conteudo = enviadas[0].conteudo;
-  const ids = PARTICIPANTES.map((p) => p.id);
+  const ids = participantes.map((p) => p.id);
   assert.deepEqual(conteudo.mentions, ids);
   assert.deepEqual(conteudo.contextInfo, { mentionedJid: ids });
   assert.equal(conteudo.react, undefined);
@@ -121,8 +139,10 @@ let falhas = 0;
 let passou = 0;
 async function testar(nome, fn) {
   lid.__definirConsultaSessaoTeste(async () => null);
+  rotasHttp.clear();
   try { await fn(); passou += 1; console.log(`✅ ${nome}`); }
   catch (err) { falhas += 1; console.error(`❌ ${nome}:`, err); }
+  finally { rotasHttp.clear(); arcontes.__definirServicoTeste(null); }
 }
 
 async function main() {
@@ -429,8 +449,7 @@ async function main() {
     assert.equal(c.jpegThumbnail, jpegThumbnail);
     assert.deepEqual(reenvio(await executar(msg(IMAGEM))).jpegThumbnail, Buffer.alloc(0));
   });
-  for (const status of [404, 410]) await testar(`download real rc14 descriptografa foto encapsulada e renova HTTP ${status} offline`, async () => {
-    const http = require('node:http');
+  for (const status of [404, 410]) await testar(`download real rc14 descriptografa foto encapsulada e renova HTTP ${status} simulado`, async () => {
     const crypto = require('node:crypto');
     const mediaKey = Buffer.alloc(32, 7);
     const { cipherKey, iv, macKey } = await baileys.getMediaKeys(mediaKey, 'image');
@@ -440,14 +459,14 @@ async function main() {
     const payload = Buffer.concat([encrypted, mac]);
     let requisicoes = 0;
     let renovacoes = 0;
-    const server = http.createServer((req, res) => {
-      requisicoes++;
-      if (req.url === '/expirada') { res.writeHead(status); res.end(); }
-      else { res.writeHead(200); res.end(payload); }
+    const base = ORIGEM_HTTP_TESTE;
+    rotasHttp.set(`${base}/expirada`, () => {
+      requisicoes++; return new Response(null, { status });
     });
-    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    rotasHttp.set(`${base}/renovada`, () => {
+      requisicoes++; return new Response(payload, { status: 200 });
+    });
     try {
-      const base = `http://127.0.0.1:${server.address().port}`;
       const quoted = { ephemeralMessage: { message: { imageMessage: {
         mediaKey, url: `${base}/expirada`, mimetype: 'image/jpeg', caption: 'Legenda offline'
       } } } };
@@ -466,7 +485,7 @@ async function main() {
       assert.equal(requisicoes, 2);
       assert.equal(renovacoes, 1);
     } finally {
-      await new Promise(resolve => server.close(resolve));
+      rotasHttp.clear();
     }
   });
   for (const status of [404, 410, 500]) {
@@ -597,6 +616,97 @@ async function main() {
     await executar(msg(IMAGEM), { erroEnvioMidia: Object.assign(new Error('conflict'), { output: { statusCode: 440 } }) });
     assert.equal(tentativasEnvio,1); assert.equal(baixadas.length,1);
   });
+  await testar('transporte simulado bloqueia externos, portas locais e rotas não registradas', async () => {
+    for (const url of ['https://example.invalid/midia', 'http://127.0.0.1:19002/midia', `${ORIGEM_HTTP_TESTE}/nao-registrada`]) {
+      await assert.rejects(fetch(url), /HTTP_NAO_SIMULADO_PROIBIDO/);
+    }
+    assert.throws(() => new (require('node:net').Socket)().connect(19001, '127.0.0.1'), /REDE_PROIBIDA/);
+  });
+  for (const sender of [LID_ADMIN, ADMIN]) await testar('identidade administrativa ambígua não autoriza texto nem download', async () => {
+    lid.__definirConsultaSessaoTeste(async () => DONO.split('@')[0]);
+    const conflitante = sender === LID_ADMIN ? { id: LID_ADMIN, phoneNumber: COMUM } : { id: '90001@lid', phoneNumber: ADMIN };
+    const participantes = [...PARTICIPANTES, conflitante];
+    recusa(await executar(msg(IMAGEM, sender), { participantes }), /Só administradores/);
+  });
+  await testar('PNs conflitantes no mesmo participante não autorizam pelo LID', async () => {
+    const participantes = [{ id: ADMIN, phoneNumber: COMUM, lid: LID_ADMIN, admin: 'admin' }, ...PARTICIPANTES.slice(1)];
+    recusa(await executar(msg(IMAGEM, LID_ADMIN), { participantes }), /Só administradores/);
+  });
+  for (const sender of [DONO, LID_DONO]) await testar('metadados ambíguos de dono também bloqueiam autorização', async () => {
+    const conflitante = sender === LID_DONO ? { id: LID_DONO, phoneNumber: COMUM } : { id: '90002@lid', phoneNumber: DONO };
+    recusa(await executar(msg(IMAGEM, sender), { participantes: [...PARTICIPANTES, conflitante] }), /Só administradores/);
+  });
+  await testar('id=PN e lid em campo separado reconhece administrador comprovado', async () => {
+    const participantes = [{ id: ADMIN, lid: LID_ADMIN, admin: 'admin' }, ...PARTICIPANTES.slice(1)];
+    assert.equal(reenvio(await executar(msg({ conversation: 'Texto administrativo' }), { participantes }), participantes).text, 'Texto administrativo');
+  });
+  for (const sender of [COMUM, LID_COMUM]) await testar('Arconte sem ADM não recebe permissão para menção geral', async () => {
+    const cols = require('./helpers/colecoes-arcontes-fake')();
+    const { criarRepositorio, preparar } = require('../dados/arcontes-olimpo-mongo');
+    await preparar(cols);
+    const repo = criarRepositorio(async () => cols);
+    await repo.definir(GRUPO, COMUM.split('@')[0], true, ADMIN.split('@')[0], 'nomeacao-ficticia');
+    assert.equal(await repo.ativo(GRUPO, COMUM.split('@')[0]), true);
+    arcontes.__definirServicoTeste(arcontes.criarServico(repo, { disponivel: () => true }));
+    recusa(await executar(msg(IMAGEM, sender)), /Só administradores/);
+  });
+  await testar('revogação de ADM é respeitada na execução seguinte', async () => {
+    reenvio(await executar(msg({ conversation: 'Autorizado antes' })));
+    const participantes = PARTICIPANTES.map(p => ({ ...p, admin: null }));
+    recusa(await executar(msg(IMAGEM), { participantes }), /Só administradores/);
+  });
+  for (const sender of [DONO, LID_DONO]) await testar('dono sem ADM mantém autorização por PN/LID', async () => {
+    assert.equal(reenvio(await executar(msg({ conversation: 'Texto do dono' }, sender))).text, 'Texto do dono');
+  });
+  await testar('sessão indisponível não concede acesso a LID desconhecido', async () => {
+    lid.__definirConsultaSessaoTeste(async () => { throw new Error('SESSAO_FICTICIA_INDISPONIVEL'); });
+    recusa(await executar(msg(IMAGEM, '90003@lid')), /Só administradores/);
+  });
+  for (const reply of [true, false]) await testar('texto extenso preservado integralmente em um único envio', async () => {
+    const texto = 'Linha Unicode 🌙\n'.repeat(50000);
+    const message = msg(reply ? { conversation: texto } : undefined);
+    if (!reply) message.message = { conversation: `/notag2 ${texto}` };
+    assert.equal(reenvio(await executar(message)).text, texto);
+    assert.equal(baixadas.length, 0);
+  });
+  await testar('buffer grande não acrescenta legenda nem mensagem auxiliar', async () => {
+    const bytes = Buffer.alloc(8 * 1024 * 1024, 7);
+    const c = reenvio(await executar(msg({ imageMessage: { mimetype: 'image/jpeg' } }), { bytesDownload: bytes }));
+    assert.equal(c.image, bytes); assert.equal(c.caption, undefined); assert.equal(c.text, undefined);
+  });
+  await testar('grupo numeroso menciona todos os cargos usando os IDs originais', async () => {
+    const participantes = [...PARTICIPANTES, { id: '90000@lid', phoneNumber: '000000000000@s.whatsapp.net', admin: 'superadmin' },
+      ...Array.from({ length: 2044 }, (_, i) => ({ id: `${91000 + i}@lid` }))];
+    const c = reenvio(await executar(msg({ conversation: 'Texto original' }), { participantes }), participantes);
+    assert.equal(c.text, 'Texto original'); assert.equal(c.mentions.length, 2048);
+    const wire = await baileys.generateWAMessageContent(c, {});
+    assert.deepEqual(wire.extendedTextMessage.contextInfo.mentionedJid, participantes.map(p => p.id));
+  });
+  for (const [tipo, tipoMidia] of [['imageMessage', 'image'], ['videoMessage', 'video'], ['audioMessage', 'audio']]) {
+    for (const corrompida of [false, true]) await testar(`download real de ${tipo} com HTTP simulado: ${corrompida ? 'corrompida' : 'válida'}`, async () => {
+      const mediaKey = Buffer.alloc(32, 8);
+      const crypto = require('node:crypto');
+      const { cipherKey, iv, macKey } = await baileys.getMediaKeys(mediaKey, tipoMidia);
+      const cipher = crypto.createCipheriv('aes-256-cbc', cipherKey, iv);
+      const encrypted = Buffer.concat([cipher.update(BYTES), cipher.final()]);
+      const mac = crypto.createHmac('sha256', macKey).update(Buffer.concat([iv, encrypted])).digest().subarray(0, 10);
+      const payload = corrompida ? Buffer.from([1, 2, 3]) : Buffer.concat([encrypted, mac]);
+      const url = `${ORIGEM_HTTP_TESTE}/midia`;
+      let requisicoes = 0;
+      rotasHttp.set(url, () => { requisicoes++; return new Response(payload); });
+      const envios = await executar(msg({ [tipo]: { mediaKey, url } }), { downloadReal: true });
+      assert.equal(requisicoes, 1);
+      if (corrompida) {
+        assert.ok(erroDownloadReal);
+        assert.equal(envios.length, 1); assert.match(envios[0].conteudo.text, /Não consegui reenviar/);
+        assert.equal(envios[0].conteudo[tipoMidia], undefined); assert.equal(envios[0].conteudo.mentions, undefined);
+      } else {
+        assert.equal(erroDownloadReal, null);
+        const c = reenvio(envios);
+        assert.deepEqual(c[tipoMidia], BYTES); assert.equal(c.text, undefined); assert.equal(c.caption, undefined);
+      }
+    });
+  }
   lid.__definirConsultaSessaoTeste(null);
   require.cache[entrada] = cacheOriginal;
   console.log(`\n${passou} passaram, ${falhas} falharam.`);

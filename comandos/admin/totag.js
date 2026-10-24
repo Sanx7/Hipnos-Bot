@@ -1,6 +1,5 @@
 const { downloadMediaMessage, normalizeMessageContent, getContentType, jidNormalizedUser } = require('@whiskeysockets/baileys');
-const { ehAdminDoGrupo, ehDonoDoBot } = require('../../config');
-const { resolverNumeroAlvo } = require('../../lid');
+const { identificar } = require('../../dados/identidade-participante');
 const { extrairTextoComando } = require('../../dados/texto-comando');
 const { disponivel, exigir, falhaConexao } = require('../../dados/socket-seguro');
 
@@ -69,18 +68,11 @@ module.exports = {
       const participantes = metadados?.participants || [];
       etapa = 'autorizacao';
 
-      // Mesma autorização de /hidetag: ADM OU dono, usando JID cru e
-      // telefone comprovado pelos metadados ou pelo mapeamento da sessão.
+      // ADM OU dono. O resolvedor compartilhado comprova PN/LID, reconhece
+      // o campo lid separado e recusa identidades ambíguas antes de autorizar.
       const sender = msg?.key?.participant || msg?.key?.remoteJid || '';
-      const doRemetente = jid => participantes.filter(p => [p.id, p.phoneNumber].filter(Boolean)
-        .some(id => jidNormalizedUser(id) === jidNormalizedUser(jid)));
-      const resolucao = /@(lid|s\.whatsapp\.net)$/.test(sender)
-        ? await resolverNumeroAlvo(doRemetente(sender), sender) : { via: null };
-      const telefone = resolucao.via && resolucao.numero ? `${resolucao.numero}@s.whatsapp.net` : null;
-      const admin = ehAdminDoGrupo(doRemetente(sender), sender) ||
-        (telefone && ehAdminDoGrupo(doRemetente(telefone), telefone));
-      const dono = telefone && ehDonoDoBot([], telefone);
-      if (!admin && !dono) {
+      const autor = await identificar(participantes, sender);
+      if (!autor.admin && !autor.dono) {
         return await avisar(jid, {
           text: '🔒 Só administradores do grupo ou donos do bot podem usar /totag.'
         }, { quoted: msg });

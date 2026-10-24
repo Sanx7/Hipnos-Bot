@@ -3,10 +3,31 @@ process.env.MONGODB_URI = ''
 process.env.MONGO_URI_RPG = ''
 process.env.OWNER_NUMBERS = '5511999990009'
 const assert = require('node:assert/strict'), fs = require('node:fs')
+const path = require('node:path'), { createRequire } = require('node:module')
+const existe = fs.existsSync, envLocal = path.resolve(__dirname, '../.env')
+fs.existsSync = arquivo => path.resolve(String(arquivo)) === envLocal ? false : existe(arquivo)
+require('node:net').Socket.prototype.connect = function () { throw new Error('REDE_PROIBIDA') }
+require('mongodb').MongoClient.prototype.connect = async function () { throw new Error('MONGO_REAL_PROIBIDO') }
 const fake = require('./helpers/colecao-antigolpe-fake')
 const detector = require('../dados/deteccao-golpes'), config = require('../dados/antigolpe-config')
 const mod = require('../dados/moderacao-antigolpe'), cmd = require('../comandos/admin/antigolpe')
 const advs = require('../advertencias'), ban = require('../comandos/admin/ban'), lid = require('../lid'), prefixos = require('../prefixo')
+const { comandos } = require('../comandos-registry')
+const { catalogo } = require('../dados/menus-catalogo')
+const menus = require('../dados/menus-olimpo')
+const arcontes = require('../dados/arcontes-olimpo')
+const arcontesMongo = require('../dados/arcontes-olimpo-mongo')
+// Usa somente a função real do loader; não importa/inicia bot.js.
+function carregarRegistro() {
+  const arquivo = path.resolve(__dirname, '../bot.js'), fonte = fs.readFileSync(arquivo, 'utf8')
+  const inicio = fonte.indexOf('function carregarComandos('), fim = fonte.indexOf('\nconst pastaComandos', inicio)
+  assert.ok(inicio >= 0 && fim > inicio, 'Função de carregamento não localizada')
+  const erros = []
+  const log = { log: (...args) => { if (args[0] instanceof Error || String(args[0]).startsWith('❌')) erros.push('MODULO_INDISPONIVEL') } }
+  new Function('require', 'fs', 'path', 'comandos', 'console', fonte.slice(inicio, fim) + '\nreturn carregarComandos')(
+    createRequire(arquivo), fs, path, comandos, log)(path.resolve(__dirname, '../comandos'))
+  assert.deepEqual(erros, [], 'Todos os comandos devem carregar offline')
+}
 const G = '111@g.us', H = '222@g.us', PN = n => `${n}@s.whatsapp.net`
 const BOT = PN('5511666660000'), ADM = PN('5511777770000'), COMUM = PN('5511888880000'), DONO = PN('5511999990009'), DONOG = PN('5511555550000')
 const ALTO = 'Sou da equipe de suporte do WhatsApp. Envie seu código de verificação recebido por SMS 123456. Sua conta será bloqueada. https://example.com'
@@ -36,6 +57,14 @@ function cenario() {
   }
   const msg = (texto = ALTO, sender = COMUM, jid = G) => ({ key: { remoteJid: jid, participant: sender, id: `msg-${++seq}`, fromMe: false }, messageTimestamp: agora / 1000, message: { conversation: texto } })
   return { mongo, registros, sock, envios, remocoes, blacklist, msg,
+    async nomearArconte() {
+      const cols = require('./helpers/colecoes-arcontes-fake')()
+      await arcontesMongo.preparar(cols)
+      const repo = arcontesMongo.criarRepositorio(async () => cols)
+      await repo.definir(G, COMUM.split('@')[0], true, ADM.split('@')[0], 'nomeacao-ficticia')
+      assert.equal(await repo.ativo(G, COMUM.split('@')[0]), true)
+      arcontes.__definirServicoTeste(arcontes.criarServico(repo, { disponivel: () => true }))
+    },
     avancar(ms) { agora += ms },
     async ligar(modo = 'alerta', sensibilidade = 'media') { await config.definir(G, { ativo: true, modo, sensibilidade }, 'adm') },
     async processar(texto = ALTO, sender = COMUM, jid = G) { return mod.processar(sock, msg(texto, sender, jid)) },
@@ -44,8 +73,12 @@ function cenario() {
     get exclusoes() { return envios.filter(p => p.delete) }, get alertas() { return envios.filter(p => p.text) }
   }
 }
-async function teste(nome, fn) { await fn(cenario()); passou++; console.log(`✅ ${nome}`) }
+async function teste(nome, fn) {
+  try { await fn(cenario()); passou++; console.log(`✅ ${nome}`) }
+  finally { arcontes.__definirServicoTeste(null) }
+}
 async function main() {
+  carregarRegistro()
   const benignos = ['Qual é sua chave Pix?', 'Vou te mandar 20 reais.', 'Recebi um código por SMS.', 'Ganhei um prêmio na escola.', 'Meu banco está fora do ar.',
     'Alguém tentou me dar um golpe.', 'https://example.com', 'Pix', 'senha', 'prêmio', 'clique agora https://example.com',
     'Não envie seu código de verificação. Nunca compartilhe sua senha.',
@@ -85,6 +118,17 @@ async function main() {
     assert.equal(detector.analisar(ALTO.replace('example.com','example.org')).risco,'alto')
   })
   await teste('contexto educativo não libera próxima frase perigosa', async () => assert.equal(detector.analisar(`Cuidado com golpes. ${ALTO}`).risco,'alto'))
+  const ataqueContinuo = ALTO.replace(/\.\s+/g, ', ')
+  for (const [nome, texto] of [
+    ['aviso antes do pedido', `Cuidado com golpes: ${ataqueContinuo}`],
+    ['aviso após o pedido', `${ataqueContinuo}, isso é um golpe`],
+    ['negação de outro pedido', `Não envie seu código de verificação, mas ${ataqueContinuo}`]
+  ]) await teste(`contexto educativo na mesma frase não isenta credenciais: ${nome}`, async c => {
+    assert.equal(detector.analisar(ataqueContinuo).risco, 'alto')
+    for (const sens of ['baixa', 'media', 'alta']) assert.equal(detector.analisar(texto, sens).risco, 'alto')
+    await c.ligar('apagar'); assert.equal(await c.processar(texto), true)
+    assert.equal(c.exclusoes.length, 1); assert.equal(c.remocoes.length, 0)
+  })
   await teste('negar ser golpe não isenta pedido perigoso', async () => assert.equal(detector.analisar(`${ALTO} Não é golpe.`).risco,'alto'))
   await teste('citação educativa com várias frases é ignorada sem ignorar ataque posterior',async()=>{
     const citado=`Exemplo de golpe: "${ALTO}".`
@@ -98,6 +142,18 @@ async function main() {
     assert.equal(detector.analisar('Sou suporte do WhatsApp. Qual é sua senha? Sua conta será bloqueada. https://example.com').risco,'alto')
   })
   await teste('acentos e maiúsculas normalizados', async () => assert.deepEqual(detector.analisar(ALTO.toUpperCase()),detector.analisar(ALTO)))
+  await teste('negações legítimas continuam educativas em pedidos separados por vírgula ou conjunção', async () => {
+    for (const texto of [
+      'Cuidado com golpes, não envie seu código de verificação e nunca informe sua senha.',
+      'Não pague taxa para liberar prêmio, não envie seus dados pessoais.',
+      'Nunca compartilhe sua senha, não mande seu código SMS para suporte do WhatsApp.'
+    ]) for (const sens of ['baixa', 'media', 'alta']) assert.equal(detector.analisar(texto, sens).risco, 'baixo')
+  })
+  await teste('vírgula interna não interrompe sinal de pagamento nem oferta de prêmio', async () => {
+    const texto = 'Parabéns, você foi selecionado. Pague uma taxa, para liberar o prêmio. Você tem 5 minutos. https://example.com'
+    for (const sens of ['baixa', 'media', 'alta']) assert.deepEqual(detector.analisar(texto, sens), detector.analisar(texto.replace('taxa,', 'taxa'), sens))
+    assert.equal(detector.analisar(texto).risco, 'alto')
+  })
   await teste('exceção literal reduz só premiação não perigosa', async () => {
     assert.equal(detector.analisar(`Sorteio oficial: ${MEDIO}`,'media',['sorteio oficial']).risco,'baixo')
     assert.equal(detector.analisar(`Sorteio oficial: ${MEDIO} Envie seu código SMS.`,'alta',['sorteio oficial']).risco,'alto')
@@ -119,6 +175,28 @@ async function main() {
   for (const sens of ['baixa','media','alta']) await teste(`configura sensibilidade ${sens}`, async c => { await c.executar(`sensibilidade ${sens}`); assert.equal((await config.obter(G)).sensibilidade,sens) })
   for (const autor of [ADM,'777@lid',DONO,'999@lid',DONOG,'555@lid']) await teste('ADM/donos configuram por PN/LID',async c=>{await c.executar('on',autor);assert.equal((await config.obter(G)).ativo,true)})
   for (const autor of [COMUM,'888@lid',`${ADM.split('@')[0]}@lid`]) await teste('comum e LID sem prova não configuram',async c=>{await c.executar('on',autor);assert.equal((await config.obter(G)).ativo,false)})
+  for (const autor of [COMUM, '888@lid']) {
+    await teste('Arconte sem ADM não configura antigolpe por PN/LID', async c => {
+      await c.nomearArconte(); await c.executar('on', autor)
+      assert.equal(c.mongo.config.docs.length, 0); assert.match(c.alertas.at(-1).text, /Apenas administradores/)
+    })
+    await teste('Arconte sem ADM continua sujeito à moderação antigolpe', async c => {
+      await c.nomearArconte(); await c.ligar('adv'); await c.processar(ALTO, autor)
+      assert.equal(await c.total(), 1); assert.equal(c.exclusoes.length, 1)
+    })
+    await teste('Arconte promovido a ADM recebe apenas a permissão real de administrador', async c => {
+      await c.nomearArconte(); c.sock.membros.find(p => p.id === COMUM).admin = 'admin'
+      await c.executar('on', autor); assert.equal((await config.obter(G)).ativo, true)
+      assert.equal(await c.processar(ALTO, autor), false); assert.equal(c.exclusoes.length, 0)
+    })
+  }
+  await teste('identidade ambígua não configura nem pune, mesmo com sessão favorável', async c => {
+    c.sock.membros.push({ id: '888@lid', phoneNumber: ADM })
+    lid.__definirConsultaSessaoTeste(async () => ADM.split('@')[0])
+    await c.executar('on', '888@lid'); assert.equal(c.mongo.config.docs.length, 0)
+    c.envios.length = 0; await c.ligar('adv'); await c.processar(ALTO, '888@lid')
+    assert.equal(c.exclusoes.length, 0); assert.equal(await c.total(), 0)
+  })
   for (const arg of ['on extra','modo ban','sensibilidade maxima','permitir','remover','status extra','excecoes extra','desconhecido']) await teste(`entrada inválida ${arg}`,async c=>{await c.executar(arg);assert.equal(c.mongo.config.docs.length,0)})
   for (const termo of ['', 'pix','premio oficial','qualquer mensagem','mensagem segura','.*','codigo sms','senha pessoal','sorteio 123456','a'.repeat(81)]) await teste(`exceção inválida ${termo.slice(0,20)}`, async c=>{
     await assert.rejects(config.permitir(G,termo,'adm'));assert.equal(c.mongo.config.docs.length,0)
@@ -134,11 +212,42 @@ async function main() {
     assert.equal((await config.obter(G)).excecoes.length,20)
   })
   await teste('grupo privado/metadados indisponíveis não configuram',async c=>{await c.executar('on',DONO,DONO);c.sock.erroMeta=true;await c.executar('on');assert.equal(c.mongo.config.docs.length,0)})
-  for (const nome of ['!antigolpe','!antiscam','!antifraude']) await teste(`prefixo/alias ${nome}`,async c=>{await c.executar('on',ADM,G,nome);assert.equal((await config.obter(G)).ativo,true)})
-  await teste('ajuda e menu com prefixo dinâmico',async c=>{
-    prefixos.__definirPrefixoTeste('!');await c.executar('');assert.match(c.alertas.at(-1).text,/!antigolpe/)
-    await require('../comandos/admin/menu-admin').executar(c.sock,G,c.msg());assert.match(c.alertas.at(-1).text,/!antifraude/)
-  })
+  for (const p of ['/', '!', '#']) {
+    for (const nome of [cmd.nome, ...cmd.aliases]) await teste(`roteamento real ${p}${nome}`, async c => {
+      prefixos.__definirPrefixoTeste(p)
+      const texto = `${p}${nome} on`, resolvido = prefixos.resolverNomeComando(texto)
+      assert.equal(resolvido, nome); assert.equal(comandos.get(resolvido), cmd)
+      await comandos.get(resolvido).executar(c.sock, G, c.msg('', ADM), texto)
+      assert.equal((await config.obter(G)).ativo, true)
+    })
+    await teste(`ajuda e catálogo paginado com prefixo ${p}`, async c => {
+      prefixos.__definirPrefixoTeste(p); await c.executar('')
+      assert.ok(c.alertas.at(-1).text.includes(`${p}antigolpe on/off/status`))
+      const entradas = menus.entradas('admin'), indice = entradas.findIndex(e => e.nome === cmd.nome)
+      const item = catalogo.filter(e => e.categoria === 'admin' && e.nome === cmd.nome)
+      assert.equal(item.length, 1); assert.ok(item[0].descricao.length > 0)
+      assert.ok(indice >= 0); assert.equal(menus.POR_PAGINA, 12)
+      const paginaDoComando = Math.floor(indice / menus.POR_PAGINA) + 1
+      const paginas = Math.ceil(entradas.length / menus.POR_PAGINA), vistos = []
+      const menu = comandos.get('menu-admin')
+      assert.equal(typeof menu?.executar, 'function')
+      for (let pagina = 1; pagina <= paginas; pagina++) {
+        const antes = c.envios.length
+        await menu.executar(c.sock, G, c.msg(), `${p}menu-admin ${pagina}`)
+        assert.equal(c.envios.length, antes + 1)
+        const texto = c.alertas.at(-1).text
+        assert.ok(texto.includes(`*Página:* ${pagina}/${paginas}`))
+        const anunciados = texto.split('\n').filter(l => l.startsWith(`*${p}`)).map(l => l.slice(p.length + 1).split('*')[0])
+        assert.deepEqual(anunciados, entradas.slice((pagina - 1) * 12, pagina * 12).map(e => e.acesso || e.nome))
+        if (texto.includes(`*${p}${cmd.nome}*`)) vistos.push(pagina)
+        if (pagina < paginas) assert.ok(texto.includes(`Próxima: ${p}menu-admin ${pagina + 1}`))
+        if (pagina > 1) assert.ok(texto.includes(`Anterior: ${p}menu-admin ${pagina - 1}`))
+      }
+      assert.deepEqual(vistos, [paginaDoComando])
+      // Os menus anunciam a entrada canônica; aliases são contratos do registro.
+      for (const alias of cmd.aliases) assert.equal(comandos.get(alias), cmd)
+    })
+  }
   await teste('desligado não gera efeitos',async c=>{assert.equal(await c.processar(),false);assert.equal(c.envios.length,0)})
   await teste('alerta notifica apenas ADM, sem punir nem bloquear',async c=>{
     await c.ligar();assert.equal(await c.processar(),false);assert.equal(c.exclusoes.length,0);assert.equal(await c.total(),0);assert.equal(c.remocoes.length,0)

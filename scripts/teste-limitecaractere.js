@@ -4,6 +4,12 @@ process.env.MONGO_URI_RPG = ''
 process.env.OWNER_NUMBERS = '5511999990009'
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
+const path = require('node:path'), { createRequire } = require('node:module')
+const existe = fs.existsSync, envLocal = path.resolve(__dirname, '../.env')
+fs.existsSync = arquivo => path.resolve(String(arquivo)) === envLocal ? false : existe(arquivo)
+let tentativasRede = 0, tentativasMongo = 0
+require('node:net').Socket.prototype.connect = function () { tentativasRede++; throw new Error('REDE_PROIBIDA') }
+require('mongodb').MongoClient.prototype.connect = async function () { tentativasMongo++; throw new Error('MONGO_REAL_PROIBIDO') }
 const fake = require('./helpers/colecao-figurinhas-fake')
 const config = require('../dados/limitecaractere-config')
 const mod = require('../dados/moderacao-limitecaractere')
@@ -12,6 +18,22 @@ const advertencias = require('../advertencias')
 const lid = require('../lid')
 const ban = require('../comandos/admin/ban')
 const prefixos = require('../prefixo')
+const { comandos } = require('../comandos-registry')
+const { catalogo } = require('../dados/menus-catalogo')
+const menus = require('../dados/menus-olimpo')
+const arcontes = require('../dados/arcontes-olimpo')
+const arcontesMongo = require('../dados/arcontes-olimpo-mongo')
+// Executa apenas a função real de carregamento, sem iniciar bot.js.
+function carregarRegistro() {
+  const arquivo = path.resolve(__dirname, '../bot.js'), fonte = fs.readFileSync(arquivo, 'utf8')
+  const inicio = fonte.indexOf('function carregarComandos('), fim = fonte.indexOf('\nconst pastaComandos', inicio)
+  assert.ok(inicio >= 0 && fim > inicio, 'Função de carregamento não localizada')
+  const erros = []
+  const log = { log: (...args) => { if (args[0] instanceof Error || String(args[0]).startsWith('❌')) erros.push('MODULO_INDISPONIVEL') } }
+  new Function('require', 'fs', 'path', 'comandos', 'console', fonte.slice(inicio, fim) + '\nreturn carregarComandos')(
+    createRequire(arquivo), fs, path, comandos, log)(path.resolve(__dirname, '../comandos'))
+  assert.deepEqual(erros, [], 'Todos os comandos devem carregar offline')
+}
 const G = '111@g.us', H = '222@g.us', PN = n => `${n}@s.whatsapp.net`
 const ADM = PN('5511777770000'), COMUM = PN('5511888880000'), BOT = PN('5511666660000')
 const DONO = PN('5511999990009'), GRUPO_DONO = PN('5511555550000')
@@ -61,6 +83,14 @@ function cenario() {
     messageTimestamp: Math.floor(agora / 1000), message: { conversation: texto }
   })
   return { mongo, sock, envios, remocoes, blacklist, msg,
+    async nomearArconte() {
+      const cols = require('./helpers/colecoes-arcontes-fake')()
+      await arcontesMongo.preparar(cols)
+      const repo = arcontesMongo.criarRepositorio(async () => cols)
+      await repo.definir(G, COMUM.split('@')[0], true, ADM.split('@')[0], 'nomeacao-ficticia')
+      assert.equal(await repo.ativo(G, COMUM.split('@')[0]), true)
+      arcontes.__definirServicoTeste(arcontes.criarServico(repo, { disponivel: () => true }))
+    },
     avancar(ms) { agora += ms },
     async executar(arg = 'on', autor = ADM, jid = G, nome = '/limitecaractere') {
       return cmd.executar(sock, jid, msg('', autor, jid), `${nome} ${arg}`)
@@ -72,8 +102,12 @@ function cenario() {
     async total(jid = G) { return advertencias.contarAdvertencias(COMUM.split('@')[0], jid) }
   }
 }
-async function teste(nome, fn) { await fn(cenario()); passou++; console.log(`✅ ${nome}`) }
+async function teste(nome, fn) {
+  try { await fn(cenario()); passou++; console.log(`✅ ${nome}`) }
+  finally { arcontes.__definirServicoTeste(null) }
+}
 async function main() {
+  carregarRegistro()
   await teste('contrato e aliases', async () => { assert.equal(cmd.nome, 'limitecaractere'); assert.deepEqual(cmd.aliases, ['limitecaracteres', 'antitextao']) })
   await teste('padrões, isolamento e desligado não pune', async c => {
     assert.deepEqual(await config.obter(G), { ativo: false, limite: 1000, acao: 'apagar' })
@@ -89,6 +123,36 @@ async function main() {
     finally { require.cache[path] = antigo }
     await c.executar('off'); assert.equal((await config.obter(G)).ativo, false)
   })
+  await teste('ativar e desativar pelo comando altera a moderação sem apagar configuração', async c => {
+    await c.executar('definir 100'); await c.executar('acao adv'); await c.executar('on')
+    assert.equal(await c.processar('x'.repeat(101)), true)
+    assert.equal(await c.total(), 1); assert.equal(c.exclusoes.length, 1)
+    await c.executar('off')
+    const envios = c.envios.length
+    assert.equal(await c.processar('x'.repeat(101)), false)
+    assert.equal(c.envios.length, envios); assert.equal(await c.total(), 1)
+    assert.deepEqual(await config.obter(G), { ativo: false, limite: 100, acao: 'adv' })
+  })
+  await teste('atualização preserva campos legados e dados de outro grupo no Mongo fictício', async c => {
+    c.mongo.config.docs.push({ _id: G, ativo: true, limite: 2500, acao: 'adv', legado: { preservar: true } })
+    await config.definir(H, { ativo: true, limite: 200, acao: 'ban' }, 'adm-ficticio')
+    const outroGrupo = structuredClone(c.mongo.config.docs.find(d => d._id === H))
+    await c.executar('definir 500'); await c.executar('off')
+    assert.deepEqual(await config.obter(G), { ativo: false, limite: 500, acao: 'adv' })
+    assert.deepEqual(c.mongo.config.docs.find(d => d._id === G).legado, { preservar: true })
+    assert.deepEqual(c.mongo.config.docs.find(d => d._id === H), outroGrupo)
+    assert.equal(c.mongo.config.docs.filter(d => d._id === G).length, 1)
+  })
+  await teste('falha de escrita não anuncia ativação nem altera a configuração persistida', async c => {
+    await c.executar('definir 500')
+    const antes = structuredClone(c.mongo.config.docs)
+    c.mongo.config.falhar = true
+    await c.executar('on')
+    assert.match(c.avisos.at(-1).text, /não há confirmação de alteração/)
+    assert.deepEqual(c.mongo.config.docs, antes)
+    c.mongo.config.falhar = false
+    assert.deepEqual(await config.obter(G), { ativo: false, limite: 500, acao: 'apagar' })
+  })
   for (const limite of [100, 10000]) await teste(`limite permitido ${limite}`, async c => { await c.executar(`definir ${limite}`); assert.equal((await config.obter(G)).limite, limite) })
   for (const arg of ['definir 99', 'definir 10001', 'definir -100', 'definir 100.5', 'definir abc', 'definir 1e3', 'definir 100 extra', 'on extra', 'acao x', 'acao ban extra', '']) {
     await teste(`entrada inválida: ${arg}`, async c => { await c.executar(arg); assert.equal(c.mongo.config.docs.length, 0) })
@@ -97,11 +161,69 @@ async function main() {
   for (const autor of [ADM, '777@lid', DONO, '999@lid', GRUPO_DONO, '555@lid']) await teste(`configuração autorizada ${autor}`, async c => { await c.executar('on', autor); assert.equal((await config.obter(G)).ativo, true) })
   for (const autor of [COMUM, '888@lid', `${ADM.split('@')[0]}@lid`]) await teste(`configuração recusada ${autor}`, async c => { await c.executar('on', autor); assert.equal((await config.obter(G)).ativo, false) })
   await teste('somente grupos e metadados obrigatórios', async c => { await c.executar('on', DONO, DONO); c.sock.erroMeta = true; await c.executar('on', DONO); assert.equal(c.mongo.config.docs.length, 0) })
-  for (const nome of ['/limitecaracteres', '!antitextao', '?limitecaractere']) await teste(`alias/prefixo ${nome}`, async c => { await c.executar('on', ADM, G, nome); assert.equal((await config.obter(G)).ativo, true) })
-  await teste('ajuda usa prefixo dinâmico e menu conserva comandos', async c => {
-    prefixos.__definirPrefixoTeste('!'); await c.executar(''); assert.match(c.avisos.at(-1).text, /!limitecaractere/)
-    await require('../comandos/admin/menu-admin').executar(c.sock, G, c.msg())
-    for (const texto of ['!limitecaractere definir 1000', '!antitextao', '/antiflood', '/adv', '/figadv', '/antilinkhard']) assert.ok(c.avisos.at(-1).text.includes(texto))
+  for (const p of ['/', '!', '#']) {
+    for (const nome of [cmd.nome, ...cmd.aliases]) await teste(`registro e execução ${p}${nome}`, async c => {
+      prefixos.__definirPrefixoTeste(p)
+      for (const operacao of ['on', 'off']) {
+        const texto = `${p}${nome} ${operacao}`, resolvido = prefixos.resolverNomeComando(texto)
+        assert.equal(resolvido, nome); assert.equal(comandos.get(resolvido), cmd)
+        await comandos.get(resolvido).executar(c.sock, G, c.msg('', ADM), texto)
+        assert.equal((await config.obter(G)).ativo, operacao === 'on')
+      }
+    })
+    await teste(`ajuda e todas as páginas administrativas com prefixo ${p}`, async c => {
+      prefixos.__definirPrefixoTeste(p); await c.executar('')
+      const ajuda = c.avisos.at(-1).text
+      for (const nome of [cmd.nome, ...cmd.aliases]) assert.ok(ajuda.includes(`${p}${nome}`))
+      assert.ok(ajuda.includes(`${p}${cmd.nome} definir 1000`))
+      assert.equal(catalogo.filter(e => e.categoria === 'admin' && e.nome === cmd.nome).length, 1)
+      const entradas = menus.entradas('admin'), paginas = Math.ceil(entradas.length / menus.POR_PAGINA), vistos = []
+      assert.equal(menus.POR_PAGINA, 12); assert.ok(paginas > 1)
+      const menu = comandos.get('menu-admin'); assert.equal(typeof menu?.executar, 'function')
+      for (let pagina = 1; pagina <= paginas; pagina++) {
+        const antes = c.envios.length
+        await menu.executar(c.sock, G, c.msg(), `${p}menu-admin ${pagina}`)
+        assert.equal(c.envios.length, antes + 1)
+        const texto = c.avisos.at(-1).text
+        assert.ok(texto.includes(`*Página:* ${pagina}/${paginas}`))
+        const anunciados = texto.split('\n').filter(l => l.startsWith(`*${p}`)).map(l => l.slice(p.length + 1).split('*')[0])
+        assert.deepEqual(anunciados, entradas.slice((pagina - 1) * 12, pagina * 12).map(e => e.acesso || e.nome))
+        vistos.push(...anunciados)
+        if (pagina < paginas) assert.ok(texto.includes(`Próxima: ${p}menu-admin ${pagina + 1}`))
+        if (pagina > 1) assert.ok(texto.includes(`Anterior: ${p}menu-admin ${pagina - 1}`))
+      }
+      assert.deepEqual(vistos, entradas.map(e => e.acesso || e.nome))
+      for (const nome of [cmd.nome, 'antiflood', 'adv', 'figadv', 'antilinkhard']) assert.equal(vistos.filter(n => n === nome).length, 1)
+      // Aliases são verificados no registro e por execução, sem exigir entradas extras no menu.
+      for (const alias of cmd.aliases) assert.equal(comandos.get(alias), cmd)
+    })
+  }
+  for (const autor of [COMUM, '888@lid']) {
+    await teste('Arconte sem ADM não configura limite por PN/LID', async c => {
+      await c.nomearArconte(); await c.executar('on', autor)
+      assert.equal(c.mongo.config.docs.length, 0); assert.match(c.avisos.at(-1).text, /Apenas administradores/)
+    })
+    await teste('Arconte sem ADM continua sujeito ao limite por PN/LID', async c => {
+      await c.nomearArconte(); await c.ligar('adv'); await c.processar(TEXTO, autor)
+      assert.equal(await c.total(), 1); assert.equal(c.exclusoes.length, 1)
+    })
+    await teste('Arconte promovido a ADM tem as permissões e proteções reais de ADM', async c => {
+      await c.nomearArconte(); c.sock.membros.find(p => p.id === COMUM).admin = 'admin'
+      await c.executar('on', autor); assert.equal((await config.obter(G)).ativo, true)
+      await c.processar(TEXTO, autor); assert.equal(c.exclusoes.length, 0)
+    })
+  }
+  for (const nome of [cmd.nome, ...cmd.aliases]) await teste(`alias ${nome} não contorna autorização nem usa o alvo como autor`, async c => {
+    prefixos.__definirPrefixoTeste('#')
+    const m = c.msg('', '888@lid')
+    m.message = { extendedTextMessage: { text: `#${nome} on`, contextInfo: { participant: DONO, mentionedJid: [ADM] } } }
+    await comandos.get(prefixos.resolverNomeComando(m.message.extendedTextMessage.text)).executar(c.sock, G, m)
+    assert.equal(c.mongo.config.docs.length, 0)
+  })
+  await teste('identidade ambígua não configura mesmo com mapeamento favorável', async c => {
+    c.sock.membros.push({ id: '888@lid', phoneNumber: ADM })
+    lid.__definirConsultaSessaoTeste(async () => ADM.split('@')[0])
+    await c.executar('on', '888@lid'); assert.equal(c.mongo.config.docs.length, 0)
   })
   for (const [nome, texto, punir] of [
     ['exatamente 1000', 'x'.repeat(1000), false], ['1001', TEXTO, true],
@@ -112,10 +234,55 @@ async function main() {
     assert.equal(await c.processar(texto), punir); assert.equal(c.exclusoes.length, punir ? 1 : 0)
   })
   await teste('sequências combinadas seguem pontos de código, não grafemas', async () => { assert.equal(mod.contarCaracteres('e\u0301👨‍👩‍👧‍👦'), Array.from('e\u0301👨‍👩‍👧‍👦').length) })
+  for (const limite of [100, 1000, 10000]) {
+    for (const tamanho of [limite - 1, limite, limite + 1]) await teste(`fronteira configurada ${limite}: ${tamanho} pontos Unicode`, async c => {
+      await c.ligar('adv', limite)
+      const texto = '🌙'.repeat(tamanho), punir = tamanho > limite
+      assert.equal(mod.contarCaracteres(texto), tamanho)
+      assert.equal(await c.processar(texto), punir)
+      assert.equal(c.exclusoes.length, punir ? 1 : 0); assert.equal(await c.total(), punir ? 1 : 0)
+    })
+  }
+  for (const [nome, texto] of [
+    ['vazio', ''], ['espaços curtos', '   '], ['somente espaços excedentes', ' '.repeat(1001)],
+    ['quebras de linha excedentes', '\n'.repeat(1001)], ['invisíveis excedentes', '\u200b'.repeat(1001)],
+    ['acentos decompostos excedentes', 'e\u0301'.repeat(501)], ['modificadores de emoji excedentes', '👍🏽'.repeat(501)],
+    ['texto extremamente longo', '漢🌙'.repeat(500001)]
+  ]) await teste(`contagem sem contorno por ${nome}`, async c => {
+    await c.ligar('adv')
+    const tamanho = Array.from(texto).length, punir = tamanho > 1000
+    assert.equal(mod.contarCaracteres(texto), tamanho)
+    assert.equal(await c.processar(texto), punir)
+    assert.equal(c.exclusoes.length, punir ? 1 : 0); assert.equal(await c.total(), punir ? 1 : 0)
+    assert.ok(c.avisos.every(e => e.text.length < 2000))
+  })
+  for (const tamanho of [1000, 1001]) {
+    for (const contexto of ['encaminhada', 'reply', 'menção']) await teste(`${contexto} respeita tamanho do texto atual (${tamanho})`, async c => {
+      await c.ligar('adv'); const m = c.msg()
+      const contextInfo = contexto === 'encaminhada' ? { isForwarded: true, forwardingScore: 99 }
+        : contexto === 'reply' ? { participant: DONO, quotedMessage: { conversation: TEXTO.repeat(10) } }
+          : { mentionedJid: [ADM, DONO] }
+      m.message = { extendedTextMessage: { text: 'x'.repeat(tamanho), contextInfo } }
+      assert.equal(await mod.processar(c.sock, m), tamanho > 1000)
+      assert.equal(c.exclusoes.length, tamanho > 1000 ? 1 : 0)
+      assert.equal(await c.total(), tamanho > 1000 ? 1 : 0)
+    })
+  }
   for (const tipo of ['extendedTextMessage', 'imageMessage', 'videoMessage', 'documentMessage']) await teste(`texto/legenda ${tipo}`, async c => {
     await c.ligar(); const m = c.msg(); m.message = { [tipo]: tipo === 'extendedTextMessage' ? { text: TEXTO } : { caption: TEXTO } }
     assert.equal(await mod.processar(c.sock, m), true); assert.equal(c.exclusoes.length, 1)
   })
+  for (const tipo of ['imageMessage', 'videoMessage', 'documentMessage']) {
+    for (const tamanho of [1000, 1001]) await teste(`legenda ${tipo} encaminhada com reply respeita fronteira ${tamanho}`, async c => {
+      await c.ligar('adv'); const m = c.msg()
+      m.message = { [tipo]: { caption: '🌙'.repeat(tamanho), contextInfo: {
+        isForwarded: true, forwardingScore: 99, participant: DONO, quotedMessage: { conversation: TEXTO.repeat(10) }
+      } } }
+      assert.equal(await mod.processar(c.sock, m), tamanho > 1000)
+      assert.equal(c.exclusoes.length, tamanho > 1000 ? 1 : 0)
+      assert.equal(await c.total(), tamanho > 1000 ? 1 : 0)
+    })
+  }
   for (const wrapper of ['ephemeralMessage', 'viewOnceMessage', 'viewOnceMessageV2', 'viewOnceMessageV2Extension', 'documentWithCaptionMessage', 'associatedChildMessage']) await teste(`legenda encapsulada ${wrapper} sem download`, async c => {
     await c.ligar(); const m = c.msg(); m.message = { [wrapper]: { message: { documentMessage: { caption: TEXTO } } } }
     await mod.processar(c.sock, m); assert.equal(c.exclusoes.length, 1)
@@ -269,6 +436,9 @@ async function main() {
       n => n === 'mongodb' ? { MongoClient } : require(n), m, { env: { MONGODB_URI: 'mongodb://offline', MONGODB_DB: 'offline' } })
     assert.deepEqual(await m.exports.obter(G), config.PADRAO); assert.equal(indices.length, 2)
     for (const x of indices) { assert.deepEqual(x.campos, { expira_em: 1 }); assert.equal(x.opcoes.expireAfterSeconds, 0) }
+  })
+  await teste('nenhuma conexão de rede ou MongoDB real foi tentada', async () => {
+    assert.equal(tentativasRede, 0); assert.equal(tentativasMongo, 0)
   })
   console.log(`\nLimite de caracteres: ${passou} testes passaram.`)
 }

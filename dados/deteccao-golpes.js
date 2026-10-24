@@ -17,17 +17,28 @@ const PADROES = {
   dados: /\b(?:envie|enviar|mande|mandar|informe|informar|preencha|preciso d[oe])\b.{0,40}\b(?:cpf|dados pessoais|dados bancarios|numero do cartao)\b/,
   verificacao: /\b(?:verifique|valide|atualize)\b.{0,25}\b(?:sua conta|conta do whatsapp)\b/
 }
+const NEGACAO_INICIAL = /^(?:nao|nunca|jamais)\s+(?:envie|mande|informe|compartilhe|clique|pague|digite|preencha|verifique|valide|atualize)\b/
+function trechosDaFrase(frase) {
+  // A negação de um pedido não pode esconder outro após vírgula ou contraste.
+  const trechos = frase.split(/,\s*(?=(?:n[aã]o|nunca|jamais|mas|por[eé]m|entretanto|sou|somos|sua|isso|envie|mande|informe|compartilhe|digite|pague|preencha|verifique|valide|atualize)\b)|\s+(?:mas|por[eé]m|entretanto)\s+|\s+e\s+(?=(?:envie|mande|informe|compartilhe|digite|pague|preencha|verifique|valide|atualize)\b)/iu)
+    .map(texto => ({ texto, n: normalizar(texto) }))
+  const pedidoDireto = trechos.some(({ n }) => !NEGACAO_INICIAL.test(n) &&
+    ['credenciais', 'dados', 'pagamento', 'verificacao'].some(categoria => PADROES[categoria].test(n)))
+  return trechos.map(t => ({ ...t, pedidoDireto }))
+}
 function analisar(texto, sensibilidade = 'media', excecoes = []) {
   if (!LIMIARES[sensibilidade]) throw new Error('Sensibilidade inválida')
   const sinais = new Set()
   let link = false, premiacaoPermitida = false
   // Contexto local: uma frase educativa não desativa o restante da mensagem.
   const conteudo = String(texto || '').replace(/(?:exemplo de golpe|recebi uma mensagem (?:suspeita|de golpe)|alerta de golpe)\s*:\s*["“][^"”]*["”]/giu, '')
-  for (const frase of conteudo.split(/(?:[.!?]\s+|[\n;]+)/u)) {
-    const n = normalizar(frase)
-    if (!n || /^(?:alerta de golpe|aviso de golpe|exemplo de golpe|nao (?:envie|mande|informe|compartilhe|clique|pague)|nunca (?:envie|mande|compartilhe|pague)|jamais (?:envie|mande|compartilhe))\b/.test(n) ||
+  for (const { texto: frase, n, pedidoDireto } of conteudo.split(/(?:[.!?]\s+|[\n;]+)/u).flatMap(trechosDaFrase)) {
+    const educativo = /^(?:alerta de golpe|aviso de golpe|exemplo de golpe)\b/.test(n) ||
         /^(?:cuidado|atencao)\b.*\b(?:golpes?|fraude)\b/.test(n) ||
-        /\b(?:alguem tentou me dar um golpe|recebi uma mensagem (?:suspeita|de golpe)|isso e (?:um )?golpe)\b/.test(n)) continue
+        /\b(?:alguem tentou me dar um golpe|recebi uma mensagem (?:suspeita|de golpe)|isso e (?:um )?golpe)\b/.test(n)
+    // Avisos/citações continuam inofensivos; rótulo educativo não isenta
+    // solicitação direta de credenciais, dados, pagamento ou verificação.
+    if (!n || NEGACAO_INICIAL.test(n) || (educativo && !pedidoDireto)) continue
     for (const [categoria, regex] of Object.entries(PADROES)) {
       if (!regex.test(n)) continue
       if (categoria === 'premiacao' && excecoes.some(t => (` ${n} `).includes(` ${normalizar(t)} `))) { premiacaoPermitida = true; continue }

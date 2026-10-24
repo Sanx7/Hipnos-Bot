@@ -12,9 +12,9 @@
 // lid-mapping da sessão, no MESMO grupo):
 //   • sem documento no telefone → RENOMEIA o `usuario_id` (a contagem fica
 //     intacta, nada se perde);
-//   • com documento no telefone → FUNDE: apaga o documento do LID capturando o
-//     total FINAL (findOneAndDelete) e soma no documento do telefone ($inc),
-//     mantendo a data mais nova ($max) e o nome do registro mais recente.
+//   • com documento no telefone → FUNDE em transação: credita o total atual,
+//     preserva metadados e só então remove a origem na mesma transação.
+//     Um diário persistente permite auditar e reconhecer repetições.
 //
 // ✳️ É IDEMPOTENTE: rodar de novo não soma nada duas vezes (o documento do LID
 //    já não existe). Se o bot estiver rodando no Render e criar o documento do
@@ -40,6 +40,8 @@
 // Uso (na raiz do projeto):
 //   node scripts/migrar-ranking-lid.js             # DRY-RUN (não grava nada)
 //   node scripts/migrar-ranking-lid.js --aplicar   # grava (com backup antes)
+//   Sem transações: --aplicar --offline-confirmado (TODOS os escritores parados;
+//   manter assim até resolver qualquer pendência do diário e terminar a migração).
 // ============================================================
 
 // Carrega o .env (via config.js) ANTES de qualquer leitura de process.env
@@ -48,12 +50,15 @@ require('../config')
 const fs = require('fs')
 const path = require('path')
 const { MongoClient } = require('mongodb')
+const { randomUUID } = require('node:crypto')
+const { fundirSeguro, registrarContexto } = require('./helpers/ranking-migracao-segura')
 // limparNumero: MESMA normalização dos dígitos usada no projeto inteiro.
 const { limparNumero } = require('../config')
 
 const NOME_BANCO = process.env.MONGODB_DB || 'whatsapp'
 const NOME_COLECAO_RANKING = process.env.MONGODB_COLLECTION_RANKING || 'ranking'
 const NOME_COLECAO_AUTH = process.env.MONGODB_COLLECTION || 'authState'
+const NOME_COLECAO_DIARIO = NOME_COLECAO_RANKING + '_migracoes_lid'
 
 // Prefixo/sufixo com que a sessão (sessao-mongo.js) grava o par LID↔telefone.
 const PREFIXO_MAPEAMENTO = 'lid-mapping-'
@@ -71,10 +76,13 @@ const TAMANHO_LID = 15
 // script roda 100% offline, sem tocar em MONGODB_URI.
 let rankingInjetada = null
 let authInjetada = null
+let diarioInjetado = null
 
-function __definirColecoesTeste ({ ranking, auth } = {}) {
+function __definirColecoesTeste ({ ranking, auth, cliente, diario } = {}) {
   rankingInjetada = ranking || null
   authInjetada = auth || null
+  diarioInjetado = diario || null
+  if (ranking && cliente && diario) registrarContexto(ranking, { cliente, diario })
 }
 
 
@@ -84,7 +92,7 @@ function __definirColecoesTeste ({ ranking, auth } = {}) {
 // -------------------------------------------------------------------
 async function obterColecoes () {
   if (rankingInjetada && authInjetada) {
-    return { ranking: rankingInjetada, auth: authInjetada, fechar: async () => {} }
+    return { ranking: rankingInjetada, auth: authInjetada, diario: diarioInjetado, fechar: async () => {} }
   }
 
   const uri = process.env.MONGODB_URI
@@ -93,16 +101,22 @@ async function obterColecoes () {
   }
 
   const cliente = new MongoClient(uri, { serverSelectionTimeoutMS: 15000 })
-  await cliente.connect()
-  await cliente.db('admin').command({ ping: 1 })
-  const banco = cliente.db(NOME_BANCO)
-  return {
-    ranking: banco.collection(NOME_COLECAO_RANKING),
-    auth: banco.collection(NOME_COLECAO_AUTH),
-    fechar: async () => {
-      try { await cliente.close() } catch (err) { /* conexão já morta */ }
+  try {
+    await cliente.connect()
+    await cliente.db('admin').command({ ping: 1 })
+    const banco = cliente.db(NOME_BANCO)
+    const opcoes = { readConcern: { level: 'majority' }, writeConcern: { w: 'majority', wtimeoutMS: 15000 }, readPreference: 'primary' }
+    const ranking = banco.collection(NOME_COLECAO_RANKING, opcoes)
+    const diario = banco.collection(NOME_COLECAO_DIARIO, opcoes)
+    registrarContexto(ranking, { cliente, diario })
+    return { ranking, diario, auth: banco.collection(NOME_COLECAO_AUTH),
+      preparar: async () => {
+        try { await banco.createCollection(NOME_COLECAO_DIARIO, { writeConcern: opcoes.writeConcern }) }
+        catch (e) { if (e.code !== 48) throw e }
+      },
+      fechar: async () => { await cliente.close().catch(() => {}) }
     }
-  }
+  } catch (e) { await cliente.close().catch(() => {}); throw e }
 }
 
 // -------------------------------------------------------------------
@@ -239,7 +253,7 @@ function simularResultado (docs, plano) {
     //    documento do telefone (o $inc real acontece sobre o total já persistido,
     //    por isso a simulação também usa o $inc e não o total do plano).
     const alvo = item.alvo ? porId.get(String(item.alvo._id)) : null
-    if (!alvo) continue
+    if (!alvo || item.creditoJaAplicado) continue
     const total = Number(item.doc.total) || 0
     const ultima = Number(item.doc.ultimaMensagem) || 0
     // Mesmas regras do update real: $inc, $max e nome do mais recente.
@@ -322,7 +336,7 @@ function imprimirResumo (relatorio, log) {
 // segue depois de reabrir o arquivo e conferir que está íntegro.
 function gravarBackup (plano, pasta) {
   const quando = new Date()
-  const marca = quando.toISOString().replace(/[:.]/g, '-')
+  const marca = quando.toISOString().replace(/[:.]/g, '-') + '-' + randomUUID()
   const arquivo = path.join(pasta, `backup-ranking-lid-${marca}.json`)
   const conteudo = JSON.stringify({
     quando: quando.toISOString(),
@@ -331,7 +345,7 @@ function gravarBackup (plano, pasta) {
     docs: plano.map((item) => ({ acao: item.acao, telefone: item.telefone, doc: item.doc }))
   }, null, 2)
 
-  fs.writeFileSync(arquivo, conteudo, 'utf8')
+  fs.writeFileSync(arquivo, conteudo, { encoding: 'utf8', flag: 'wx', mode: 0o600 })
 
   // ✅ Só segue se o arquivo foi escrito E reaberto com sucesso.
   const relido = JSON.parse(fs.readFileSync(arquivo, 'utf8'))
@@ -346,33 +360,12 @@ function gravarBackup (plano, pasta) {
 // 🔀 fundir(ranking, item): trata UM documento do plano.
 //   • Sem documento no telefone  → RENOMEIA o `usuario_id` (a contagem fica
 //     intacta: nada de $inc, nada de perda).
-//   • Com documento no telefone  → FUNDE: findOneAndDelete no doc do LID (traz
-//     o total FINAL, já com as mensagens que chegaram depois do plano),
-//     $inc no doc do telefone, $max na data e nome do registro mais recente.
+//   • Fusão/renomeação e diário na mesma transação por padrão.
+//   • Fallback explícito de manutenção: crédito com comprovante atômico,
+//     confirmação, exclusão condicional e retomada pelo diário persistente.
 //   • Doc do LID já apagado (rodada anterior) → 'nada' (idempotência).
 // -------------------------------------------------------------------
-async function fundir (ranking, item) {
-  const filtroAlvo = { grupo_id: item.doc.grupo_id, usuario_id: item.telefone }
-  const atual = await ranking.findOne(filtroAlvo)
-
-  if (!atual) {
-    await ranking.updateOne({ _id: item.doc._id }, { $set: { usuario_id: item.telefone } })
-    return { acao: 'renomear', total: Number(item.doc.total) || 0 }
-  }
-
-  const apagado = await ranking.findOneAndDelete({ _id: item.doc._id })
-  if (!apagado) return { acao: 'nada', total: 0 }
-
-  const total = Number(apagado.total) || 0
-  const ultima = Number(apagado.ultimaMensagem) || 0
-  const update = { $inc: { total }, $max: { ultimaMensagem: ultima } }
-  // 🏷️ Só o registro MAIS RECENTE manda no nome (empate: fica o do LID).
-  if (ultima >= (Number(atual.ultimaMensagem) || 0) && apagado.nome) {
-    update.$set = { nome: apagado.nome }
-  }
-  await ranking.updateOne(filtroAlvo, update)
-  return { acao: 'fundir', total }
-}
+async function fundir (ranking, item, opcoes) { return fundirSeguro(ranking, item, opcoes) }
 
 // -------------------------------------------------------------------
 // 🚀 migrar({ aplicar, pastaBackup, log }): o fluxo inteiro.
@@ -383,12 +376,24 @@ async function fundir (ranking, item) {
 //   5) reimprime o relatório (fusões, renomeações, LIDs sem mapeamento).
 // Devolve o relatório (o teste usa isso).
 // -------------------------------------------------------------------
-async function migrar ({ aplicar = false, pastaBackup = process.cwd(), log = console.log } = {}) {
-  const { ranking, auth, fechar } = await obterColecoes()
+async function migrar ({ aplicar = false, pastaBackup = process.cwd(), log = console.log, offlineConfirmado = false } = {}) {
+  const { ranking, auth, diario, preparar, fechar } = await obterColecoes()
   try {
     const docs = await ranking.find({}).toArray()
     const { comprovados, paresNaSessao, provados } = await lerMapeamentoComprovado(auth)
     const { plano, semParComprovado, possiveisLids, comMarcaLid } = montarPlano(docs, comprovados)
+    // Uma queda após excluir a origem pode deixar apenas o diário para retomar.
+    // A prova PN/LID continua obrigatória, inclusive nessa retomada.
+    const pendentes = diario ? await diario.find({ estado: 'preparada', modo: 'offline' }).toArray() : []
+    for (const p of pendentes) {
+      if (comprovados.get(limparNumero(p.origem?.usuario_id)) !== p.telefone) throw new Error('MIGRACAO_PENDENTE_SEM_PROVA_ATUAL')
+      const alvo = docs.find(d => String(d._id) === String(p.destinoAntes?._id)) || p.destinoAntes
+      const retomada = { doc: p.origem, telefone: p.telefone, acao: p.acao, alvo,
+        creditoJaAplicado: alvo?._migracoesRankingLid?.[p._id] !== undefined }
+      const indice = plano.findIndex(i => String(i.doc._id) === String(p.origem._id))
+      if (indice < 0) plano.push(retomada)
+      else plano[indice] = retomada
+    }
     const documentosDepois = simularResultado(docs, plano)
 
     const relatorio = {
@@ -414,20 +419,12 @@ async function migrar ({ aplicar = false, pastaBackup = process.cwd(), log = con
 
     // 💾 Backup ANTES de qualquer escrita (e só segue se ele reabriu íntegro).
     relatorio.backup = gravarBackup(plano, pastaBackup)
+    await preparar?.()
     relatorio.aplicar = true
 
     for (const item of plano) {
-      let resultado = null
-      try {
-        resultado = await fundir(ranking, item)
-      } catch (err) {
-        // 🔁 Corrida com o bot em produção: uma mensagem pode ter criado o
-        //    documento do telefone entre a leitura e a escrita → o índice único
-        //    idx_ranking_grupo_usuario devolve E11000. Repetir cai na fusão.
-        if (err?.code !== 11000) throw err
-        relatorio.corridas += 1
-        resultado = await fundir(ranking, item)
-      }
+      const resultado = await fundir(ranking, item, { offlineConfirmado })
+      relatorio.corridas += resultado?.corridas || 0
       if (!resultado || resultado.acao === 'nada') continue
       if (resultado.acao === 'renomear') relatorio.renomeacoes += 1
       else relatorio.fusoes += 1
@@ -451,7 +448,7 @@ async function main () {
     : '🧪 Modo DRY-RUN (padrão): nada será gravado — use --aplicar para executar.')
 
   try {
-    const relatorio = await migrar({ aplicar })
+    const relatorio = await migrar({ aplicar, offlineConfirmado: process.argv.includes('--offline-confirmado') })
     console.log(
       `ℹ️ Resumo: ${relatorio.fusoes} fusão(ões), ${relatorio.renomeacoes} renomeação(ões), ` +
       `${relatorio.semParComprovado} documento(s) sem par comprovado ` +
@@ -459,7 +456,7 @@ async function main () {
     )
     process.exit(0)
   } catch (err) {
-    console.error('❌ Falha na migração do ranking LID→número:', err?.message || err)
+    console.error('❌ Migração interrompida; preserve backups e consulte o diário. Evento:', err?.codigo || 'MIGRACAO_INDISPONIVEL')
     process.exit(1)
   }
 }
@@ -470,6 +467,7 @@ module.exports = {
   NOME_BANCO,
   NOME_COLECAO_RANKING,
   NOME_COLECAO_AUTH,
+  NOME_COLECAO_DIARIO,
   __definirColecoesTeste,
   lerValorCru,
   lerMapeamentoComprovado,

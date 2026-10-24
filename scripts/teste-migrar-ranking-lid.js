@@ -4,7 +4,7 @@
 // Roda 100% offline: o migrador recebe DUAS coleções em memória
 // (__definirColecoesTeste) com o contrato mínimo do driver MongoDB — inclusive
 // o ÍNDICE ÚNICO (grupo_id, usuario_id), que é o que faz a corrida com o bot
-// estourar E11000, e o `findOneAndDelete`, usado para capturar o total final.
+// estourar E11000, além de snapshots transacionais e rollback.
 //
 // ⚠️ MONGODB_URI é zerada no TOPO (antes de qualquer require): o config.js
 // carrega o .env da raiz e o teste promete não tocar em nenhum banco real.
@@ -17,10 +17,15 @@
 // ============================================================
 
 process.env.MONGODB_URI = ''
+process.env.MONGO_URI_RPG = ''
+require('node:net').Socket.prototype.connect = function () { throw Error('REDE_PROIBIDA') }
+require('mongodb').MongoClient.prototype.connect = async function () { throw Error('MONGO_PROIBIDO') }
 
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
+const existe = fs.existsSync
+fs.existsSync = p => path.resolve(String(p)) === path.resolve(__dirname, '../.env') ? false : existe(p)
 const {
   __definirColecoesTeste,
   lerMapeamentoComprovado,
@@ -54,87 +59,9 @@ function exigir (cond, detalhe) { if (!cond) throw new Error(detalhe || 'condica
 
 // ─── 🗄️ Coleção em memória com o contrato do driver (índice único incluso) ───
 function criarColecao (docsIniciais = []) {
-  const documentos = new Map()
-  let sequencia = 0
-  const chaveDe = (doc) => `${doc.grupo_id}|${doc.usuario_id}`
-  const casa = (doc, filtro) =>
-    Object.entries(filtro || {}).every(([campo, valor]) => {
-      if (valor && typeof valor === 'object' && !Array.isArray(valor) && valor.$regex) {
-        return new RegExp(valor.$regex).test(String(doc[campo]))
-      }
-      return doc[campo] === valor
-    })
-  const semIndice = () => {}
-  void semIndice
-  for (const doc of docsIniciais) documentos.set(String(doc._id), { ...doc })
-
-  return {
-    _docs: documentos,
-    async findOne (filtro) {
-      for (const doc of documentos.values()) if (casa(doc, filtro)) return { ...doc }
-      return null
-    },
-    // 🪟 No driver real `find()` devolve um CURSOR (não uma Promise) — por isso
-    //    aqui também: é o cursor que tem `.toArray()`.
-    find (filtro) {
-      return {
-        async toArray () {
-          return [...documentos.values()].filter((d) => casa(d, filtro)).map((d) => ({ ...d }))
-        }
-      }
-    },
-    async updateOne (filtro, atualizacao) {
-      // 🧨 FIDELIDADE AO MONGO: o índice único (grupo_id, usuario_id) é testado
-      // ANTES de aplicar. É ele que devolve E11000 quando o bot criou o
-      // documento do telefone entre o findOne e esta escrita (a corrida que o
-      // migrador trata caindo no caminho de fusão).
-      if (atualizacao.$set && atualizacao.$set.usuario_id !== undefined) {
-        let alvo = null
-        for (const doc of documentos.values()) if (casa(doc, filtro)) { alvo = doc; break }
-        if (alvo) {
-          // O filtro pode ser só pelo _id (o renomear do migrador): o grupo vem
-          // do próprio documento.
-          const grupo = filtro.grupo_id ?? alvo.grupo_id
-          for (const [chave, doc] of documentos) {
-            if (doc === alvo) continue
-            if (chaveDe(doc) === `${grupo}|${atualizacao.$set.usuario_id}`) {
-              const err = new Error('E11000 duplicate key error collection')
-              err.code = 11000
-              throw err
-            }
-          }
-        }
-      }
-      for (const doc of documentos.values()) {
-        if (!casa(doc, filtro)) continue
-        if (atualizacao.$set) Object.assign(doc, atualizacao.$set)
-        if (atualizacao.$max) {
-          for (const [campo, valor] of Object.entries(atualizacao.$max)) {
-            doc[campo] = Math.max(Number(doc[campo]) || 0, valor)
-          }
-        }
-        if (atualizacao.$inc) {
-          for (const [campo, valor] of Object.entries(atualizacao.$inc)) {
-            doc[campo] = (Number(doc[campo]) || 0) + valor
-          }
-        }
-        return { matchedCount: 1 }
-      }
-      return { matchedCount: 0 }
-    },
-    async findOneAndDelete (filtro) {
-      for (const [chave, doc] of documentos) {
-        if (!casa(doc, filtro)) continue
-        documentos.delete(chave)
-        return { ...doc }
-      }
-      return null
-    }
-  }
+  return require('./helpers/ranking-migracao-fake')(docsIniciais).ranking
 }
 
-// 📦 Cenário pronto: sessão com PARES COMPROVADOS de A e B e um LID órfão
-// (só a chave reversa, sem o par direto — logo, SEM prova dupla).
 function cenario () {
   const ranking = criarColecao([
     { _id: 'r1', grupo_id: GRUPO, usuario_id: LID_A, nome: 'A pelo LID', total: 7, ultimaMensagem: 100, lid: LID_A },
@@ -328,11 +255,11 @@ async function main () {
     // 🐗 O bot grava no telefone DEPOIS que o migrador montou o plano e ANTES da
     //    1ª escrita: o renomear estoura E11000 no índice único.
     const updateOneOriginal = ranking.updateOne.bind(ranking)
-    ranking.updateOne = async (filtro, atualizacao) => {
+    ranking.updateOne = async (filtro, atualizacao, opcoes) => {
       if (filtro._id === 'z1' && !ranking._docs.has('z2')) {
         ranking._docs.set('z2', { _id: 'z2', grupo_id: GRUPO, usuario_id: TEL_A, nome: 'do bot', total: 1, ultimaMensagem: 800 })
       }
-      return updateOneOriginal(filtro, atualizacao)
+      return updateOneOriginal(filtro, atualizacao, opcoes)
     }
 
     const relatorio = await migrar({ aplicar: true, pastaBackup: pasta, log: silencioso })
