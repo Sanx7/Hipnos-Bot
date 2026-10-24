@@ -68,6 +68,11 @@ for (const nome of ['ranking', 'rankativo', 'inativos', 'sairgrupo', 'sairdogrup
   if (typeof comandos.get(nome)?.executar !== 'function') process.exitCode = 1
 }
 const comunicado = require('../comandos/menu-dono/comunicado')
+const surpresa = require('../comandos/menu-dono/surpresa')
+if (comandos.get('surpresa') !== surpresa || surpresa.oculto !== true || surpresa.aliases.length !== 0) process.exitCode = 1
+for (const cmd of require('../comandos/rpg/aniversarios')) {
+  if (comandos.get(cmd.nome) !== cmd || cmd.categoria !== 'rpg') process.exitCode = 1
+}
 for (const nome of [comunicado.nome, ...comunicado.aliases]) {
   if (comandos.get(nome) !== comunicado) process.exitCode = 1
 }

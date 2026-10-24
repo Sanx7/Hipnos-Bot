@@ -126,9 +126,9 @@ async function main() {
       chamadas.push({ caminhos, resposta, opts, opcoes }); return sock.sendMessage(jid, resposta, opts)
     } }
   })
-  await teste('42 comandos adultos preservam nomes, aliases, legendas, menções e arquivos anteriores', async () => {
+  await teste('50 comandos adultos preservam nomes, aliases, legendas, menções e arquivos anteriores', async () => {
     adultoLigado = true
-    assert.equal(comandosAdultos.length, 42)
+    assert.equal(comandosAdultos.length, 50)
     const c = await contexto(), m = c.msg(A, B, 'adulto')
     for (const cfg of configuracoes) {
       const cmd = comandosAdultos.find(cmd => cmd.nome === cfg.nome)
@@ -141,9 +141,79 @@ async function main() {
       assert.equal(r.opcoes.fallbackTexto, false)
       assert.equal(r.opts.quoted, m)
     }
-    assert.equal(chamadas.length, 42)
+    assert.equal(chamadas.length, 50)
   })
-  await teste('modo adulto desligado e privado bloqueiam todos os 42 comandos antes da mídia', async () => {
+  const casosTextoAdulto = [
+    ['sem contexto', null, null],
+    ['sem alvo', {}, null],
+    ['participant sem reply', { participant: pn(B) }, null],
+    ['mencoes invalidas', { mentionedJid: ['', null, 123, 'invalido', G, 'status@broadcast'] }, null],
+    ['lista de mencoes malformada', { mentionedJid: pn(B) }, null],
+    ['mencao ao proprio autor', { mentionedJid: [pn(A)] }, null],
+    ['mencao ao dispositivo do proprio autor', { mentionedJid: [A + ':2@s.whatsapp.net'] }, null],
+    ['reply ao proprio autor', { participant: pn(A), quotedMessage: { conversation: 'teste' } }, null],
+    ['reply sem participante', { quotedMessage: { conversation: 'teste' } }, null],
+    ['reply com participante invalido', { participant: G, quotedMessage: { conversation: 'teste' } }, null],
+    ['mencao valida', { mentionedJid: [pn(B)] }, pn(B)],
+    ['mencao LID valida', { mentionedJid: ['888@lid'] }, '888@lid'],
+    ['mencao valida apos entradas invalidas', { mentionedJid: [null, pn(A), pn(B)] }, pn(B)],
+    ['reply a outra pessoa', { participant: pn(B), quotedMessage: { conversation: 'teste' } }, pn(B)],
+    ['reply valido apos mencao invalida', { mentionedJid: [G], participant: pn(B), quotedMessage: { conversation: 'teste' } }, pn(B)],
+    ['mencao tem prioridade sobre reply', { mentionedJid: [pn(B)], participant: pn(C), quotedMessage: { conversation: 'teste' } }, pn(B)]
+  ];
+  for (const [nome, info, alvo] of casosTextoAdulto) {
+    await teste(`50 comandos adultos: texto e mencoes em ${nome}`, async () => {
+      adultoLigado = true
+      const c = await contexto(), m = c.msg(A, null, 'texto-adulto')
+      m.message = info ? { extendedTextMessage: { contextInfo: info } } : { conversation: '/comando' }
+      for (const cfg of configuracoes) {
+        await comandosAdultos.find(cmd => cmd.nome === cfg.nome).executar(c.sock, G, m)
+        const r = chamadas.at(-1)
+        const esperado = alvo ? cfg.frase.replace(/\[autor\]|\{autor\}/gi, '@'+A)
+          .replace(/\[alvo\]|\{alvo\}/gi, '@'+alvo.split('@')[0]).trim() : cfg.legenda
+        assert.equal(r.resposta.text, esperado, cfg.nome)
+        assert.deepEqual(r.resposta.mentions, alvo ? [pn(A), alvo] : undefined)
+        assert.deepEqual(r.caminhos, cfg.gifs)
+        assert.equal(r.opts.quoted, m)
+        assert.equal(r.opcoes.fallbackTexto, false)
+      }
+      assert.equal(chamadas.length, 50)
+    })
+  }
+  await teste('identificador alternativo do autor nao vira alvo; namespaces PN e LID distintos', async () => {
+    const c = await contexto(), cmd = comandosAdultos[0], cfg = configuracoes[0]
+    const m = c.msg(A, null, 'autor-alternativo')
+    m.key.participant = '777@lid'
+    m.key.participantAlt = pn(A)
+    m.participant = undefined
+    m.message.extendedTextMessage.contextInfo = { mentionedJid: [pn(A)] }
+    await cmd.executar(c.sock, G, m)
+    assert.equal(chamadas.at(-1).resposta.text, cfg.legenda)
+    assert.equal(chamadas.at(-1).resposta.mentions, undefined)
+    // Digitos iguais em namespaces diferentes nao comprovam a mesma pessoa.
+    m.message.extendedTextMessage.contextInfo.mentionedJid = ['777@s.whatsapp.net']
+    await cmd.executar(c.sock, G, m)
+    assert.deepEqual(chamadas.at(-1).resposta.mentions, ['777@lid', '777@s.whatsapp.net'])
+  })
+  await teste('reply em imagem, video e documento usa frase', async () => {
+    const c = await contexto(), cmd = comandosAdultos[0], cfg = configuracoes[0]
+    for (const tipo of ['imageMessage', 'videoMessage', 'documentMessage']) {
+      const m = c.msg(A, null, tipo)
+      m.message = { [tipo]: { contextInfo: { participant: pn(B), quotedMessage: { conversation: 'teste' } } } }
+      await cmd.executar(c.sock, G, m)
+      assert.equal(chamadas.at(-1).resposta.text, cfg.frase.replace(/\{autor\}/g, '@'+A).replace(/\{alvo\}/g, '@'+B))
+    }
+  })
+  await teste('sem alvo e sem legenda nao usa frase como fallback', async () => {
+    const c = await contexto(), cfg = configuracoes[0], original = cfg.legenda
+    try {
+      cfg.legenda = ''
+      await comandosAdultos[0].executar(c.sock, G, c.msg(A, null, 'sem-legenda'))
+      assert.equal(chamadas.at(-1).resposta.text, undefined)
+      assert.equal(chamadas.at(-1).resposta.mentions, undefined)
+    } finally { cfg.legenda = original }
+  })
+  await teste('modo adulto desligado e privado bloqueiam todos os 50 comandos antes da mídia', async () => {
     adultoLigado = false
     const c = await contexto(), m = c.msg(A, B, 'adulto-bloqueado')
     for (const cmd of comandosAdultos) {

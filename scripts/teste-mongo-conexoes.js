@@ -194,6 +194,19 @@ async function main() {
       let atual = fs.readFileSync(path.join(raiz, f), 'utf8').replace(/\r\n/g, '\n')
       let anterior = original(f).replace(/\r\n/g, '\n')
       if (f === 'bot.js') {
+        // Integração autorizada do agendador de aniversários. O listener real
+        // é executado por teste-aniversarios-conexao.js; o restante segue protegido.
+        const aniversarios = [
+          ["const { agendador: agendadorAniversarios } = require('./aniversarios')\n", 1],
+          ['    agendadorAniversarios.fechar(antigo)\n', 3],
+          ['      agendadorAniversarios.fechar(sock)\n', 1],
+          ["      agendadorAniversarios.abrir(sock).catch(() => console.info('[aniversarios]', { evento: 'inicio_adiado' }))\n", 1]
+        ]
+        for (const [trecho, quantidade] of aniversarios) {
+          assert.equal(atual.split(trecho).length - 1, quantidade)
+          atual = atual.replaceAll(trecho, '')
+          anterior = anterior.replaceAll(trecho, '')
+        }
         // Somente o bloco AFK mudou seu escopo; teste-afk.js executa o bloco
         // real em dois grupos. O restante do listener/lifecycle segue idêntico.
         const semBlocoAfk = texto => {

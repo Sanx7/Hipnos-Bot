@@ -49,8 +49,8 @@ async function main() {
     assert.equal(relacionamento.casar.length, 4)
     assert.equal(relacionamento.aceitar.length, 3)
     assert.deepEqual(relacionamento.recusarnamoro.map(f => path.extname(f)), ['.mp4', '.gif'])
-    assert.equal(adultos.find(c => c.nome === 'esfregar').gifs.length, 5)
-    assert.equal(adultos.find(c => c.nome === 'pgpeito').gifs.length, 3)
+    assert.equal(adultos.length, 50)
+    for (const comando of adultos) assert.equal(comando.gifs.length, 1, comando.nome)
   })
   await teste('sorteio oferece todos os candidatos com o mesmo intervalo, sem duplicar caminhos', async () => {
     for (const caminhos of [relacionamento.casar, relacionamento.aceitar, relacionamento.recusarnamoro,

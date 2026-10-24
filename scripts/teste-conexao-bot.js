@@ -57,7 +57,9 @@ async function main() {
         async end() { if (fimAntigo) await fimAntigo; listeners.clear(); this.ws.isOpen = false } }; sockets.push(s); return s
     }, P: () => ({}), require: nome => nome === './dados/protecao-bot' ? { protegerRemocoes() {} } : require('node:module').createRequire(require.resolve('../bot'))(nome),
     mensagensEnviadas: { acompanharSocket() {} }, registrarSocketBoasVindas() {}, prefixoComandos: { obterPrefixo: async () => '/' }, iniciarAgendadorLembretes: async () => ({}),
-    agendadorAnuncios: { fechar() {}, abrir: async () => ({}) }, DisconnectReason: require('@whiskeysockets/baileys').DisconnectReason, linkDoQrCode: '', qrcode: { generate() {} },
+    agendadorAnuncios: { fechar() {}, abrir: async () => ({}) },
+    agendadorAniversarios: { fechar() {}, abrir: async () => ({}) },
+    DisconnectReason: require('@whiskeysockets/baileys').DisconnectReason, linkDoQrCode: '', qrcode: { generate() {} },
     rodadasVouc: { obter() { return {} }, fechar() {} },
     clearTimeout: timer => { if (timer) timer.cancelado = true }, setTimeout: (fn,ms) => { const timer = { fn, ms }; agendamentos.push(timer); return timer }
   }

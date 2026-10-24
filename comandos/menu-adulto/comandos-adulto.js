@@ -38,8 +38,15 @@ try {
   modoAdultoAtivo = async () => false;
 }
 
-// Descobre quem foi mencionado ou quem é o dono da mensagem respondida.
-function acharAlvo(msg) {
+// Aceita somente JIDs de pessoas; o sufixo de dispositivo não muda a identidade.
+function normalizarPessoa(jid) {
+  if (typeof jid !== 'string') return null;
+  const partes = /^(\d+)(?::\d+)?@(s\.whatsapp\.net|lid)$/.exec(jid);
+  return partes ? `${partes[1]}@${partes[2]}` : null;
+}
+
+// Descobre um alvo explícito diferente do autor, mantendo prioridade da menção.
+function acharAlvo(msg, autorJid) {
   const contexto =
     msg.message?.extendedTextMessage?.contextInfo ||
     msg.message?.imageMessage?.contextInfo ||
@@ -47,14 +54,23 @@ function acharAlvo(msg) {
     msg.message?.documentMessage?.contextInfo ||
     {};
 
-  // Pessoa mencionada no comando
-  if (contexto.mentionedJid && contexto.mentionedJid.length > 0) {
-    return contexto.mentionedJid[0];
+  // participantAlt é o identificador alternativo informado pela própria mensagem.
+  // PN e LID não são comparados pelos dígitos.
+  const autores = new Set([autorJid, msg.key?.participantAlt, msg.participant]
+    .map(normalizarPessoa).filter(Boolean));
+  const valido = jid => {
+    const pessoa = normalizarPessoa(jid);
+    return pessoa && !autores.has(pessoa) ? pessoa : null;
+  };
+  const mencionados = Array.isArray(contexto.mentionedJid) ? contexto.mentionedJid : [];
+  for (const jid of mencionados) {
+    const alvo = valido(jid);
+    if (alvo) return alvo;
   }
 
-  // Pessoa cuja mensagem foi respondida
-  if (contexto.participant) {
-    return contexto.participant;
+  // participant isolado não comprova que há uma mensagem respondida.
+  if (contexto.quotedMessage && typeof contexto.quotedMessage === 'object') {
+    return valido(contexto.participant);
   }
 
   return null;
@@ -157,19 +173,19 @@ function criarComando(config) {
           msg.key.remoteJid;
 
         // Quem foi mencionado/respondido
-        const alvoJid = acharAlvo(msg);
+        const alvoJid = acharAlvo(msg, autorJid);
 
         // Monta a legenda
         //
-        // Se existir "frase", usa:
+        // Somente com alvo válido, usa "frase":
         // [autor] -> quem executou
         // [alvo]  -> quem foi mencionado/respondido
         //
-        // Se não existir "frase", usa a legenda antiga.
+        // Sem alvo válido, utiliza exclusivamente a legenda configurada.
         let legendaFinal = config.legenda || undefined;
         let mentions = [];
 
-        if (config.frase) {
+        if (alvoJid && config.frase) {
           const resultado = montarLegenda(
             config.frase,
             autorJid,

@@ -168,10 +168,6 @@ legenda: 'voce se esfregou',
 frase: '{autor} esfregou a xereca molhadinha',
 gifs: [
 'assets/gifs/esfregar/seesfregar.gif',
-'assets/gifs/esfregar/seesfregar1.gif',
-'assets/gifs/esfregar/seesfregar2.gif',
-'assets/gifs/esfregar/seesfregar3.gif',
-'assets/gifs/esfregar/seesfregar4.gif',
 ]
 },
 {
@@ -262,8 +258,6 @@ legenda: 'voce pegou em um peito',
 frase: '{autor} pegou no peito da (o) {alvo}',
 gifs: [
 'assets/gifs/pgpeito/pegarnopeito.mp4',
-'assets/gifs/pgpeito/pegarnopeito2.gif',
-'assets/gifs/pgpeito/pegarnopeito3.gif',
 ]
 },
 {
@@ -363,7 +357,6 @@ legenda: 'voce deu um tapa na🖐️​ bunda de alguem',
 frase: '{autor} deu um tapa🖐️​ na bunda da (o) {alvo} e ele(a) se contorceu de prazer e gemeu alto😈​',
 gifs: [
 'assets/gifs/tapabunda/tapanabunda.mp4',
-'assets/gifs/baternabunda/baternabunda.gif',
 ]
 },
 {
@@ -373,7 +366,6 @@ legenda: 'Voce da um tapa na🖐️​ bunda de alguem',
 frase: '{autor} deu um tapa🖐️​ na bunda da (o) {alvo} e ele(a) se contorceu de prazer e pediu mais😈​',
 gifs: [
 'assets/gifs/tapabunda/tapanabunda2.mp4',
-'assets/gifs/baternabunda/baternabunda.gif',
 ]
 },
 {
@@ -383,6 +375,78 @@ legenda: 'Voce e sua parceira se aproximam e fazem um sexo lésbico, se esfregan
 frase: '{autor} e {alvo} fizeram um sexo lésbico roçando fortemente uma na outra😈​',
 gifs: [
 'assets/gifs/tesourar/tesourar.gif',
+]
+},
+{
+nome: 'esfregar1',
+aliases: ['seesfregar1'],
+legenda: 'voce se masturbou de forma gostosa',
+frase: '{autor} se masturbou de forma gostosa na frente do (a) {alvo}',
+gifs: [
+'assets/gifs/esfregar/seesfregar1.gif',
+]
+},
+{
+nome: 'esfregar2',
+aliases: ['seesfregar2'],
+legenda: 'voce siriricou e ficou com a xota molhadinha',
+frase: '{autor} siriricou e ficou com a xota molhadinha na frente do (a) {alvo}',
+gifs: [
+'assets/gifs/esfregar/seesfregar2.gif',
+]
+},
+{
+nome: 'esfregar3',
+aliases: ['seesfregar3'],
+legenda: 'voce se esfregou em um travesseiro',
+frase: '{autor} se esfregou em um travesseiro na frente do (a) {alvo}',
+gifs: [
+'assets/gifs/esfregar/seesfregar3.gif',
+]
+},
+{
+nome: 'esfregar4',
+aliases: ['seesfregar4'],
+legenda: 'voce enfiou a mao na buceta e esfegou bem gostoso',
+frase: '{autor} enfiou a mao na buceta de {alvo} e esfregou bem gostoso',
+gifs: [
+'assets/gifs/esfregar/seesfregar4.gif',
+]
+},
+{
+nome: 'pgpeito2',
+aliases: ['pegarnopeito2','pgpeito2','peitos2'],
+legenda: 'voce apertou os peitos de alguem',
+frase: '{autor} apertou os peitos da (o) {alvo}',
+gifs: [
+'assets/gifs/pgpeito/pegarnopeito2.gif',
+]
+},
+{
+nome: 'pgpeito3',
+aliases: ['pegarnopeito3','pgpeito3','peitos3'],
+legenda: 'voce pegou nos peitos de alguem',
+frase: '{autor} pegou nos peitos da (o) {alvo}',
+gifs: [
+'assets/gifs/pgpeito/pegarnopeito3.gif',
+]
+},
+{
+nome: 'tapabunda3',
+aliases: ['baternabunda3','pgbunda3','bunda3','bdsm','tapanabunda3'],
+legenda: 'voce deu uma palmada de brincadeira',
+frase: '{autor} deu uma palmada de brincadeira em {alvo}',
+gifs: [
+'assets/gifs/baternabunda/baternabunda.gif',
+]
+},
+{
+nome: 'tapabunda4',
+aliases: ['baternabunda4','pgbunda4','bunda4','bdsm1','tapanabunda4'],
+legenda: 'voce surpreendeu seu par com uma palmada',
+frase: '{autor} surpreendeu {alvo} com uma palmada',
+gifs: [
+'assets/gifs/baternabunda/baternabunda.gif',
 ]
 }
 ];

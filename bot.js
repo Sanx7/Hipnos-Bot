@@ -102,6 +102,7 @@ const { processarGatilhoIA } = require('./ia-interativa')
 // Mongo falhar, ele apenas loga e tenta de novo no próximo ciclo.
 const { iniciarAgendadorLembretes } = require('./lembretes')
 const { agendador: agendadorAnuncios } = require('./anuncios')
+const { agendador: agendadorAniversarios } = require('./aniversarios')
 
 // 🪪 Resolução LID→número real (lid.js) — usada pela anti-blacklist: a entrada
 // pode chegar como "@lid" (identificador novo do WhatsApp) enquanto o
@@ -300,6 +301,7 @@ const leaseSessao = criarLease({ perdida: () => {
   if (antigo) {
     socketSeguro.atualizar(antigo, false)
     agendadorAnuncios.fechar(antigo)
+    agendadorAniversarios.fechar(antigo)
     rodadasVouc.fechar(antigo)
     sockAtual = null
     Promise.resolve(antigo.end(undefined)).catch(() => {})
@@ -319,6 +321,7 @@ async function montarBot() {
   if (sockAtual) {
     const antigo = sockAtual
     agendadorAnuncios.fechar(antigo)
+    agendadorAniversarios.fechar(antigo)
     rodadasVouc.fechar(antigo)
     socketSeguro.atualizar(antigo, false)
     sockAtual = null
@@ -963,6 +966,7 @@ async function montarBot() {
       socketSeguro.atualizar(sock, true)
       clearTimeout(timerReconexao)
       agendadorAnuncios.abrir(sock).catch(() => console.info('[setads]', 'inicio_adiado'))
+      agendadorAniversarios.abrir(sock).catch(() => console.info('[aniversarios]', { evento: 'inicio_adiado' }))
       tentativas = 0
       reconexaoAgendada = false
       console.log('🌙 Hipnos Bot connected successfully!')
@@ -978,6 +982,7 @@ async function montarBot() {
     if (connection === 'close') {
       socketSeguro.atualizar(sock, false)
       agendadorAnuncios.fechar(sock)
+      agendadorAniversarios.fechar(sock)
       rodadasVouc.fechar(sock)
       const codigo = lastDisconnect?.error?.output?.statusCode
       const conflito = codigo === DisconnectReason.connectionReplaced || codigo === 440
@@ -1046,6 +1051,7 @@ async function encerrarBot() {
   if (antigo) {
     socketSeguro.atualizar(antigo, false)
     agendadorAnuncios.fechar(antigo)
+    agendadorAniversarios.fechar(antigo)
     sockAtual = null
     await antigo.end(undefined)
   }

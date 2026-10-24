@@ -55,7 +55,7 @@ function anunciados(texto, sinal) {
 async function main() {
   await teste('catálogo cobre todos os comandos carregados, sem repetições', () => {
     const navegacao = new Set(['menu', 'brincadeira', ...portais.map(p => p.nome)])
-    const reais = [...new Set([...comandos.values()].map(c => c.nome))].filter(n => !navegacao.has(n)).sort()
+    const reais = [...new Set([...comandos.values()].filter(c => !c.oculto).map(c => c.nome))].filter(n => !navegacao.has(n)).sort()
     const ativos = catalogo.filter(c => comandos.get(c.nome)?.nome === c.nome)
     assert.deepEqual([...new Set(ativos.map(c => c.nome))].sort(), reais)
     assert.equal(new Set(catalogo.map(c => `${c.categoria}:${c.nome}`)).size, catalogo.length)
@@ -64,6 +64,24 @@ async function main() {
       assert.ok(c.descricao.length >= 12 && c.descricao.length <= 120)
       assert.doesNotMatch(c.descricao, /(?:^|\s)\/[\p{L}\d-]+/u)
     }
+  })
+  await teste('comando reservado carrega sem ser anunciado nos menus', () => {
+    const cmd = comandos.get('surpresa')
+    assert.equal(typeof cmd?.executar, 'function')
+    assert.equal(cmd.oculto, true)
+    assert.ok(!catalogo.some(c => c.nome === cmd.nome))
+    for (const portal of portais) assert.ok(!entradas(portal.categoria).some(c => c.nome === cmd.nome))
+  })
+  await teste('quatro comandos de aniversarios no RPG, com uma entrada por comando', () => {
+    for (const nome of ['aniversario', 'meuaniversario', 'aniversarios', 'removeraniversario']) {
+      const cmd = comandos.get(nome)
+      assert.equal(cmd?.nome, nome)
+      assert.equal(cmd.categoria, 'rpg')
+      assert.equal(typeof cmd.executar, 'function')
+      assert.equal(entradas('rpg').filter(c => c.nome === nome).length, 1)
+      assert.equal(fontes.filter(f => f.cmd.nome === nome || (f.cmd.aliases || []).includes(nome)).length, 1)
+    }
+    assert.equal(POR_PAGINA, 12)
   })
   for (const sinal of ['/', '!', '#']) {
     prefixo.__definirPrefixoTeste(sinal)
@@ -97,28 +115,35 @@ async function main() {
     }
   }
   prefixo.__definirPrefixoTeste('!')
-  await teste('menu adulto cobre os 42 comandos reais, uma única entrada por implementação', () => {
+  await teste('menu adulto cobre os 50 comandos reais, uma única entrada por implementação', () => {
     const reais = require('../comandos/menu-adulto/comandos-adulto')
     const lista = entradas('adulto')
-    assert.equal(reais.length, 42)
+    assert.equal(reais.length, 50)
     assert.equal(lista.length, reais.length)
     assert.deepEqual(lista.map(c => c.nome).sort(), reais.map(c => c.nome).sort())
     for (const cmd of reais) {
       const item = lista.find(c => c.nome === cmd.nome)
       assert.equal(comandos.get(item.acesso || item.nome), cmd)
+      const novos = ['esfregar1', 'esfregar2', 'esfregar3', 'esfregar4', 'pgpeito2', 'pgpeito3', 'tapabunda3', 'tapabunda4']
+      if (!novos.includes(cmd.nome)) continue
+      for (const rota of new Set([cmd.nome, ...cmd.aliases])) {
+        const donos = fontes.filter(f => f.cmd.nome === rota || (f.cmd.aliases || []).includes(rota))
+        assert.equal(donos.length, 1, `Rota adulta duplicada: ${rota}`)
+        assert.equal(comandos.get(rota), cmd)
+      }
     }
   })
-  await teste('adulto tem quatro páginas 12/12/12/6, com aliases somente como acesso da mesma entrada', async () => {
+  await teste('adulto tem 5 paginas 12/12/12/12/2, com aliases somente como acesso da mesma entrada', async () => {
     const rotas = [], quantidades = []
     let texto = ''
-    for (let p = 1; p <= 4; p++) {
+    for (let p = 1; p <= 5; p++) {
       const pagina = (await executar('menu-adulto', `!menu-adulto ${p}`)).conteudo.text
       texto += pagina
       const nomes = [...pagina.matchAll(/\*!([\p{L}\d-]+)\*/gu)].map(m => m[1])
       rotas.push(...nomes); quantidades.push(nomes.length)
     }
-    assert.deepEqual(quantidades, [12, 12, 12, 6])
-    assert.equal(new Set(rotas).size, 42)
+    assert.deepEqual(quantidades, [12, 12, 12, 12, 2])
+    assert.equal(new Set(rotas).size, 50)
     assert.match(texto, /\*!murro\* \(soco adulto\)/)
     assert.match(texto, /\*!bater\* \(tapa adulto\)/)
     assert.doesNotMatch(texto, /\*!(?:soco|tapa|boquete|tirarcalcinha)\*/)
@@ -129,7 +154,7 @@ async function main() {
     try {
       comandos.delete('murro')
       comandos.set('bater', comandos.get('tapa'))
-      assert.equal(entradas('adulto').length, 40)
+      assert.equal(entradas('adulto').length, 48)
       assert.ok(!entradas('adulto').some(c => ['soco', 'tapa'].includes(c.nome)))
     } finally { comandos.set('murro', murro); comandos.set('bater', bater) }
   })
@@ -193,7 +218,7 @@ async function main() {
     assert.ok(!resposta.conteudo.video && !resposta.conteudo.image)
     assert.equal(await adulto.modoAdultoAtivo('120000000000@g.us'), false)
   })
-  await teste('todos os 42 acessos exibidos continuam bloqueados com modo adulto desligado', async () => {
+  await teste('todos os 50 acessos exibidos continuam bloqueados com modo adulto desligado', async () => {
     await executar('menu-adulto', '!menu-adulto')
     for (const item of entradas('adulto')) {
       const acesso = item.acesso || item.nome

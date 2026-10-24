@@ -8,6 +8,8 @@ const sock = { ev: { on(evento, fn) { assert.equal(evento,'connection.update'); 
 const contexto = { sock, sockAtual: sock, console: { log() {}, error() {}, info() {}, warn() {} }, qrcode: { generate() {} }, linkDoQrCode: '', tentativas: 0, reconexaoAgendada: false, idProcessoConexao: 'offline', geracao: 1,
   socketSeguro: { atualizar() {} }, inicializadorSocket: { bloqueado: () => false, bloquear() {} }, leaseSessao: { valida: () => true }, clearTimeout() {}, timerReconexao: null,
   agendadorAnuncios: { abrir(s) { assert.equal(s,sock); aberturas++; return Promise.resolve() }, fechar(s) { assert.equal(s,sock); fechamentos++ } },
+  agendadorAniversarios: { abrir: async () => {}, fechar() {} },
+  rodadasVouc: { fechar() {} },
   iniciarAgendadorLembretes: () => Promise.resolve(), DisconnectReason: { loggedOut: 401, badSession: 500 }, setTimeout() {}, startBot: () => Promise.resolve() }
 contexto.tratarFalhaInicializacao = () => {}
 vm.runInNewContext(fonte.slice(inicio,fim), contexto)
