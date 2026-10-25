@@ -1,0 +1,1367 @@
+{
+  "commit": "a405356d26e96e5672c7512e08bbe76e13bcc306",
+  "branch": "feat/casamento-olimpo",
+  "inicio": "2026-10-25T18:29:38.320Z",
+  "suites": [
+    {
+      "suite": "scripts/teste-acoes.js",
+      "estado": "nao-executada",
+      "motivo": "integracao com servico real"
+    },
+    {
+      "suite": "scripts/teste-adivinha-emoji.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 4945,
+      "casosAprovados": 44,
+      "metodoContagem": "resumo da suite"
+    },
+    {
+      "suite": "scripts/teste-administrar.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 11791,
+      "casosAprovados": 4,
+      "metodoContagem": "resumo da suite"
+    },
+    {
+      "suite": "scripts/teste-adv.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 17556,
+      "casosAprovados": 26,
+      "metodoContagem": "resumo da suite"
+    },
+    {
+      "suite": "scripts/teste-advertencias-evolucao.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 22365,
+      "casosAprovados": 63,
+      "metodoContagem": "resumo da suite"
+    },
+    {
+      "suite": "scripts/teste-afk.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 6322,
+      "casosAprovados": 22,
+      "metodoContagem": "resumo da suite"
+    },
+    {
+      "suite": "scripts/teste-alcunha.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 7247,
+      "casosAprovados": 28,
+      "metodoContagem": "resumo da suite"
+    },
+    {
+      "suite": "scripts/teste-aleatorios.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 14622,
+      "casosAprovados": 11,
+      "metodoContagem": "casos individuais registrados"
+    },
+    {
+      "suite": "scripts/teste-aliases-comandos.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 8692,
+      "casosAprovados": 33,
+      "metodoContagem": "resumo da suite"
+    },
+    {
+      "suite": "scripts/teste-anagrama.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 6653,
+      "casosAprovados": 27,
+      "metodoContagem": "casos individuais registrados"
+    },
+    {
+      "suite": "scripts/teste-animacoes-comandos.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 3361,
+      "casosAprovados": 44,
+      "metodoContagem": "resumo da suite"
+    },
+    {
+      "suite": "scripts/teste-animacoes-locais.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 1998,
+      "casosAprovados": 11,
+      "metodoContagem": "resumo da suite"
+    },
+    {
+      "suite": "scripts/teste-aniversarios-conexao.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 707,
+      "casosAprovados": 0,
+      "metodoContagem": "integrado sem contagem individual"
+    },
+    {
+      "suite": "scripts/teste-aniversarios.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 3193,
+      "casosAprovados": 49,
+      "metodoContagem": "resumo da suite"
+    },
+    {
+      "suite": "scripts/teste-antiaudio.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 1948,
+      "casosAprovados": 8,
+      "metodoContagem": "casos individuais registrados"
+    },
+    {
+      "suite": "scripts/teste-antidoc.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 618,
+      "casosAprovados": 8,
+      "metodoContagem": "casos individuais registrados"
+    },
+    {
+      "suite": "scripts/teste-antievento.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 1896,
+      "casosAprovados": 8,
+      "metodoContagem": "casos individuais registrados"
+    },
+    {
+      "suite": "scripts/teste-antiflood.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 2665,
+      "casosAprovados": 78,
+      "metodoContagem": "resumo da suite"
+    },
+    {
+      "suite": "scripts/teste-antigolpe.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 7976,
+      "casosAprovados": 198,
+      "metodoContagem": "resumo da suite"
+    },
+    {
+      "suite": "scripts/teste-antilink.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 653,
+      "casosAprovados": 8,
+      "metodoContagem": "casos individuais registrados"
+    },
+    {
+      "suite": "scripts/teste-antilinkhard.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 3149,
+      "casosAprovados": 97,
+      "metodoContagem": "resumo da suite"
+    },
+    {
+      "suite": "scripts/teste-antipay.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 821,
+      "casosAprovados": 8,
+      "metodoContagem": "casos individuais registrados"
+    },
+    {
+      "suite": "scripts/teste-antistatus.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 746,
+      "casosAprovados": 8,
+      "metodoContagem": "casos individuais registrados"
+    },
+    {
+      "suite": "scripts/teste-arcontes-olimpo.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 1815,
+      "casosAprovados": 98,
+      "metodoContagem": "resumo da suite"
+    },
+    {
+      "suite": "scripts/teste-assinatura.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 1848,
+      "casosAprovados": 24,
+      "metodoContagem": "casos individuais registrados"
+    },
+    {
+      "suite": "scripts/teste-atividade-grupo.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 4970,
+      "casosAprovados": 26,
+      "metodoContagem": "resumo da suite"
+    },
+    {
+      "suite": "scripts/teste-avaliacao.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 1085,
+      "casosAprovados": 8,
+      "metodoContagem": "casos individuais registrados"
+    },
+    {
+      "suite": "scripts/teste-blacklist-numero.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 1605,
+      "casosAprovados": 20,
+      "metodoContagem": "resumo da suite"
+    },
+    {
+      "suite": "scripts/teste-boasvindas.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 15938,
+      "casosAprovados": 23,
+      "metodoContagem": "casos individuais registrados"
+    },
+    {
+      "suite": "scripts/teste-brat.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 4879,
+      "casosAprovados": 5,
+      "metodoContagem": "casos individuais registrados"
+    },
+    {
+      "suite": "scripts/teste-casamento-olimpo.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 1487,
+      "casosAprovados": 61,
+      "metodoContagem": "resumo da suite"
+    },
+    {
+      "suite": "scripts/teste-cep.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 1654,
+      "casosAprovados": 7,
+      "metodoContagem": "casos individuais registrados"
+    },
+    {
+      "suite": "scripts/teste-checkativo.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 1988,
+      "casosAprovados": 8,
+      "metodoContagem": "casos individuais registrados"
+    },
+    {
+      "suite": "scripts/teste-cobrinha.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 1814,
+      "casosAprovados": 21,
+      "metodoContagem": "resumo da suite"
+    },
+    {
+      "suite": "scripts/teste-compatibilidade-canvas.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 20865,
+      "casosAprovados": 15,
+      "metodoContagem": "8 valores de configuracao e 7 cenarios"
+    },
+    {
+      "suite": "scripts/teste-compatibilidade.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 1116,
+      "casosAprovados": 32,
+      "metodoContagem": "resumo da suite"
+    },
+    {
+      "suite": "scripts/teste-comunicado.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 1391,
+      "casosAprovados": 53,
+      "metodoContagem": "resumo da suite"
+    },
+    {
+      "suite": "scripts/teste-conexao-bot.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 1276,
+      "casosAprovados": 61,
+      "metodoContagem": "resumo da suite"
+    },
+    {
+      "suite": "scripts/teste-conversor.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 883,
+      "casosAprovados": 13,
+      "metodoContagem": "casos individuais registrados"
+    },
+    {
+      "suite": "scripts/teste-corvip.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 5035,
+      "casosAprovados": 20,
+      "metodoContagem": "casos individuais registrados"
+    },
+    {
+      "suite": "scripts/teste-ddd.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 454,
+      "casosAprovados": 7,
+      "metodoContagem": "casos individuais registrados"
+    },
+    {
+      "suite": "scripts/teste-delete.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 409,
+      "casosAprovados": 9,
+      "metodoContagem": "casos individuais registrados"
+    },
+    {
+      "suite": "scripts/teste-desenharpalavra.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 584,
+      "casosAprovados": 46,
+      "metodoContagem": "resumo da suite"
+    },
+    {
+      "suite": "scripts/teste-dicionario.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 1380,
+      "casosAprovados": 10,
+      "metodoContagem": "casos individuais registrados"
+    },
+    {
+      "suite": "scripts/teste-dino.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 1338,
+      "casosAprovados": 18,
+      "metodoContagem": "resumo da suite"
+    },
+    {
+      "suite": "scripts/teste-downloads-extra.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 16144,
+      "casosAprovados": 39,
+      "metodoContagem": "casos individuais registrados"
+    },
+    {
+      "suite": "scripts/teste-efeitos-visuais.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 17394,
+      "casosAprovados": 61,
+      "metodoContagem": "casos individuais registrados"
+    },
+    {
+      "suite": "scripts/teste-efeitos.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 8363,
+      "casosAprovados": 16,
+      "metodoContagem": "casos individuais registrados"
+    },
+    {
+      "suite": "scripts/teste-elogio.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 1473,
+      "casosAprovados": 13,
+      "metodoContagem": "casos individuais registrados"
+    },
+    {
+      "suite": "scripts/teste-emojimix.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 1750,
+      "casosAprovados": 11,
+      "metodoContagem": "casos individuais registrados"
+    },
+    {
+      "suite": "scripts/teste-enquete-admin.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 1341,
+      "casosAprovados": 53,
+      "metodoContagem": "resumo da suite"
+    },
+    {
+      "suite": "scripts/teste-enquete.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 1353,
+      "casosAprovados": 49,
+      "metodoContagem": "resumo da suite"
+    },
+    {
+      "suite": "scripts/teste-enquetes-nativas.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 2501,
+      "casosAprovados": 38,
+      "metodoContagem": "resumo da suite"
+    },
+    {
+      "suite": "scripts/teste-estabilidade.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 6998,
+      "casosAprovados": 17,
+      "metodoContagem": "casos individuais registrados"
+    },
+    {
+      "suite": "scripts/teste-eununca.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 1420,
+      "casosAprovados": 7,
+      "metodoContagem": "casos individuais registrados"
+    },
+    {
+      "suite": "scripts/teste-explicarmeme.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 1962,
+      "casosAprovados": 28,
+      "metodoContagem": "casos individuais registrados"
+    },
+    {
+      "suite": "scripts/teste-fake-chat.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 2188,
+      "casosAprovados": 8,
+      "metodoContagem": "casos individuais registrados"
+    },
+    {
+      "suite": "scripts/teste-figurinha.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 8369,
+      "casosAprovados": 54,
+      "metodoContagem": "resumo da suite"
+    },
+    {
+      "suite": "scripts/teste-forca.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 788,
+      "casosAprovados": 35,
+      "metodoContagem": "resumo da suite"
+    },
+    {
+      "suite": "scripts/teste-frase.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 631,
+      "casosAprovados": 18,
+      "metodoContagem": "casos individuais registrados"
+    },
+    {
+      "suite": "scripts/teste-gartic-catalogo.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 3501,
+      "casosAprovados": 36,
+      "metodoContagem": "resumo da suite"
+    },
+    {
+      "suite": "scripts/teste-gartic.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 5963,
+      "casosAprovados": 20,
+      "metodoContagem": "resumo da suite"
+    },
+    {
+      "suite": "scripts/teste-gerar-nome.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 1810,
+      "casosAprovados": 17,
+      "metodoContagem": "casos individuais registrados"
+    },
+    {
+      "suite": "scripts/teste-hidetag.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 787,
+      "casosAprovados": 13,
+      "metodoContagem": "casos individuais registrados"
+    },
+    {
+      "suite": "scripts/teste-historicoarconte.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 2837,
+      "casosAprovados": 58,
+      "metodoContagem": "resumo da suite"
+    },
+    {
+      "suite": "scripts/teste-horoscopo.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 1367,
+      "casosAprovados": 9,
+      "metodoContagem": "casos individuais registrados"
+    },
+    {
+      "suite": "scripts/teste-ia-interativa-donos.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 4805,
+      "casosAprovados": 13,
+      "metodoContagem": "casos individuais registrados"
+    },
+    {
+      "suite": "scripts/teste-ia-interativa.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 2152,
+      "casosAprovados": 29,
+      "metodoContagem": "casos individuais registrados"
+    },
+    {
+      "suite": "scripts/teste-ia.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 777,
+      "casosAprovados": 6,
+      "metodoContagem": "casos individuais registrados"
+    },
+    {
+      "suite": "scripts/teste-insulto.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 1480,
+      "casosAprovados": 11,
+      "metodoContagem": "casos individuais registrados"
+    },
+    {
+      "suite": "scripts/teste-jornal-incremental.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 15676,
+      "casosAprovados": 21,
+      "metodoContagem": "resumo da suite"
+    },
+    {
+      "suite": "scripts/teste-jornal-mongo-real.js",
+      "estado": "nao-executada",
+      "motivo": "integracao com servico real"
+    },
+    {
+      "suite": "scripts/teste-jornal.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 4095,
+      "casosAprovados": 20,
+      "metodoContagem": "casos individuais registrados"
+    },
+    {
+      "suite": "scripts/teste-lembrete.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 1022,
+      "casosAprovados": 14,
+      "metodoContagem": "casos individuais registrados"
+    },
+    {
+      "suite": "scripts/teste-letra.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 889,
+      "casosAprovados": 14,
+      "metodoContagem": "casos individuais registrados"
+    },
+    {
+      "suite": "scripts/teste-limitecaractere.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 6709,
+      "casosAprovados": 167,
+      "metodoContagem": "resumo da suite"
+    },
+    {
+      "suite": "scripts/teste-limpar-chat.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 1226,
+      "casosAprovados": 41,
+      "metodoContagem": "resumo da suite"
+    },
+    {
+      "suite": "scripts/teste-linkgp.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 1616,
+      "casosAprovados": 8,
+      "metodoContagem": "casos individuais registrados"
+    },
+    {
+      "suite": "scripts/teste-loader.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 5643,
+      "casosAprovados": 0,
+      "metodoContagem": "integrado sem contagem individual"
+    },
+    {
+      "suite": "scripts/teste-mensagens-apagadas.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 2296,
+      "casosAprovados": 14,
+      "metodoContagem": "casos individuais registrados"
+    },
+    {
+      "suite": "scripts/teste-menus-olimpo.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 6601,
+      "casosAprovados": 54,
+      "metodoContagem": "resumo da suite"
+    },
+    {
+      "suite": "scripts/teste-meuslembretes.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 806,
+      "casosAprovados": 19,
+      "metodoContagem": "resumo da suite"
+    },
+    {
+      "suite": "scripts/teste-migrar-ranking-lid.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 788,
+      "casosAprovados": 14,
+      "metodoContagem": "casos individuais registrados"
+    },
+    {
+      "suite": "scripts/teste-migrar-ranking-seguranca.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 1945,
+      "casosAprovados": 51,
+      "metodoContagem": "node:test"
+    },
+    {
+      "suite": "scripts/teste-moderacao-figurinhas.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 1397,
+      "casosAprovados": 44,
+      "metodoContagem": "resumo da suite"
+    },
+    {
+      "suite": "scripts/teste-modificador-voz.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 6950,
+      "casosAprovados": 55,
+      "metodoContagem": "casos individuais registrados"
+    },
+    {
+      "suite": "scripts/teste-mongo-conexoes-real.js",
+      "estado": "nao-executada",
+      "motivo": "integracao com servico real"
+    },
+    {
+      "suite": "scripts/teste-mongo-conexoes.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 4437,
+      "casosAprovados": 82,
+      "metodoContagem": "resumo da suite"
+    },
+    {
+      "suite": "scripts/teste-namoro-olimpo.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 2034,
+      "casosAprovados": 65,
+      "metodoContagem": "resumo da suite"
+    },
+    {
+      "suite": "scripts/teste-nasa-integracao.js",
+      "estado": "nao-executada",
+      "motivo": "integracao com servico real"
+    },
+    {
+      "suite": "scripts/teste-nasa.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 1842,
+      "casosAprovados": 8,
+      "metodoContagem": "casos individuais registrados"
+    },
+    {
+      "suite": "scripts/teste-nomecustom.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 5146,
+      "casosAprovados": 22,
+      "metodoContagem": "casos individuais registrados"
+    },
+    {
+      "suite": "scripts/teste-novidades.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 755,
+      "casosAprovados": 13,
+      "metodoContagem": "casos individuais registrados"
+    },
+    {
+      "suite": "scripts/teste-npm-shell-sem-canvas.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 5799,
+      "casosAprovados": 16,
+      "metodoContagem": "resumo da suite"
+    },
+    {
+      "suite": "scripts/teste-nuke.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 1512,
+      "casosAprovados": 89,
+      "metodoContagem": "resumo da suite"
+    },
+    {
+      "suite": "scripts/teste-on-off.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 5334,
+      "casosAprovados": 86,
+      "metodoContagem": "resumo da suite"
+    },
+    {
+      "suite": "scripts/teste-perfil.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 5614,
+      "casosAprovados": 11,
+      "metodoContagem": "casos individuais registrados"
+    },
+    {
+      "suite": "scripts/teste-pergunta.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 362,
+      "casosAprovados": 4,
+      "metodoContagem": "resumo da suite"
+    },
+    {
+      "suite": "scripts/teste-pinterest.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 701,
+      "casosAprovados": 9,
+      "metodoContagem": "casos individuais registrados"
+    },
+    {
+      "suite": "scripts/teste-play.js",
+      "estado": "nao-executada",
+      "motivo": "integracao com servico real"
+    },
+    {
+      "suite": "scripts/teste-ppt.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 1460,
+      "casosAprovados": 10,
+      "metodoContagem": "resumo da suite"
+    },
+    {
+      "suite": "scripts/teste-prefixo.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 5189,
+      "casosAprovados": 25,
+      "metodoContagem": "resumo da suite"
+    },
+    {
+      "suite": "scripts/teste-procurado.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 10397,
+      "casosAprovados": 40,
+      "metodoContagem": "resumo da suite"
+    },
+    {
+      "suite": "scripts/teste-protecao-bot.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 5363,
+      "casosAprovados": 48,
+      "metodoContagem": "resumo da suite"
+    },
+    {
+      "suite": "scripts/teste-quem.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 554,
+      "casosAprovados": 8,
+      "metodoContagem": "resumo da suite"
+    },
+    {
+      "suite": "scripts/teste-quiz.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 1008,
+      "casosAprovados": 29,
+      "metodoContagem": "resumo da suite"
+    },
+    {
+      "suite": "scripts/teste-ranking-registro.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 812,
+      "casosAprovados": 14,
+      "metodoContagem": "casos individuais registrados"
+    },
+    {
+      "suite": "scripts/teste-ranking.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 9344,
+      "casosAprovados": 26,
+      "metodoContagem": "resumo da suite"
+    },
+    {
+      "suite": "scripts/teste-reacoes-palavras.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 1406,
+      "casosAprovados": 23,
+      "metodoContagem": "resumo da suite"
+    },
+    {
+      "suite": "scripts/teste-reescrever.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 1390,
+      "casosAprovados": 12,
+      "metodoContagem": "casos individuais registrados"
+    },
+    {
+      "suite": "scripts/teste-removebg.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 3136,
+      "casosAprovados": 18,
+      "metodoContagem": "resumo da suite"
+    },
+    {
+      "suite": "scripts/teste-resposta-prefixo.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 1351,
+      "casosAprovados": 26,
+      "metodoContagem": "resumo da suite"
+    },
+    {
+      "suite": "scripts/teste-resumir.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 1474,
+      "casosAprovados": 27,
+      "metodoContagem": "casos individuais registrados"
+    },
+    {
+      "suite": "scripts/teste-revelar-permissoes.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 5819,
+      "casosAprovados": 18,
+      "metodoContagem": "resumo da suite"
+    },
+    {
+      "suite": "scripts/teste-revelaraudio.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 1138,
+      "casosAprovados": 17,
+      "metodoContagem": "casos individuais registrados"
+    },
+    {
+      "suite": "scripts/teste-rimas.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 1034,
+      "casosAprovados": 6,
+      "metodoContagem": "casos individuais registrados"
+    },
+    {
+      "suite": "scripts/teste-rpg-conexao.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 1837,
+      "casosAprovados": 3,
+      "metodoContagem": "resumo da suite"
+    },
+    {
+      "suite": "scripts/teste-rpg-empregos.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 614,
+      "casosAprovados": 14,
+      "metodoContagem": "resumo da suite"
+    },
+    {
+      "suite": "scripts/teste-rpg-faculdade.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 2594,
+      "casosAprovados": 20,
+      "metodoContagem": "resumo da suite"
+    },
+    {
+      "suite": "scripts/teste-rpg-fase1.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 656,
+      "casosAprovados": 0,
+      "metodoContagem": "integrado sem contagem individual"
+    },
+    {
+      "suite": "scripts/teste-rpg-fase2.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 2803,
+      "casosAprovados": 0,
+      "metodoContagem": "integrado sem contagem individual"
+    },
+    {
+      "suite": "scripts/teste-rpg-integracao-mongo.js",
+      "estado": "nao-executada",
+      "motivo": "integracao com servico real"
+    },
+    {
+      "suite": "scripts/teste-rpg-isolamento.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 1481,
+      "casosAprovados": 12,
+      "metodoContagem": "resumo da suite"
+    },
+    {
+      "suite": "scripts/teste-rpg-lid.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 3307,
+      "casosAprovados": 0,
+      "metodoContagem": "integrado sem contagem individual"
+    },
+    {
+      "suite": "scripts/teste-rpg-seguranca.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 1253,
+      "casosAprovados": 23,
+      "metodoContagem": "resumo da suite"
+    },
+    {
+      "suite": "scripts/teste-sessao-mongo.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 1221,
+      "casosAprovados": 9,
+      "metodoContagem": "6 escritas e 3 leituras"
+    },
+    {
+      "suite": "scripts/teste-setads-conexao.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 2499,
+      "casosAprovados": 9,
+      "metodoContagem": "resumo da suite"
+    },
+    {
+      "suite": "scripts/teste-setads-storage.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 1246,
+      "casosAprovados": 28,
+      "metodoContagem": "resumo da suite"
+    },
+    {
+      "suite": "scripts/teste-setads.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 2211,
+      "casosAprovados": 135,
+      "metodoContagem": "resumo da suite"
+    },
+    {
+      "suite": "scripts/teste-sticker-captura.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 2232,
+      "casosAprovados": 26,
+      "metodoContagem": "resumo da suite"
+    },
+    {
+      "suite": "scripts/teste-sticker-video.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 45719,
+      "casosAprovados": 6,
+      "metodoContagem": "casos individuais registrados"
+    },
+    {
+      "suite": "scripts/teste-sugestao.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 1343,
+      "casosAprovados": 6,
+      "metodoContagem": "casos individuais registrados"
+    },
+    {
+      "suite": "scripts/teste-surpresa.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 1350,
+      "casosAprovados": 26,
+      "metodoContagem": "resumo da suite"
+    },
+    {
+      "suite": "scripts/teste-temavip.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 8033,
+      "casosAprovados": 15,
+      "metodoContagem": "casos individuais registrados"
+    },
+    {
+      "suite": "scripts/teste-tempo-resposta.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 809,
+      "casosAprovados": 7,
+      "metodoContagem": "casos individuais registrados"
+    },
+    {
+      "suite": "scripts/teste-tiktok.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 4952,
+      "casosAprovados": 18,
+      "metodoContagem": "casos individuais registrados"
+    },
+    {
+      "suite": "scripts/teste-totag.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 1831,
+      "casosAprovados": 122,
+      "metodoContagem": "resumo da suite"
+    },
+    {
+      "suite": "scripts/teste-traduzir.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 1582,
+      "casosAprovados": 21,
+      "metodoContagem": "casos individuais registrados"
+    },
+    {
+      "suite": "scripts/teste-troca-dono.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 1772,
+      "casosAprovados": 72,
+      "metodoContagem": "resumos por processo"
+    },
+    {
+      "suite": "scripts/teste-ttp.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 1754,
+      "casosAprovados": 7,
+      "metodoContagem": "casos individuais registrados"
+    },
+    {
+      "suite": "scripts/teste-velha.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 1671,
+      "casosAprovados": 12,
+      "metodoContagem": "casos individuais registrados"
+    },
+    {
+      "suite": "scripts/teste-vip-identidade-cooldown.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 2239,
+      "casosAprovados": 26,
+      "metodoContagem": "resumo da suite"
+    },
+    {
+      "suite": "scripts/teste-vip-mongo.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 894,
+      "casosAprovados": 9,
+      "metodoContagem": "casos individuais registrados"
+    },
+    {
+      "suite": "scripts/teste-vouc.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 2363,
+      "casosAprovados": 56,
+      "metodoContagem": "resumo da suite"
+    },
+    {
+      "suite": "scripts/teste-welcome-mongo.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 1020,
+      "casosAprovados": 15,
+      "metodoContagem": "casos individuais registrados"
+    },
+    {
+      "suite": "scripts/teste-wiki.js",
+      "estado": "aprovada",
+      "codigo": 0,
+      "ms": 1296,
+      "casosAprovados": 9,
+      "metodoContagem": "casos individuais registrados"
+    }
+  ],
+  "inventario": [
+    "scripts/teste-acoes.js",
+    "scripts/teste-adivinha-emoji.js",
+    "scripts/teste-administrar.js",
+    "scripts/teste-adv.js",
+    "scripts/teste-advertencias-evolucao.js",
+    "scripts/teste-afk.js",
+    "scripts/teste-alcunha.js",
+    "scripts/teste-aleatorios.js",
+    "scripts/teste-aliases-comandos.js",
+    "scripts/teste-anagrama.js",
+    "scripts/teste-animacoes-comandos.js",
+    "scripts/teste-animacoes-locais.js",
+    "scripts/teste-aniversarios-conexao.js",
+    "scripts/teste-aniversarios.js",
+    "scripts/teste-antiaudio.js",
+    "scripts/teste-antidoc.js",
+    "scripts/teste-antievento.js",
+    "scripts/teste-antiflood.js",
+    "scripts/teste-antigolpe.js",
+    "scripts/teste-antilink.js",
+    "scripts/teste-antilinkhard.js",
+    "scripts/teste-antipay.js",
+    "scripts/teste-antistatus.js",
+    "scripts/teste-arcontes-olimpo.js",
+    "scripts/teste-assinatura.js",
+    "scripts/teste-atividade-grupo.js",
+    "scripts/teste-avaliacao.js",
+    "scripts/teste-blacklist-numero.js",
+    "scripts/teste-boasvindas.js",
+    "scripts/teste-brat.js",
+    "scripts/teste-casamento-olimpo.js",
+    "scripts/teste-cep.js",
+    "scripts/teste-checkativo.js",
+    "scripts/teste-cobrinha.js",
+    "scripts/teste-compatibilidade-canvas.js",
+    "scripts/teste-compatibilidade.js",
+    "scripts/teste-comunicado.js",
+    "scripts/teste-conexao-bot.js",
+    "scripts/teste-conversor.js",
+    "scripts/teste-corvip.js",
+    "scripts/teste-ddd.js",
+    "scripts/teste-delete.js",
+    "scripts/teste-desenharpalavra.js",
+    "scripts/teste-dicionario.js",
+    "scripts/teste-dino.js",
+    "scripts/teste-downloads-extra.js",
+    "scripts/teste-efeitos-visuais.js",
+    "scripts/teste-efeitos.js",
+    "scripts/teste-elogio.js",
+    "scripts/teste-emojimix.js",
+    "scripts/teste-enquete-admin.js",
+    "scripts/teste-enquete.js",
+    "scripts/teste-enquetes-nativas.js",
+    "scripts/teste-estabilidade.js",
+    "scripts/teste-eununca.js",
+    "scripts/teste-explicarmeme.js",
+    "scripts/teste-fake-chat.js",
+    "scripts/teste-figurinha.js",
+    "scripts/teste-forca.js",
+    "scripts/teste-frase.js",
+    "scripts/teste-gartic-catalogo.js",
+    "scripts/teste-gartic.js",
+    "scripts/teste-gerar-nome.js",
+    "scripts/teste-hidetag.js",
+    "scripts/teste-historicoarconte.js",
+    "scripts/teste-horoscopo.js",
+    "scripts/teste-ia-interativa-donos.js",
+    "scripts/teste-ia-interativa.js",
+    "scripts/teste-ia.js",
+    "scripts/teste-insulto.js",
+    "scripts/teste-jornal-incremental.js",
+    "scripts/teste-jornal-mongo-real.js",
+    "scripts/teste-jornal.js",
+    "scripts/teste-lembrete.js",
+    "scripts/teste-letra.js",
+    "scripts/teste-limitecaractere.js",
+    "scripts/teste-limpar-chat.js",
+    "scripts/teste-linkgp.js",
+    "scripts/teste-loader.js",
+    "scripts/teste-mensagens-apagadas.js",
+    "scripts/teste-menus-olimpo.js",
+    "scripts/teste-meuslembretes.js",
+    "scripts/teste-migrar-ranking-lid.js",
+    "scripts/teste-migrar-ranking-seguranca.js",
+    "scripts/teste-moderacao-figurinhas.js",
+    "scripts/teste-modificador-voz.js",
+    "scripts/teste-mongo-conexoes-real.js",
+    "scripts/teste-mongo-conexoes.js",
+    "scripts/teste-namoro-olimpo.js",
+    "scripts/teste-nasa-integracao.js",
+    "scripts/teste-nasa.js",
+    "scripts/teste-nomecustom.js",
+    "scripts/teste-novidades.js",
+    "scripts/teste-npm-shell-sem-canvas.js",
+    "scripts/teste-nuke.js",
+    "scripts/teste-on-off.js",
+    "scripts/teste-perfil.js",
+    "scripts/teste-pergunta.js",
+    "scripts/teste-pinterest.js",
+    "scripts/teste-play.js",
+    "scripts/teste-ppt.js",
+    "scripts/teste-prefixo.js",
+    "scripts/teste-procurado.js",
+    "scripts/teste-protecao-bot.js",
+    "scripts/teste-quem.js",
+    "scripts/teste-quiz.js",
+    "scripts/teste-ranking-registro.js",
+    "scripts/teste-ranking.js",
+    "scripts/teste-reacoes-palavras.js",
+    "scripts/teste-reescrever.js",
+    "scripts/teste-removebg.js",
+    "scripts/teste-resposta-prefixo.js",
+    "scripts/teste-resumir.js",
+    "scripts/teste-revelar-permissoes.js",
+    "scripts/teste-revelaraudio.js",
+    "scripts/teste-rimas.js",
+    "scripts/teste-rpg-conexao.js",
+    "scripts/teste-rpg-empregos.js",
+    "scripts/teste-rpg-faculdade.js",
+    "scripts/teste-rpg-fase1.js",
+    "scripts/teste-rpg-fase2.js",
+    "scripts/teste-rpg-integracao-mongo.js",
+    "scripts/teste-rpg-isolamento.js",
+    "scripts/teste-rpg-lid.js",
+    "scripts/teste-rpg-seguranca.js",
+    "scripts/teste-sessao-mongo.js",
+    "scripts/teste-setads-conexao.js",
+    "scripts/teste-setads-storage.js",
+    "scripts/teste-setads.js",
+    "scripts/teste-sticker-captura.js",
+    "scripts/teste-sticker-video.js",
+    "scripts/teste-sugestao.js",
+    "scripts/teste-surpresa.js",
+    "scripts/teste-temavip.js",
+    "scripts/teste-tempo-resposta.js",
+    "scripts/teste-tiktok.js",
+    "scripts/teste-totag.js",
+    "scripts/teste-traduzir.js",
+    "scripts/teste-troca-dono.js",
+    "scripts/teste-ttp.js",
+    "scripts/teste-velha.js",
+    "scripts/teste-vip-identidade-cooldown.js",
+    "scripts/teste-vip-mongo.js",
+    "scripts/teste-vouc.js",
+    "scripts/teste-welcome-mongo.js",
+    "scripts/teste-wiki.js"
+  ],
+  "externas": [
+    "scripts/teste-acoes.js",
+    "scripts/teste-play.js",
+    "scripts/teste-nasa-integracao.js",
+    "scripts/teste-mongo-conexoes-real.js",
+    "scripts/teste-jornal-mongo-real.js",
+    "scripts/teste-rpg-integracao-mongo.js"
+  ],
+  "fim": "2026-10-25T18:32:56.360Z",
+  "ambiente": {
+    "node": "v24.17.0",
+    "plataforma": "win32",
+    "arquitetura": "x64"
+  },
+  "resumo": {
+    "inventarioInicial": 145,
+    "encontradas": 146,
+    "executadas": 140,
+    "aprovadas": 140,
+    "reprovadas": 0,
+    "timeouts": 0,
+    "naoExecutadas": 6,
+    "casosIndividuaisAprovados": 4021,
+    "casosIndividuaisReprovados": 0,
+    "suitesIntegradasSemContagem": [
+      "scripts/teste-aniversarios-conexao.js",
+      "scripts/teste-loader.js",
+      "scripts/teste-rpg-fase1.js",
+      "scripts/teste-rpg-fase2.js",
+      "scripts/teste-rpg-lid.js"
+    ]
+  },
+  "validacoesComplementares": {
+    "guardaOffline": 7,
+    "sintaxeJavaScript": {
+      "aprovados": 523,
+      "reprovados": 0
+    },
+    "nodeCheckArquivosAlterados": 4,
+    "diffCheck": "aprovado"
+  },
+  "comandos": {
+    "rotas": 647,
+    "objetos": 361,
+    "entradasCatalogo": 345,
+    "portais": 12,
+    "porPagina": 12,
+    "prefixos": [
+      "/",
+      "!",
+      "#"
+    ],
+    "conflitosConhecidos": 16,
+    "conflitosNovos": 0,
+    "avisosAlias": 9
+  },
+  "fontesAuditoria": {
+    "func/administrar.js": "b5f0cb6d03572a31d9bd456329ecb1f82fae24b7fe60c4a10d8a1098e5942c9a",
+    "scripts/teste-administrar.js": "6947d4e531a2be632a6df2b03e8a458bff6d8b3f143cbc8607d1acde85941512",
+    "scripts/auditoria-offline.js": "e3afc89798c16eff34a6eee84a00d021ef6f92b99bdb8d33f110f0c902f37202",
+    "scripts/helpers/auditoria-offline-preload.js": "361372838c89319e253941bd60e90d52c916bc985fca7c61a41c442474c86ec8"
+  }
+}

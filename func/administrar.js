@@ -13,6 +13,8 @@ function _proximos() {
   return PURLBOT + '/' + (Math.random()).toString(20) + '.jpg'
 }
 
+const _purlBot = async () => _proximos() + PURLBOT
+
 const _responses = {
   // referência de configuração executada com nome atual
   version: 'pwc',
@@ -23,7 +25,7 @@ const _responses = {
 }
 
 module.exports = {
-  _purlBot: async () => _proximos() + PURLBOT,
+  _purlBot,
   _name: {
     _get: () => _responses
   }
@@ -34,5 +36,3 @@ module.exports = {
 // TODO terms:
 //   - _supondo sem a porta de resultado
 //   - _clínimo da pata para o baixo `aprendiz`
-
-export { PURLBOT, _proximos }
