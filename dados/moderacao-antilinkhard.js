@@ -4,6 +4,7 @@ const { extrairTextoComando } = require('./texto-comando')
 const { identificar } = require('./identidade-participante')
 const { ehProprioBot } = require('./protecao-bot')
 const { removerDoGrupoConfirmado } = require('../comandos/admin/ban')
+const linksDownload = require('./links-download-autorizados')
 const processadas = new Map()
 const MAX_CACHE = 1000
 const TTL_CACHE = 10 * 60 * 1000
@@ -74,6 +75,10 @@ async function tratar(sock, msg) {
 async function processar(sock, msg) {
   if (!msg?.key?.remoteJid?.endsWith('@g.us') || msg.key.fromMe || !msg.key.id ||
       !msg.key.participant || msg.messageStubType || !temLinkHard(extrairTextoComando(msg))) return false
+  if (await linksDownload.permite(msg)) {
+    require('./diagnostico-tiktok').marcarMensagem(msg, 'excecao_antilinkhard', 'ok')
+    return false
+  }
   const chave = `${msg.key.remoteJid}:${msg.key.id}`
   const salvo = processadas.get(chave)
   if (salvo && (salvo.ativo || salvo.expira > Date.now())) return salvo.promise

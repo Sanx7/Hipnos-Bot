@@ -515,17 +515,28 @@ async function montarBot() {
   });
 
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
-    if (!socketSeguro.disponivel(sock)) return
+    const diagnostico = require('./dados/diagnostico-tiktok')
+    // Ampliar o roteamento somente para mensagens novas, sem ampliar replay
+    // de historico/append: nesses eventos preservamos o comportamento anterior.
+    const mensagensDoFluxo = type === 'notify' ? messages : messages.slice(0, 1)
+    const rastros = diagnostico.receber(mensagensDoFluxo)
+    if (!socketSeguro.disponivel(sock)) { diagnostico.lote(rastros, 'socket', 'bloqueado'); return }
     try {
       // Moderação do lote inteiro, inclusive em OFF. Hard assume os links antes das demais regras.
+      diagnostico.lote(rastros, 'antilinkhard')
       const linksTratados = await moderacaoAntilinkHard.processarLote(sock, messages)
+      diagnostico.lote(rastros, 'antiflood')
       const floodsTratados = await moderacaoAntiflood.processarLote(sock, messages, type, linksTratados)
+      diagnostico.lote(rastros, 'limite')
       const textosTratados = await moderacaoLimiteCaractere.processarLote(sock, messages, type, new Set([...linksTratados, ...floodsTratados]))
+      diagnostico.lote(rastros, 'figurinhas')
       const figurinhasTratadas = await moderacaoFigurinhas.processarLote(sock, messages.filter(msg => !linksTratados.has(`${msg?.key?.remoteJid}:${msg?.key?.id}`) && !floodsTratados.has(`${msg?.key?.remoteJid}:${msg?.key?.id}`) && !textosTratados.has(`${msg?.key?.remoteJid}:${msg?.key?.id}`)))
+      diagnostico.lote(rastros, 'antigolpe')
       const golpesTratados = await moderacaoAntigolpe.processarLote(sock, messages, type, new Set([...linksTratados, ...floodsTratados, ...textosTratados, ...figurinhasTratadas]))
       // Votos de todas as mensagens novas do lote, após moderação.
       // O gerenciador aplica sua própria barreira OFF antes de interpretar votos.
       const votosVouc = new Set()
+      diagnostico.lote(rastros, 'voto')
       if (type === 'notify') {
         const tratados = new Set([...linksTratados, ...floodsTratados, ...textosTratados, ...figurinhasTratadas, ...golpesTratados])
         for (const mensagem of messages) {
@@ -533,11 +544,13 @@ async function montarBot() {
           if (!tratados.has(id) && await rodadasVouc.obter(sock).processarMensagem(mensagem)) votosVouc.add(id)
         }
       }
-      const msg = messages[0]
+      // Cada mensagem do lote deve atravessar suas proprias barreiras. Um
+      // retorno (fromMe, moderacao, OFF etc.) nao pode descartar as seguintes.
+      async function processarMensagem(msg) {
 
       if (!msg?.message) return
-      if (votosVouc.has(`${msg.key?.remoteJid}:${msg.key?.id}`)) return
-      if (msg.key.fromMe) return
+      if (votosVouc.has(`${msg.key?.remoteJid}:${msg.key?.id}`)) { diagnostico.marcar('voto', 'bloqueado'); return }
+      if (msg.key.fromMe) { diagnostico.marcar('from_me', 'bloqueado'); return }
 
       const jid = msg.key.remoteJid
       const sender = msg.key.participant || msg.key.remoteJid
@@ -552,7 +565,7 @@ async function montarBot() {
           const ativo = await antiApagadaHabilitada(jid)
           if (ativo) {
             const resultado = await tratarRevogacao(sock, msg, jid)
-            if (resultado === 'reenviado') return
+            if (resultado === 'reenviado') { diagnostico.marcar('revogacao', 'bloqueado'); return }
           }
         }
       } catch (errApagadas) {
@@ -580,7 +593,9 @@ async function montarBot() {
       }
 
       // 🪐 GUARDIÕES DO LIMBO (MONITORES DE GRUPO)
-      if (linksTratados.has(`${jid}:${msg.key.id}`) || floodsTratados.has(`${jid}:${msg.key.id}`) || textosTratados.has(`${jid}:${msg.key.id}`) || figurinhasTratadas.has(`${jid}:${msg.key.id}`) || golpesTratados.has(`${jid}:${msg.key.id}`)) return
+      for (const [etapa, tratados] of [['antilinkhard', linksTratados], ['antiflood', floodsTratados], ['limite', textosTratados], ['figurinhas', figurinhasTratadas], ['antigolpe', golpesTratados]]) {
+        if (tratados.has(`${jid}:${msg.key.id}`)) { diagnostico.marcar(etapa, 'bloqueado'); return }
+      }
       if (jid.endsWith('@g.us')) {
         const caminhoConfigs = path.join(__dirname, 'comandos', 'dados', 'antias.json');
         if (fs.existsSync(caminhoConfigs)) {
@@ -589,6 +604,7 @@ async function montarBot() {
           if (configAtiva(configs, 'antiAudio', 'antiaudio', jid)) {
             const ehAudio = msg.message.audioMessage || msg.message.extendedTextMessage?.contextInfo?.quotedMessage?.audioMessage;
             if (ehAudio) {
+              diagnostico.marcar('anti_audio', 'bloqueado')
               await sock.sendMessage(jid, { delete: { remoteJid: jid, fromMe: false, id: msg.key.id, participant: sender } });
               return; 
             }
@@ -597,6 +613,7 @@ async function montarBot() {
           if (configAtiva(configs, 'antiDocument', 'antidoc', jid)) {
             const ehDocumento = msg.message.documentMessage || msg.message.documentWithCaptionMessage || msg.message.extendedTextMessage?.contextInfo?.quotedMessage?.documentMessage;
             if (ehDocumento) {
+              diagnostico.marcar('anti_documento', 'bloqueado')
               await sock.sendMessage(jid, { delete: { remoteJid: jid, fromMe: false, id: msg.key.id, participant: sender } });
               return; 
             }
@@ -605,6 +622,7 @@ async function montarBot() {
           if (configAtiva(configs, 'antiEvent', 'antievento', jid)) {
             const ehEvento = msg.message.eventMessage || msg.message.extendedTextMessage?.contextInfo?.quotedMessage?.eventMessage;
             if (ehEvento) {
+              diagnostico.marcar('anti_evento', 'bloqueado')
               await sock.sendMessage(jid, { delete: { remoteJid: jid, fromMe: false, id: msg.key.id, participant: sender } });
               return; 
             }
@@ -613,8 +631,10 @@ async function montarBot() {
           if (configAtiva(configs, 'antiLink', 'antilink', jid)) {
             const conteudoTexto = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
             const temLink = temLinkBasico(conteudoTexto);
-            
-            if (temLink) {
+            const linkDownloadPermitido = temLink && await require('./dados/links-download-autorizados').permite(msg)
+            if (linkDownloadPermitido) diagnostico.marcar('excecao_antilink_basico', 'ok')
+            if (temLink && !linkDownloadPermitido) {
+              diagnostico.marcar('antilink_basico', 'bloqueado')
               await sock.sendMessage(jid, { delete: { remoteJid: jid, fromMe: false, id: msg.key.id, participant: sender } });
               return; 
             }
@@ -625,6 +645,7 @@ async function montarBot() {
             const ehPagamentoStealth = msg.messageStubType === 63 || msg.messageStubType === 40 || msg.messageStubType === 41;
 
             if (ehPagamentoNormal || ehPagamentoStealth) {
+              diagnostico.marcar('anti_pagamento', 'bloqueado')
               // 🛡️ PROTEÇÃO DO DONO DO BOT: a automação também não remove o
               // dono (vale mesmo quando o sender chega como "@lid").
               if (await ehRemetenteEhDono(sock, jid, sender)) {
@@ -646,6 +667,7 @@ async function montarBot() {
             const marcouStatus = contextInfo?.remoteJid === 'status@broadcast';
 
             if (marcouStatus) {
+              diagnostico.marcar('anti_status', 'bloqueado')
               // 🛡️ PROTEÇÃO DO DONO DO BOT: a automação também não remove o
               // dono (vale mesmo quando o sender chega como "@lid").
               if (await ehRemetenteEhDono(sock, jid, sender)) {
@@ -702,13 +724,14 @@ async function montarBot() {
       const mutedUsers = muteCmd?.mutedUsers
 
       if (mutedUsers?.has(sender)) {
+        diagnostico.marcar('mute', 'bloqueado')
         return
       }
 
       // Manutenção GLOBAL: moderação, atividade e caches já processaram a
       // mensagem. AFK ainda atualiza seus dados, mas só pode responder quando
       // há autorização interativa. A barreira fica após essa atualização.
-      const podeInteragir = await estadoBot.permitirMensagem(sock, jid, sender)
+      const podeInteragir = await diagnostico.aguardar('manutencao', () => estadoBot.permitirMensagem(sock, jid, sender))
 
       // 💤━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
       // 💤 SISTEMA AFK — checagem única por mensagem (UMA consulta ao Mongo)
@@ -733,6 +756,7 @@ async function montarBot() {
       // 🛡️ Nada aqui lança: falha de banco/rede é logada e o fluxo segue.
       try {
         // 📋 Candidatos: remetente + jids vindos de menções/reply
+        diagnostico.marcar('afk')
         const contextoInfo =
           msg.message.extendedTextMessage?.contextInfo ||
           msg.message[Object.keys(msg.message)[0]]?.contextInfo ||
@@ -755,7 +779,7 @@ async function montarBot() {
         let participantesAfk = null
         if (precisaResolverLid && String(jid || '').endsWith('@g.us')) {
           try {
-            participantesAfk = (await sock.groupMetadata(jid))?.participants || null
+            participantesAfk = (await diagnostico.aguardar('metadados_afk', () => sock.groupMetadata(jid)))?.participants || null
           } catch (errMetaAfk) {
             console.warn('[afk] Metadados indisponíveis para consultar identidades.')
           }
@@ -827,7 +851,7 @@ async function montarBot() {
 
       // OFF bloqueia só a interação manual: comandos, palpites e IA.
       // Donos (JID/LID) continuam acessando inclusive /on. Sem aviso/spam.
-      if (!podeInteragir) return
+      if (!podeInteragir) { diagnostico.marcar('manutencao', 'bloqueado'); return }
 
       // Consulta pública sem prefixo. Moderação e manutenção já verificadas;
       // consumir também em cooldown impede votos/palpites e respostas da IA.
@@ -844,10 +868,11 @@ async function montarBot() {
       //      vale é o prefixo salvo no MongoDB (troca em tempo real pelo
       //      /set-prefix). `null` = não é comando (cai no texto livre abaixo);
       //      `''` = o prefixo sozinho, sem nome (ex.: "/" ou "!").
-      await prefixoComandos.obterPrefixo()
+      await diagnostico.aguardar('prefixo', () => prefixoComandos.obterPrefixo())
       const nomeComando = prefixoComandos.resolverNomeComando(text)
 
       if (nomeComando === null) {
+        diagnostico.marcar('nao_comando', 'bloqueado')
         // Acessório: não consome palpites/IA nem aguarda MongoDB ou Baileys.
         void reacoesPalavras.processar(sock, msg, { tipo: type, texto: text, nomeComando })
         try {
@@ -875,8 +900,10 @@ async function montarBot() {
       if (!nomeComando) return
 
       const comando = comandos.get(nomeComando)
+      diagnostico.marcar('reconhecido', 'ok')
 
       if (!comando) {
+        diagnostico.marcar('registro', 'ausente')
         // Fallback somente na rodada do próprio participante; comandos existentes têm prioridade.
         await rodadasVouc.obter(sock).fallback(jid, msg, text)
         return
@@ -888,6 +915,7 @@ async function montarBot() {
           const configs = JSON.parse(fs.readFileSync(caminhoConfigs, 'utf-8'));
           
           if (configAtiva(configs, 'onlyAdmin', 'onlyadmin', jid)) {
+            diagnostico.marcar('restrito')
             // 🔒 MODO SOMENTE ADMIN (/soadm) — para ESTE grupo específico
             // Quando ativo, apenas administradores (ou o dono do bot) podem usar
             // os comandos. Não-admins são ignorados (ou avisados, se config).
@@ -897,10 +925,10 @@ async function montarBot() {
             if (!(await estadoBot.remetenteEhDono(sock, jid, sender))) {
               let metadados = null
               try {
-                metadados = await sock.groupMetadata(jid)
+                metadados = await diagnostico.aguardar('metadados_restrito', () => sock.groupMetadata(jid))
               } catch (err) {
                 // Sem metadados não dá pra provar que é admin -> bloqueia
-                console.error('Erro ao buscar metadados no modo restrito:', err)
+                console.warn('[restrito]', { evento: 'metadados_indisponiveis' })
               }
 
               const ehAdmin = ehAdminDoGrupo(metadados?.participants, sender)
@@ -908,6 +936,7 @@ async function montarBot() {
               const arconteKick = !ehAdmin && nomeComando === 'kick' && comando === require('./comandos/admin/kick') &&
                 await require('./dados/arcontes-olimpo').podeKickRestrito(sock, jid, sender)
               if (!ehAdmin && !arconteKick) {
+                diagnostico.marcar('restrito', 'bloqueado')
                 if (AVISAR_BLOQUEIO) {
                   await sock.sendMessage(jid, {
                     text: '🛡️ *MODO RESTRITO ATIVO*\n\nApenas *administradores do grupo* podem invocar os comandos de Hipnos enquanto o /soadm estiver ativo neste recinto. 💤'
@@ -928,7 +957,7 @@ async function montarBot() {
       // mensagem de erro garante que nem a própria notificação de falha
       // consiga vazar (rede fora, rate limit, etc.).
       try {
-        await comando.executar(sock, jid, msg, text)
+        await diagnostico.aguardar('handler', () => comando.executar(sock, jid, msg, text))
       } catch (erro) {
         console.error('❌ Erro no comando:', erro)
         await sock.sendMessage(jid, {
@@ -936,7 +965,15 @@ async function montarBot() {
         }, { quoted: msg }).catch(() => {})
       }
 
+      }
+      diagnostico.lote(rastros, 'fila')
+      for (const mensagem of mensagensDoFluxo) {
+        await diagnostico.executar(rastros.get(mensagem), () => processarMensagem(mensagem)).catch(() => {
+          console.warn('[mensagem]', { evento: 'falha_processamento' })
+        })
+      }
     } catch (err) {
+      diagnostico.lote(rastros, 'erro_lote', 'erro', err)
       console.log('❌ Erro:')
       console.log(err)
     }

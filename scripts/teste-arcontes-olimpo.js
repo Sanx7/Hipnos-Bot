@@ -383,6 +383,7 @@ async function main() {
     const req = createRequire(require.resolve('../bot'))
     async function permitido(nomeComando, comando, sender = pn(R)) {
       const ctx = { sock: c.sock, jid: G, sender, msg: c.msg(), nomeComando, comando,
+        diagnostico: require('../dados/diagnostico-tiktok'),
         require: req, path: require('node:path'), __dirname: require('node:path').dirname(require.resolve('../bot')),
         fs: { existsSync: () => true, readFileSync: () => '{}' }, configAtiva: () => true,
         estadoBot: { remetenteEhDono: async () => false }, ehAdminDoGrupo: () => false,

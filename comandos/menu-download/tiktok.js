@@ -42,6 +42,7 @@ const { execFile } = require('child_process')
 const axios = require('axios')
 const { Downloader } = require('@tobyg74/tiktok-api-dl')
 const { caminhoFfmpeg, apagarComRetry } = require('../menu-utilitario/audio-extrator')
+const diagnostico = require('../../dados/diagnostico-tiktok')
 
 // ─── Configurações ───
 const LIMITE_MB = 50 // mesmo padrão do /tomp3
@@ -141,16 +142,14 @@ async function tentarVersao (link, versao) {
 
 // ─── Cascata v1 → v2 → v3 (só falha de verdade se TODAS falharem) ───
 async function resolverVideo (link) {
-  const falhas = []
   for (const versao of VERSOES_TENTATIVAS) {
     try {
       return await tentarVersao(link, versao)
     } catch (err) {
-      falhas.push(`${versao}: ${err?.message || err}`)
-      console.error(`[tiktok] tentativa ${versao} falhou:`, err?.message || err)
+      console.error('[tiktok]', { evento: 'fonte_indisponivel', versao, categoria: diagnostico.categoriaErro(err) })
     }
   }
-  console.error('[tiktok] todas as versões falharam:', falhas.join(' | '))
+  console.error('[tiktok]', { evento: 'fontes_indisponiveis' })
   throw new ErroTiktok('todas as fontes falharam', 'falha')
 }
 
@@ -205,16 +204,14 @@ async function tentarVersaoAudio (link, versao) {
 
 // ─── Cascata de ÁUDIO v1 → v2 → v3 (mesma ordem do vídeo) ───
 async function resolverAudio (link) {
-  const falhas = []
   for (const versao of VERSOES_TENTATIVAS) {
     try {
       return await tentarVersaoAudio(link, versao)
     } catch (err) {
-      falhas.push(`${versao}: ${err?.message || err}`)
-      console.error(`[tiktok-audio] tentativa ${versao} falhou:`, err?.message || err)
+      console.error('[tiktok-audio]', { evento: 'fonte_indisponivel', versao, categoria: diagnostico.categoriaErro(err) })
     }
   }
-  console.error('[tiktok-audio] todas as versões falharam:', falhas.join(' | '))
+  console.error('[tiktok-audio]', { evento: 'fontes_indisponiveis' })
   throw new ErroTiktok('todas as fontes falharam', 'falha')
 }
 
@@ -289,9 +286,9 @@ function gerarThumbnailVideo (caminhoVideo, idUnico) {
             return resolver({ base64: bufferThumb.toString('base64'), caminho: caminhoThumb })
           }
         }
-        console.error('[tiktok] ⚠️ ffmpeg não gerou thumbnail — enviando sem preview:', erro?.message || 'arquivo ausente')
+        console.error('[tiktok]', { evento: 'thumbnail_indisponivel' })
       } catch (errLeitura) {
-        console.error('[tiktok] ⚠️ falha ao ler thumbnail:', errLeitura?.message)
+        console.error('[tiktok]', { evento: 'thumbnail_leitura_indisponivel' })
       }
       resolver({ base64: null, caminho: caminhoThumb })
     })
@@ -304,6 +301,7 @@ async function enviarVideo (sock, jid, msg, buffer, video) {
   const caminhoTemp = path.join(os.tmpdir(), `tiktok_${idUnico}.mp4`)
   let caminhoThumb = null
   try {
+    diagnostico.marcar('preparar_midia')
     fs.writeFileSync(caminhoTemp, buffer)
 
     // Thumbnail via ffmpeg (processo filho) — ao passar jpegThumbnail pronto,
@@ -323,8 +321,8 @@ async function enviarVideo (sock, jid, msg, buffer, video) {
       mimetype: 'video/mp4'
     }
     if (thumb.base64) conteudo.jpegThumbnail = Buffer.from(thumb.base64, 'base64')
-
-    return await sock.sendMessage(jid, conteudo, { quoted: msg })
+    diagnostico.marcar('preparar_midia', 'ok')
+    return await diagnostico.aguardar('envio_midia', () => sock.sendMessage(jid, conteudo, { quoted: msg }))
   } finally {
     await apagarComRetry(caminhoTemp)
     await apagarComRetry(caminhoThumb)
@@ -345,16 +343,16 @@ async function executar (sock, jid, msg, text) {
     if (!link) throw new ErroTiktok('link ausente ou inválido', 'uso')
 
     // 1) Resolve a URL do vídeo (cascata v1 → v2 → v3, 15s por tentativa)
-    const video = await resolverVideo(link)
+    const video = await diagnostico.aguardar('fonte', () => resolverVideo(link))
 
     // 2) Baixa o MP4 (axios, arraybuffer, limite de 50MB)
-    const buffer = await baixarVideo(video.url)
+    const buffer = await diagnostico.aguardar('download', () => baixarVideo(video.url))
 
     // 3) Envia como vídeo com thumbnail do ffmpeg
     await enviarVideo(sock, jid, msg, buffer, video)
   } catch (err) {
-    console.error('[tiktok] erro ao baixar o vídeo:', err)
-    await sock.sendMessage(jid, { text: avisoParaErro(err) }, { quoted: msg }).catch(() => {})
+    console.error('[tiktok]', { evento: 'operacao_falhou', categoria: diagnostico.categoriaErro(err) })
+    await diagnostico.aguardar('aviso_erro', () => sock.sendMessage(jid, { text: avisoParaErro(err) }, { quoted: msg })).catch(() => {})
   }
 }
 

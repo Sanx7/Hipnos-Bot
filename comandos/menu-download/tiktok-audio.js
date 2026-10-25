@@ -35,6 +35,7 @@ const path = require('path')
 // 🔗 Fonte ÚNICA do link: o próprio módulo do /tik-tok (lib + cascata +
 // regex de validação + teto de 50MB).
 const tiktok = require('./tiktok')
+const diagnostico = require('../../dados/diagnostico-tiktok')
 // 🎛️ Conversão por ffmpeg + limpeza com retry — módulo COMPARTILHADO do
 // /tomp3 e do /transcrever (nunca sharp/libvips in-process).
 const { converterParaMp3, apagarComRetry } = require('../menu-utilitario/audio-extrator')
@@ -109,24 +110,25 @@ async function executar (sock, jid, msg, text) {
 
     // 2) Procura o ÁUDIO na cascata v1 → v2 → v3 (ou o vídeo, se não houver
     //    faixa publicada). 15s por tentativa, sem somar entre as versões.
-    const info = await tiktok.resolverAudio(link)
+    const info = await diagnostico.aguardar('fonte', () => tiktok.resolverAudio(link))
 
     // 3) Caminho 1 — faixa direto: já é MP3, envia sem passar pelo ffmpeg
     if (info.origem === 'audio' && ehMp3(info.url)) {
       console.log('[tiktok-audio] ♪ faixa direta em MP3 — sem ffmpeg')
-      const buffer = await tiktok.baixarComLimite(info.url, 'áudio')
-      return await sock.sendMessage(jid, {
+      const buffer = await diagnostico.aguardar('download', () => tiktok.baixarComLimite(info.url, 'áudio'))
+      return await diagnostico.aguardar('envio_midia', () => sock.sendMessage(jid, {
         audio: buffer,
         mimetype: 'audio/mpeg',
         ptt: false,
         caption: legenda(info)
-      }, { quoted: msg })
+      }, { quoted: msg }))
     }
 
     // 4) Caminho 2 — vídeo (ou áudio em outro formato): extrai p/ MP3
     const rotulo = info.origem === 'audio' ? 'áudio' : 'vídeo'
     console.log(`[tiktok-audio] 🎬 baixando o ${rotulo} e extraindo o áudio via ffmpeg...`)
-    const buffer = await tiktok.baixarComLimite(info.url, rotulo)
+    const buffer = await diagnostico.aguardar('download', () => tiktok.baixarComLimite(info.url, rotulo))
+    diagnostico.marcar('preparar_midia')
 
     const entrada = info.origem === 'audio' ? 'm4a' : 'mp4'
     caminhoTemp = caminhoTemporario(idUnico, entrada)
@@ -141,19 +143,19 @@ async function executar (sock, jid, msg, text) {
     console.log(`[tiktok-audio] ✅ MP3 pronto: ${fs.statSync(saidaMp3).size} bytes`)
 
     // 5) Envia como ÁUDIO comum (ptt: false), citando o comando
-    await sock.sendMessage(jid, {
+    diagnostico.marcar('preparar_midia', 'ok')
+    await diagnostico.aguardar('envio_midia', () => sock.sendMessage(jid, {
       audio: fs.readFileSync(saidaMp3),
       mimetype: 'audio/mpeg',
       ptt: false,
       caption: legenda(info)
-    }, { quoted: msg })
+    }, { quoted: msg }))
 
     // 6) Limpa o MP3 gerado (o finally cuida do resto)
     await apagarComRetry(saidaMp3)
   } catch (err) {
-    console.error('[tiktok-audio] erro ao baixar o áudio:', err?.message || err)
-    if (err?.mensagemFfmpeg) console.error('[tiktok-audio] 📎 detalhe do ffmpeg:', err.mensagemFfmpeg)
-    await sock.sendMessage(jid, { text: avisoParaErro(err) }, { quoted: msg }).catch(() => {})
+    console.error('[tiktok-audio]', { evento: 'operacao_falhou', categoria: diagnostico.categoriaErro(err) })
+    await diagnostico.aguardar('aviso_erro', () => sock.sendMessage(jid, { text: avisoParaErro(err) }, { quoted: msg })).catch(() => {})
   } finally {
     // 🧹 Limpeza SEMPRE (sucesso ou falha) — apagarComRetry nunca lança
     if (caminhoTemp) await apagarComRetry(caminhoTemp)

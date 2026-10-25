@@ -193,6 +193,7 @@ async function main() {
     assert.ok(inicio >= 0 && fim > inicio)
     sock.ev = { on: (_, fn) => { handler = fn } }
     const contexto = {
+      require: require('node:module').createRequire(require.resolve('../bot')),
       sock, console, path, __dirname: path.dirname(require.resolve('../bot')),
       socketSeguro: require('../dados/socket-seguro'),
       fs: { existsSync: () => true, readFileSync: () => JSON.stringify(blacklistOuConfigs) },

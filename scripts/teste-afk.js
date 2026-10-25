@@ -31,6 +31,7 @@ function contexto({ jid = A, sender = pn(K), text = 'oi', mencoes = [], reply, p
   const sock = { async groupMetadata() { if (falharMeta) throw new Error('Metadados offline'); return { participants: participantes } },
     async sendMessage(destino, c) { envios.push({ destino, ...c }) } }
   return { jid, sender, text, podeInteragir, msg, sock, envios, avisos, ...afk, prefixoComandos,
+    diagnostico: require('../dados/diagnostico-tiktok'),
     console: { warn: () => avisos.push('falha'), log() {}, error: () => avisos.push('falha') } }
 }
 async function processar(opcoes) {

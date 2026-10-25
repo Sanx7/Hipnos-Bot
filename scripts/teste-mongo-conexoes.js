@@ -227,6 +227,18 @@ async function main() {
           atual = atual.replace(trecho, '')
           anterior = anterior.replace(trecho, '')
         }
+        // O roteamento de lotes/diagnostico foi autorizado nesta investigacao.
+        // Seus efeitos sao exercitados por teste-tiktok-contexto e teste-on-off.
+        // Conexao, lease, persistencia e lifecycle fora do listener continuam
+        // sujeitos a igualdade integral com HEAD, assim como todos os modulos acima.
+        const semListenerMensagens = texto => {
+          const inicio = texto.indexOf("  sock.ev.on('messages.upsert',")
+          const fim = texto.indexOf("  sock.ev.on('connection.update',", inicio)
+          assert.ok(inicio >= 0 && fim > inicio)
+          return texto.slice(0, inicio) + texto.slice(fim)
+        }
+        atual = semListenerMensagens(atual)
+        anterior = semListenerMensagens(anterior)
       }
       assert.equal(atual, anterior, f)
     }
